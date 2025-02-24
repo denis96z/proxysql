@@ -2,9 +2,13 @@
 #define UTILS_H
 
 #include <algorithm>
+#include <functional>
 #include <string>
+#include <thread>
 #include <vector>
 #include <fstream>
+#include <unistd.h>
+#include <utility>
 
 #include "curl/curl.h"
 #include "mysql.h"
@@ -13,6 +17,9 @@
 
 #include "command_line.h"
 #include "mysql.h"
+
+template <typename T>
+using rc_t = std::pair<int,T>;
 
 // Improve dependency failure compilation error
 #ifndef DISABLE_WARNING_COUNT_LOGGING
@@ -55,6 +62,38 @@ my_bool mysql_stmt_close_override(MYSQL_STMT* stmt, const char* file, int line);
 }
 
 #endif 
+
+/**
+ * @brief Computes the binomial coefficient C(n, k)
+ */
+long long binom_coeff(int n, int k);
+
+/**
+ * @brief Computes the probability for all buckets has at least one elem.
+ * @param N Number of elements to place.
+ * @param M Number of buckets to fill.
+ * @return The computed probability.
+ */
+long double prob_filled(int N, int M);
+
+/**
+ * @brief Computes the inverse of 'prob_filled', finding the min number of elements so the target
+ *  probability is reached.
+ * @details NOTE: The inverse of 'prob_filled' isn't trivial to compute, due to this, this method
+ *  computes it numerically using a simple binary search. The search isn't optimized or built to work
+ *  with a generic M, yet it reasonably fits its current use cases for small M values.
+ * @param tg_prob The target probability for which to find the number of elements.
+ * @param M The number of buckets in which to place the elements.
+ * @return Number of elements necessary to achieve the target probability.
+ */
+int find_min_elems(double tg_prob, int M);
+
+/**
+ * @brief Returns the string representation of an std::thread
+ * @param id Thread id to be converted to string.
+ * @return The string representation of the thread::id.
+ */
+std::string to_string(std::thread::id id);
 
 /**
  * @brief Helper function to disable Core nodes scheduler from ProxySQL Cluster nodes.
@@ -144,6 +183,10 @@ int create_table_test_sbtest1(int num_rows, MYSQL *mysql);
 int create_table_test_sqlite_sbtest1(int num_rows, MYSQL *mysql); // as above, but for SQLite3 server
 int add_more_rows_test_sbtest1(int num_rows, MYSQL *mysql, bool sqlite=false);
 
+/**
+ * @brief Returns the current monotonic time by 'clock_gettime'.
+ * @return Current monotonic time in microseconds (us).
+ */
 unsigned long long monotonic_time();
 
 using mysql_res_row = std::vector<std::string>;
@@ -164,7 +207,31 @@ std::vector<mysql_res_row> extract_mysql_rows(MYSQL_RES* my_res);
  *   * Query produces no resulset.
  *   * An error takes place during query execution or resultset retrieval.
  */
-std::pair<uint32_t,std::vector<mysql_res_row>> mysql_query_ext_rows(MYSQL* mysql, const std::string& query);
+rc_t<std::vector<mysql_res_row>> mysql_query_ext_rows(MYSQL* mysql, const std::string& query);
+
+using sq3_col_def_t = std::string;
+using sq3_row_t = std::vector<std::string>;
+using sq3_err_t = int;
+using sq3_res_t = std::tuple<std::vector<sq3_col_def_t>,std::vector<sq3_row_t>,int64_t,sq3_err_t>;
+
+enum SQ3_RES_T {
+	SQ3_COLUMNS_DEF,
+	SQ3_ROWS,
+	SQ3_AFFECTED_ROWS,
+	SQ3_ERR
+};
+
+/**
+ * @brief Executes the provided query in the supplied sqlite3 db object.
+ * @param db Already initialized 'sqlite3' handler.
+ * @param query The query to be executed.
+ * @return An 'sq3_result_t' object holding the result, depending on the type of query and result, different
+ *  fields will be populated, in case of success:
+ *   - For DQL stmts COLUMN_DEF and ROWS will hold the columns definitions and the rows from the resultset.
+ *   - For DML stmts the AFFECTED_ROWS will show the number of modified rows.
+ *  In case of failure, ERR field will be populated and others will remain empty.
+ */
+sq3_res_t sqlite3_execute_stmt(sqlite3* db, const std::string& query);
 
 /**
  * @brief Holds the result of an `mysql_query_ext_val` operation.
@@ -229,6 +296,32 @@ ext_val_t<T> mysql_query_ext_val(MYSQL* mysql, const std::string& query, const T
 	 } else {
 		 return ext_single_row_val(rows.second.front(), def_val);
 	 }
+}
+
+template <typename T>
+ext_val_t<T> sq3_query_ext_val(sqlite3* db, const std::string& query, const T& def_val) {
+	const auto& sq3_res { sqlite3_execute_stmt(db, query) };
+	const auto& sq3_err { std::get<SQ3_RES_T::SQ3_ERR>(sq3_res) };
+	const auto& sq3_rows { std::get<SQ3_RES_T::SQ3_ROWS>(sq3_res) };
+
+	if (sq3_err) {
+		return { sq3_err, def_val };
+	} else if (sq3_rows.empty()) {
+		return { -1, def_val };
+	} else {
+		return ext_single_row_val(sq3_rows.front(), def_val);
+	}
+}
+
+template <typename T>
+std::string sq3_get_ext_val_err(const ext_val_t<T>& ext_val) {
+	if (ext_val.err == -1) {
+		return "Received invalid empty resultset/row";
+	} else if (ext_val.err == -2) {
+		return "Failed to parse response value '" + ext_val.str + "'";
+	} else {
+		return std::string { sqlite3_errstr(ext_val.err) };
+	}
 }
 
 /**
@@ -630,9 +723,27 @@ enum LINE_MATCH_T { POS, LINE, MATCH };
  *  For example, regex '\d+' should become '(\d+)'.
  * @return All the lines found matching the regex.
  */
-std::vector<line_match_t> get_matching_lines(
+std::pair<size_t,std::vector<line_match_t>> get_matching_lines(
 	std::fstream& f_stream, const std::string& regex, bool get_matches=false
 );
+
+/**
+ * @brief Row entries from 'debug_log' table, from debug database.
+ */
+struct debug_entry_t {
+	uint64_t id;
+	time_t time;
+	uint64_t lapse;
+	uint64_t thread;
+	std::string file;
+	uint64_t line;
+	std::string funct;
+	uint64_t modnum;
+	std::string modname;
+	uint64_t verbosity;
+	std::string message;
+	std::string note;
+};
 
 /**
  * @brief Opens a sqlite3 db file located in the supplied path with the provided flags.
@@ -642,30 +753,20 @@ std::vector<line_match_t> get_matching_lines(
  * @return EXIT_SUCCESS in case of success, EXIT_FAILURE otherwise. Error cause is logged.
  */
 int open_sqlite3_db(const std::string& f_path, sqlite3** db, int flags);
-
-using sq3_col_def_t = std::string;
-using sq3_row_t = std::vector<std::string>;
-using sq3_err_t = std::string;
-using sq3_res_t = std::tuple<std::vector<sq3_col_def_t>,std::vector<sq3_row_t>,int64_t,sq3_err_t>;
-
-enum SQ3_RES_T {
-	SQ3_COLUMNS_DEF,
-	SQ3_ROWS,
-	SQ3_AFFECTED_ROWS,
-	SQ3_ERR
-};
-
 /**
- * @brief Executes the provided query in the supplied sqlite3 db object.
- * @param db Already initialized 'sqlite3' handler.
- * @param query The query to be executed.
- * @return An 'sq3_result_t' object holding the result, depending on the type of query and result, different
- *  fields will be populated, in case of success:
- *   - For DQL stmts COLUMN_DEF and ROWS will hold the columns definitions and the rows from the resultset.
- *   - For DML stmts the AFFECTED_ROWS will show the number of modified rows.
- *  In case of failure, ERR field will be populated and others will remain empty.
+ * @brief Builds a debug_entry_t from an sq3_row_t from 'debug_log' table.
+ * @param row The row to map to a 'debug_entry_t' struct.
+ * @return A pair of kind `{err_code, debug_entry_t}`.
  */
-sq3_res_t sqlite3_execute_stmt(sqlite3* db, const std::string& query);
+rc_t<debug_entry_t> build_debug_entry(const sq3_row_t& row);
+/**
+ * @brief Retrieves a list of debug entries matching the supplied conditions.
+ * @param db An already opened connection to a 'SQLite3' database.
+ * @param conds Conditions for the WHERE clause for row filtering, no filtering if empty. E.g: 'id >
+ *  $timestamp AND file="foo.cpp"'.
+ * @return A pair of kind `{err_code, matched_rows}`.
+ */
+rc_t<std::vector<debug_entry_t>> sq3_get_debug_entries(sqlite3* db, const std::string& conds);
 
 /**
  * @brief If found returns the element index, -1 otherwise.
@@ -741,6 +842,36 @@ using pool_state_t = std::map<uint32_t,mysql_row_t>;
  * @return A pair of the shape {err_code, pool_state_t}.
  */
 std::pair<int,pool_state_t> fetch_conn_stats(MYSQL* admin, const std::vector<uint32_t> hgs);
+/**
+ * @brief Waits for a generic condition.
+ * @details Wait finishes by a non-zero return code by the condition or by timeout.
+ * @param cond Condition to be evaluated at each wait interval.
+ * @param to_us Timeout at which to stop the wait, in microseconds.
+ * @param delay_us Delay between wait intervals, in microseconds.
+ * @return 0 for success, non-zero return code from 'cond' for failure, or INT_MIN for timeout.
+ */
+template <typename T>
+rc_t<T> wait_for_cond(const std::function<rc_t<T>()>& cond, uint32_t to_us, uint32_t delay_us) {
+	int rc { 0 };
+	T res {};
+	uint32_t waited { 0 };
+
+	while (waited < to_us) {
+		std::tie(rc, res) = cond();
+
+		if (rc == 0) {
+			usleep(delay_us);
+			waited += delay_us;
+		} else if (rc < 0) {
+			break;
+		} else {
+			return { 0, res };
+		}
+	}
+
+	return { INT_MIN, res };
+}
+
 /**
  * @brief Waits until the condition specified by the 'query' holds, or 'timeout' is reached.
  * @details Several details about the function impl:

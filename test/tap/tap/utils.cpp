@@ -187,6 +187,60 @@ my_bool mysql_stmt_close_override(MYSQL_STMT* stmt, const char* file, int line) 
 
 #endif
 
+long long binom_coeff(int n, int k) {
+    if (k > n) return 0;
+    if (k == 0 || k == n) return 1;
+
+    long long res = 1;
+
+    for (int i = 0; i < k; ++i) {
+        res *= (n - i);
+        res /= (i + 1);
+    }
+
+    return res;
+}
+
+long double prob_filled(int N, int M) {
+    if (N < M) return 0.0;
+
+    double prob_empty = 0.0;
+
+    for (int k = 1; k <= M; ++k) {
+        double binom = binom_coeff(M, k);
+        double base = (double(M) - k)/ double(M);
+        double term = binom * pow(base, double(N));
+
+        prob_empty += (k % 2 == 1 ? 1 : -1) * term;
+    }
+
+    return 1.0 - prob_empty;
+}
+
+int find_min_elems(double tg_prob, int M) {
+    int low = M, high = 20 * M, mid;
+
+    while (low < high) {
+        mid = (low + high) / 2;
+        double prob = prob_filled(mid, M);
+
+        if (prob < tg_prob) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+
+    return low;
+}
+
+string to_string(std::thread::id id) {
+	std::stringstream helper;
+	helper << id;
+
+	return helper.str();
+}
+
 pair<int,vector<MYSQL*>> disable_core_nodes_scheduler(CommandLine& cl, MYSQL* admin) {
 	vector<MYSQL*> nodes_conns {};
 
@@ -553,15 +607,15 @@ std::vector<mysql_res_row> extract_mysql_rows(MYSQL_RES* my_res) {
 	return result;
 };
 
-pair<uint32_t,vector<mysql_res_row>> mysql_query_ext_rows(MYSQL* mysql, const string& query) {
+rc_t<vector<mysql_res_row>> mysql_query_ext_rows(MYSQL* mysql, const string& query) {
 	int rc = mysql_query(mysql, query.c_str());
 	if (rc != EXIT_SUCCESS) {
-		return { mysql_errno(mysql), {} };
+		return { static_cast<int>(mysql_errno(mysql)), {} };
 	}
 
 	MYSQL_RES* myres = mysql_store_result(mysql);
 	if (myres == nullptr) {
-		return { mysql_errno(mysql), {} };
+		return { static_cast<int>(mysql_errno(mysql)), {} };
 	}
 
 	const vector<mysql_res_row> rows { extract_mysql_rows(myres) };
@@ -1475,13 +1529,47 @@ int open_file_and_seek_end(const string& f_path, std::fstream& f_stream) {
 	return EXIT_SUCCESS;
 }
 
-vector<line_match_t> get_matching_lines(fstream& f_stream, const string& s_regex, bool get_matches) {
+rc_t<debug_entry_t> build_debug_entry(const sq3_row_t& row) {
+	if (row.size() < 12) {
+		return { -1, {} };
+	}
+
+	const auto str_to_uint64 = [](const std::string& str) -> uint64_t {
+		return str.empty() ? 0 : std::stoull(str);
+	};
+
+	const auto str_to_time_t = [](const string& str) -> time_t {
+		return str.empty() ? 0 : static_cast<time_t>(std::stoll(str));
+	};
+
+	return { 0, debug_entry_t {
+		str_to_uint64(row[0]),
+		str_to_time_t(row[1]),
+		str_to_uint64(row[2]),
+		str_to_uint64(row[3]),
+		row[4],
+		str_to_uint64(row[5]),
+		row[6],
+		str_to_uint64(row[7]),
+		row[8],
+		str_to_uint64(row[9]),
+		row[10],
+		row[11]
+	}};
+}
+
+pair<size_t,vector<line_match_t>> get_matching_lines(
+	fstream& f_stream, const string& s_regex, bool get_matches
+) {
 	vector<line_match_t> found_matches {};
+	size_t insp_lines { 0 };
 
 	string next_line {};
 	fstream::pos_type init_pos { f_stream.tellg() };
 
 	while (getline(f_stream, next_line)) {
+		insp_lines += 1;
+
 		re2::RE2 regex { s_regex };
 		re2::StringPiece match;
 
@@ -1504,7 +1592,7 @@ vector<line_match_t> get_matching_lines(fstream& f_stream, const string& s_regex
 		f_stream.seekg(init_pos);
 	}
 
-	return found_matches;
+	return { insp_lines, found_matches };
 }
 
 const uint32_t USLEEP_SQLITE_LOCKED = 100;
@@ -1536,7 +1624,7 @@ sq3_res_t sqlite3_execute_stmt(sqlite3* db, const string& query) {
 	} while (rc==SQLITE_LOCKED || rc==SQLITE_BUSY);
 
 	if (rc != SQLITE_OK) {
-		res = {{}, {}, {}, sqlite3_errmsg(db)};
+		res = {{}, {}, {}, sqlite3_errcode(db)};
 		goto cleanup;
 	}
 
@@ -1556,7 +1644,7 @@ sq3_res_t sqlite3_execute_stmt(sqlite3* db, const string& query) {
 				uint32_t affected_rows = sqlite3_changes(db);
 				res = {{}, {}, affected_rows, {}};
 			} else {
-				res = {{}, {}, {}, sqlite3_errmsg(db)};
+				res = {{}, {}, {}, sqlite3_errcode(db)};
 				goto cleanup;
 			}
 		} else {
@@ -1595,6 +1683,31 @@ cleanup:
 	sqlite3_finalize(stmt);
 
 	return res;
+}
+
+rc_t<vector<debug_entry_t>> sq3_get_debug_entries(sqlite3* db, const string& conds) {
+	const string query {
+		"SELECT id, time, lapse, thread, file, line, funct, modnum, modname, verbosity, message, note"
+		" FROM debug_log" + (conds.empty() ? "" : " WHERE 1=1 AND " + conds)
+	};
+
+	const sq3_res_t rows { sqlite3_execute_stmt(db, query) };
+	const int sq3_err { std::get<SQ3_RES_T::SQ3_ERR>(rows) };
+
+	if (sq3_err) {
+		return { sq3_err, {} };
+	} {
+		vector<debug_entry_t> entries {};
+
+		for (const auto & row : std::get<SQ3_RES_T::SQ3_ROWS>(rows)) {
+			auto [err, entry] = build_debug_entry(row);
+			assert((void("Received malformed row from 'debug_log' table"), err == 0));
+
+			entries.push_back(entry);
+		}
+
+		return { 0, entries };
+	}
 }
 
 json fetch_internal_session(MYSQL* proxy, bool verbose) {
