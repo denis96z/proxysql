@@ -675,7 +675,7 @@ string to_string(const test_conf_t& conf) {
 	return "{ "
 		"\"req_auth\":'" + conf.req_auth + "', "
 		"\"def_auth\":'" + conf.def_auth + "', "
-		"\"hashed_pass\":'" + std::to_string(conf.hashed_pass) + "'"
+		"\"hashed_pass\":'" + std::to_string(conf.hashed_pass) + "', "
 		"\"use_ssl\":'" + std::to_string(conf.use_ssl) + "'"
 	" }";
 }
