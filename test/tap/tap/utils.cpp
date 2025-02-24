@@ -1567,7 +1567,12 @@ sq3_res_t sqlite3_execute_stmt(sqlite3* db, const string& query) {
 				cols_defs.push_back(sqlite3_column_name(stmt, i));
 			}
 
-			while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+			while ((rc = sqlite3_step(stmt)) == SQLITE_ROW || rc == SQLITE_BUSY) {
+				if (rc == SQLITE_BUSY) {
+					usleep(USLEEP_SQLITE_LOCKED);
+					continue;
+				}
+
 				sq3_row_t row {};
 
 				for (uint32_t i = 0; i < cols_count; i++) {
