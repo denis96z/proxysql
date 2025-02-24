@@ -1033,17 +1033,6 @@ int create_extra_users(
 	return EXIT_SUCCESS;
 }
 
-string tap_curtime() {
-	time_t __timer;
-	char lut[30];
-	struct tm __tm_info;
-	time(&__timer);
-	localtime_r(&__timer, &__tm_info);
-	strftime(lut, 25, "%Y-%m-%d %H:%M:%S", &__tm_info);
-	string s = string(lut);
-	return s;
-}
-
 int get_proxysql_cpu_usage(const CommandLine& cl, uint32_t intv, double& cpu_usage) {
 	// Create Admin connection
 	MYSQL* proxysql_admin = mysql_init(NULL);
@@ -1992,7 +1981,7 @@ int wait_for_cond(MYSQL* mysql, const string& q, uint32_t to) {
 	return result;
 }
 
-vector<check_res_t> wait_for_conds(MYSQL* mysql, const vector<string>& qs, uint32_t to) {
+vector<rc_t<string>> wait_for_conds(MYSQL* mysql, const vector<string>& qs, uint32_t to) {
 	diag("Waiting multiple conditions in ('%s':%d):", mysql->host, mysql->port);
 	for (const string& q : qs) {
 		diag("  - cond: '%s'", q.c_str());
@@ -2000,10 +1989,10 @@ vector<check_res_t> wait_for_conds(MYSQL* mysql, const vector<string>& qs, uint3
 
 	std::chrono::duration<double> elapsed {};
 
-	vector<check_res_t> res {};
+	vector<rc_t<string>> res {};
 	std::transform(qs.begin(), qs.end(), std::back_inserter(res),
 		[] (const string& q) {
-			return check_res_t { 1, q };
+			return rc_t<string> { 1, q };
 		}
 	);
 	auto start = std::chrono::system_clock::now();
@@ -2024,7 +2013,7 @@ vector<check_res_t> wait_for_conds(MYSQL* mysql, const vector<string>& qs, uint3
 		}
 
 		int acc = std::accumulate(res.begin(), res.end(), size_t(0),
-			[] (size_t acc, const check_res_t& p) -> size_t {
+			[] (size_t acc, const rc_t<string>& p) -> size_t {
 				if (p.first == 0) {
 					return acc + 1;
 				} else {
@@ -2044,10 +2033,10 @@ vector<check_res_t> wait_for_conds(MYSQL* mysql, const vector<string>& qs, uint3
 	return res;
 }
 
-int proc_wait_checks(const vector<check_res_t>& chks) {
+int proc_wait_checks(const vector<rc_t<string>>& chks) {
 	int res = 0;
 
-	for (const check_res_t& r : chks) {
+	for (const rc_t<string>& r : chks) {
 		if (r.first == -1) {
 			res = -1;
 			diag("Waiting check FAILED to execute '%s'", r.second.c_str());
@@ -2174,7 +2163,7 @@ int check_nodes_sync(
 			return EXIT_FAILURE;
 		}
 
-		const vector<check_res_t> wres { wait_for_conds(admin, { check }, to) };
+		const vector<rc_t<string>> wres { wait_for_conds(admin, { check }, to) };
 		int node_sync = proc_wait_checks(wres);
 
 		if (node_sync != EXIT_SUCCESS) {

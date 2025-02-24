@@ -107,18 +107,6 @@ std::string to_string(std::thread::id id);
  */
 std::pair<int,std::vector<MYSQL*>> disable_core_nodes_scheduler(CommandLine& cl, MYSQL* admin);
 
-inline std::string get_formatted_time() {
-	time_t __timer;
-	char __buffer[30];
-
-	struct tm __tm_info {};
-	time(&__timer);
-	localtime_r(&__timer, &__tm_info);
-	strftime(__buffer, 25, "%Y-%m-%d %H:%M:%S", &__tm_info);
-
-	return std::string(__buffer);
-}
-
 /**
  * @brief Wrapper for 'mysql_query' with logging for convenience.
  * @details Should be used through 'mysql_query_t' macro.
@@ -471,7 +459,6 @@ int create_extra_users(
 	MYSQL* proxysql_admin, MYSQL* mysql_server, const std::vector<user_config>& users_config
 );
 
-std::string tap_curtime();
 /**
  * @brief Returns ProxySQL cpu usage in ms.
  * @param intv The interval in which the CPU usage of ProxySQL is going
@@ -885,8 +872,6 @@ rc_t<T> wait_for_cond(const std::function<rc_t<T>()>& cond, uint32_t to_us, uint
  */
 int wait_for_cond(MYSQL* mysql, const std::string& query, uint32_t timeout);
 
-using check_res_t = std::pair<int,std::string>;
-
 /**
  * @brief Waits for multiple conditions to take place before returning.
  * @param mysql Already oppened connection in which to execute the queries.
@@ -894,14 +879,14 @@ using check_res_t = std::pair<int,std::string>;
  * @param to Timeout in which all the conditions should be accomplished.
  * @return Vector of pairs of shape '{err, check}'.
  */
-std::vector<check_res_t> wait_for_conds(MYSQL* mysql, const std::vector<std::string>& qs, uint32_t to);
+std::vector<rc_t<std::string>> wait_for_conds(MYSQL* mysql, const std::vector<std::string>& qs, uint32_t to);
 
 /**
  * @brief Reduces a vector of 'check_res_t' to either success or failure.
  * @param chks Vector to be fold into single value.
  * @return -1 in case a check failed to execute, 1 if any check timedout, 0 for success.
  */
-int proc_wait_checks(const std::vector<check_res_t>& chks);
+int proc_wait_checks(const std::vector<std::pair<int,std::string>>& chks);
 
 /**
  * @brief Encapsulates a server address.

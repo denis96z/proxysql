@@ -51,9 +51,7 @@ using std::unique_ptr;
 
 #define MYSQL_QUERY_T__(mysql, query) \
 	do { \
-		const std::string time { get_formatted_time() }; \
-		fprintf(stderr, "# %s: Issuing query '%s' to ('%s':%d)\n", time.c_str(), query, mysql->host, mysql->port); \
-		if (mysql_query(mysql, query)) { \
+		if (mysql_query_t(mysql, query)) { \
 			fprintf(stderr, "File %s, line %d, Error: %s\n", __FILE__, __LINE__, mysql_error(mysql)); \
 			return { EXIT_FAILURE, vector<user_creds_t> {} }; \
 		} \
@@ -61,9 +59,7 @@ using std::unique_ptr;
 
 #define MYSQL_QUERY_T_(mysql, query) \
 	do { \
-		const std::string time { get_formatted_time() }; \
-		fprintf(stderr, "# %s: Issuing query '%s' to ('%s':%d)\n", time.c_str(), query, mysql->host, mysql->port); \
-		if (mysql_query(mysql, query)) { \
+		if (mysql_query_t(mysql, query)) { \
 			fprintf(stderr, "File %s, line %d, Error: %s\n", __FILE__, __LINE__, mysql_error(mysql)); \
 			return { EXIT_FAILURE, user_def_t {} }; \
 		} \
