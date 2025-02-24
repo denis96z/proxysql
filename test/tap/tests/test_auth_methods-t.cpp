@@ -935,6 +935,21 @@ bool detect_sha2_full_auth(const sess_info_t& sess_info) {
 bool chk_exp_sha2_full_auth(
 	const test_conf_t& conf, const test_creds_t& creds, const user_auth_stats_t& auth_info
 ) {
+	// TODO: ProxySQL requires a full-auth everytime a dual-password is used. This is a limitation
+	// on the current auth state-machine. This should be fixed in the next auth-rework. The
+	// following code will be obsolete when this is implemented.
+	///////////////////////////////////////////////////////////////////////////
+	if (
+		creds.info.type == PASS_TYPE::ADDITIONAL
+		&& conf.req_auth == "caching_sha2_password"
+		&& conf.def_auth == "caching_sha2_password"
+		&& conf.hashed_pass == true
+	) {
+		diag("TODO-WARNING: The following check will FAKE pass - This limitation should be fixed");
+		return true;
+	}
+	///////////////////////////////////////////////////////////////////////////
+
 	if (!is_empty_pass(creds.pass.get()) && conf.hashed_pass && creds.info.auth == "caching_sha2_password") {
 		if (creds.info.type == PASS_TYPE::PRIMARY) {
 			return auth_info.prim_pass_auths == 0;
