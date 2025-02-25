@@ -79,7 +79,7 @@ static TEST_DATA g_test = { NO_PLAN, 0, 0, "" };
   @param us True for enabling microseconds in log output.
   @param len Buffer len.
  */
-size_t get_fmt_time(char* tm_buf, size_t len, bool us=false) {
+size_t get_fmt_time(char* tm_buf, size_t len, bool us) {
   time_t __timer;
   time(&__timer);
   struct tm __tm_info {};
