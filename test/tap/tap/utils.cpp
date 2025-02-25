@@ -29,6 +29,8 @@ using std::vector;
 using std::to_string;
 using nlohmann::json;
 
+#define SELECT_RUNTIME_VAR "SELECT variable_value FROM runtime_global_variables WHERE variable_name="
+
 #define LAST_QUERY_EXECUTED_STR(mysql)	(*static_cast<std::string*>(mysql->unused_0)) 
 #define STMT_VECTOR(stmt)				(*static_cast<std::vector<MYSQL_STMT*>*>(stmt->mysql->unused_3))
 #define STMT_EXECUTED_VECTOR(stmt)		(*static_cast<std::vector<std::unique_ptr<char,decltype(&free)>>*>(stmt->mysql->unused_4))
@@ -1033,18 +1035,30 @@ int create_extra_users(
 	return EXIT_SUCCESS;
 }
 
-int get_proxysql_cpu_usage(const CommandLine& cl, uint32_t intv, double& cpu_usage) {
+int get_proxysql_cpu_usage(const CommandLine& cl, double& cpu_usage, uint32_t intv) {
 	// Create Admin connection
-	MYSQL* proxysql_admin = mysql_init(NULL);
-	if (!mysql_real_connect(proxysql_admin, cl.host, cl.admin_username, cl.admin_password, NULL, cl.admin_port, NULL, 0)) {
-		fprintf(stderr, "File %s, line %d, Error: %s\n", __FILE__, __LINE__, mysql_error(proxysql_admin));
+	MYSQL* admin = mysql_init(NULL);
+	if (!mysql_real_connect(admin, cl.host, cl.admin_username, cl.admin_password, NULL, cl.admin_port, NULL, 0)) {
+		fprintf(stderr, "File %s, line %d, Error: %s\n", __FILE__, __LINE__, mysql_error(admin));
 		return EXIT_FAILURE;
 	}
 
-	// Set new interval
-	const string set_stats_query { "SET admin-stats_system_cpu=" + std::to_string(intv) };
-	MYSQL_QUERY(proxysql_admin, set_stats_query.c_str());
-	MYSQL_QUERY(proxysql_admin, "LOAD ADMIN VARIABLES TO RUNTIME");
+	const char SELECT_CPU_INTV[] { SELECT_RUNTIME_VAR"'admin-stats_system_cpu'" };
+	ext_val_t<int32_t> cur_intv { mysql_query_ext_val(admin, SELECT_CPU_INTV, -1) };
+
+	if (cur_intv.err) {
+		const string err { get_ext_val_err(admin, cur_intv) };
+		diag("Failed query   query:`%s`, err:`%s`", SELECT_CPU_INTV, err.c_str());
+		return EXIT_FAILURE;
+	}
+
+	if (intv == UINT32_MAX) {
+		intv = cur_intv.val;
+	} else {
+		const string set_stats_query { "SET admin-stats_system_cpu=" + std::to_string(intv) };
+		MYSQL_QUERY(admin, set_stats_query.c_str());
+		MYSQL_QUERY(admin, "LOAD ADMIN VARIABLES TO RUNTIME");
+	}
 
 	// Wait until 'system_cpu' is filled with newer entries
 	time_t curtime = time(NULL);
@@ -1053,9 +1067,9 @@ int get_proxysql_cpu_usage(const CommandLine& cl, uint32_t intv, double& cpu_usa
 	const char runtime_stats[] {
 		"SELECT variable_value FROM runtime_global_variables WHERE variable_name='admin-stats_system_cpu'"
 	};
-	ext_val_t<int> ext_rintv { mysql_query_ext_val(proxysql_admin, runtime_stats, 10) };
+	ext_val_t<int> ext_rintv { mysql_query_ext_val(admin, runtime_stats, 10) };
 	if (ext_rintv.err != EXIT_SUCCESS) {
-		const string err { get_ext_val_err(proxysql_admin, ext_rintv) };
+		const string err { get_ext_val_err(admin, ext_rintv) };
 		diag("Failed query   query:`%s`, err:`%s`", runtime_stats, err.c_str());
 		return EXIT_FAILURE;
 	}
@@ -1075,10 +1089,10 @@ int get_proxysql_cpu_usage(const CommandLine& cl, uint32_t intv, double& cpu_usa
 	const string count_query {
 		"SELECT COUNT(*) FROM system_cpu WHERE timestamp > " + std::to_string(curtime)
 	};
-	ext_val_t<int> ext_stats_count { mysql_query_ext_val(proxysql_admin, count_query, 10) };
+	ext_val_t<int> ext_stats_count { mysql_query_ext_val(admin, count_query, 10) };
 
 	if (ext_stats_count.err != EXIT_SUCCESS) {
-		const string err { get_ext_val_err(proxysql_admin, ext_stats_count) };
+		const string err { get_ext_val_err(admin, ext_stats_count) };
 		diag("Failed query   query:`%s`, err:`%s`", count_query.c_str(), err.c_str());
 		return EXIT_FAILURE;
 	}
@@ -1088,10 +1102,10 @@ int get_proxysql_cpu_usage(const CommandLine& cl, uint32_t intv, double& cpu_usa
 
 	while (entry_count < 2) {
 		diag("Waiting for more 'system_cpu' entries...   entry_count=%d", entry_count);
-		ext_val_t<int> ext_stats_count { mysql_query_ext_val(proxysql_admin, count_query, 10) };
+		ext_val_t<int> ext_stats_count { mysql_query_ext_val(admin, count_query, 10) };
 
 		if (ext_stats_count.err != EXIT_SUCCESS) {
-			const string err { get_ext_val_err(proxysql_admin, ext_stats_count) };
+			const string err { get_ext_val_err(admin, ext_stats_count) };
 			diag("Failed query   query:`%s`, err:`%s`", count_query.c_str(), err.c_str());
 			return EXIT_FAILURE;
 		}
@@ -1100,8 +1114,8 @@ int get_proxysql_cpu_usage(const CommandLine& cl, uint32_t intv, double& cpu_usa
 		sleep(1);
 	}
 
-	MYSQL_QUERY(proxysql_admin, "SELECT * FROM system_cpu ORDER BY timestamp DESC LIMIT 2");
-	MYSQL_RES* admin_res = mysql_store_result(proxysql_admin);
+	MYSQL_QUERY(admin, "SELECT * FROM system_cpu ORDER BY timestamp DESC LIMIT 2");
+	MYSQL_RES* admin_res = mysql_store_result(admin);
 	MYSQL_ROW row = mysql_fetch_row(admin_res);
 
 	double s_clk = (1000.0 / sysconf(_SC_CLK_TCK));
@@ -1122,10 +1136,12 @@ int get_proxysql_cpu_usage(const CommandLine& cl, uint32_t intv, double& cpu_usa
 	mysql_free_result(admin_res);
 
 	// recover admin variables
-	MYSQL_QUERY(proxysql_admin, "SET admin-stats_system_cpu=60");
-	MYSQL_QUERY(proxysql_admin, "LOAD ADMIN VARIABLES TO RUNTIME");
+	if (intv != UINT32_MAX) {
+		MYSQL_QUERY(admin, ("SET admin-stats_system_cpu=" + std::to_string(cur_intv.val)).c_str());
+		MYSQL_QUERY(admin, "LOAD ADMIN VARIABLES TO RUNTIME");
+	}
 
-	mysql_close(proxysql_admin);
+	mysql_close(admin);
 
 	return EXIT_SUCCESS;
 }

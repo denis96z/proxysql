@@ -461,13 +461,17 @@ int create_extra_users(
 
 /**
  * @brief Returns ProxySQL cpu usage in ms.
- * @param intv The interval in which the CPU usage of ProxySQL is going
- *  to be measured.
- * @param cpu_usage Output parameter with the cpu usage by ProxySQL in
- *  'ms' in the specified interval.
+ * @details The parameter intv, determines the duration of the measuring interval, and by such,
+ *  determines the execution time of the function.
+ * @param cpu_usage Output holding ProxySQL CPU usage ('ms') in the interval.
+ * @param intv The interval in which the CPU usage is going to be measured. ProxySQL internal stats
+ *  tables are used for performing the measurement, this parameter modifies 'admin-stats_system_cpu',
+ *  modifying internal refresh-interval. The special value UINT32_MAX allows to use the current value
+ *  for 'admin-stats_system_cpu', thus not changing current ProxySQL internal measuring interval.
+ *  This is the default value, since testing environments use max resolution anyway.
  * @return 0 if success, -1 in case of error.
  */
-int get_proxysql_cpu_usage(const CommandLine& cl, uint32_t intv, double& cpu_usage);
+int get_proxysql_cpu_usage(const CommandLine& cl, double& cpu_usage, uint32_t intv=UINT32_MAX);
 
 /**
  * @brief Helper struct holding connection options for helper functions creating MySQL connections.
