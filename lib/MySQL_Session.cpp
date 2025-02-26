@@ -4042,6 +4042,17 @@ __get_pkts_from_client:
 						}
 						switch ((enum_mysql_command)c) {
 							case _MYSQL_COM_QUERY:
+								{
+									const char* schemaname { client_myds->myconn->userinfo->schemaname };
+									const char* recv_query { static_cast<char*>(pkt.ptr) + 5 };
+									const uint32_t recv_query_sz { pkt.size - 5 };
+
+									proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Processing received query"
+										"   session=%p session_type=%d schemaname=%s query=%.*s\n",
+										this, session_type, schemaname ? schemaname : "", recv_query_sz, recv_query
+									);
+								}
+
 								__sync_add_and_fetch(&thread->status_variables.stvar[st_var_queries],1);
 								if (session_type == PROXYSQL_SESSION_MYSQL) {
 									bool rc_break=false;
@@ -4849,7 +4860,6 @@ handler_again:
 		case PROCESSING_STMT_PREPARE:
 		case PROCESSING_STMT_EXECUTE:
 		case PROCESSING_QUERY:
-			//fprintf(stderr,"PROCESSING_QUERY\n");
 			// Pause Check
 			// It checks if pause_until is greater than the current time (thread->curtime).
 			// If so, it returns handler_ret immediately, indicating that processing should be paused until a later time.
