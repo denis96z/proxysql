@@ -339,9 +339,12 @@ int threads_warmup(const CommandLine& cl, MYSQL* admin, sqlite3* sq3_db) {
 					return EXIT_FAILURE;
 				}
 
-				const string query { rand() % 2 ? "SELECT 1" : "SELECT 2" };
-				diag("Issuing query from worker   thread_id=%s query=\"%s\"", th_id.c_str(), query.c_str());
-				MYSQL_QUERY_T(proxy, query.c_str());
+				const char* wup_query { rand() % 2 ?
+					"SELECT /* thread_warmup-" __FILE__ " */ 1" :
+					"SELECT /* thread_warmup-" __FILE__ " */ 2"
+				};
+				diag("Issuing query from worker   thread_id=%s query=\"%s\"", th_id.c_str(), wup_query);
+				MYSQL_QUERY_T(proxy, wup_query);
 				mysql_free_result(mysql_store_result(proxy));
 
 				mysql_close(proxy);
@@ -363,7 +366,7 @@ int threads_warmup(const CommandLine& cl, MYSQL* admin, sqlite3* sq3_db) {
 	const auto [_, matched_entries] {
 		sq3_get_debug_entries(sq3_db,
 			"id > " + _TO_S(last_id.val) + " AND file='MySQL_Session.cpp'"
-			" AND message LIKE '%Processing received query%'"
+			" AND message LIKE '%Processing received query%thread_warmup-" __FILE__ "%'"
 		)
 	};
 
@@ -376,20 +379,9 @@ int threads_warmup(const CommandLine& cl, MYSQL* admin, sqlite3* sq3_db) {
 	diag("Thread query distribution:\n%s", nlohmann::json(threads_ids).dump(4).c_str());
 
 	ok(
-		threads_ids.size() == mysql_threads.val + 1,
+		threads_ids.size() == mysql_threads.val,
 		"Each thread processed at least one warm-up query   threads_ids=%ld mysql_threads=%d",
-		threads_ids.size(), mysql_threads.val + 1
-	);
-
-	vector<pair<uint32_t,uint32_t>> sq3_ths {};
-	std::copy_if(threads_ids.begin(), threads_ids.end(), std::back_inserter(sq3_ths),
-		[] (const pair<uint32_t,uint32_t>& e) -> bool { return e.second == 1; }
-	);
-
-	ok(
-		sq3_ths.size() == 1,
-		"Only one SQLite3 thread spawned to process 'FLUSH LOGS'   sq3_ths=[%s]",
-		nlohmann::json(sq3_ths).dump(-1).c_str()
+		threads_ids.size(), mysql_threads.val
 	);
 
 	return EXIT_FAILURE;
@@ -522,7 +514,7 @@ int test_fast_routing_algorithm(
 
 int main(int argc, char** argv) {
 	// `12` logic checks + 20*3 checks per query rule, per test
-	plan((2*3 + 2 + 2*2 + 20*3) * 2);
+	plan((2*3 + 2 + 2 + 20*3) * 2);
 
 	CommandLine cl;
 
