@@ -63,182 +63,18 @@ void PgSQL_Set_Stmt_Parser::set_query(const std::string& nq) {
 	free(query_no_space);
 }
 
-#define QUOTES "(?:'|\"|`)?"
-#define SPACES " *"
-#define NAMES "(NAMES)"
-#define NAME_VALUE "((?:\\w|\\d)+)"
-
-#define SESSION_P1 "(?:|SESSION +|@@|@@session.|@@local.)"
-#define VAR_P1 "`?(@\\w+|\\w+)`?"
-
-// added (?:[\\w]+=(?:on|off)|,)+ for optimizer_switch
-#define VAR_VALUE_P1_1 "(?:\\()*(?:SELECT)*(?: )*(?:CONCAT\\()*(?:(?:(?: )*REPLACE|IFNULL|CONCAT)\\()+(?: )*(?:NULL|@OLD_SQL_MODE|@@SQL_MODE),(?:(?:'|\\w|,| |\"|\\))+(?:\\))*)(?:\\))"
-#define VAR_VALUE_P1_2 "|(?:NULL)"
-#define VAR_VALUE_P1_3 "|(?:[\\w]+=(?:on|off)|,)+"
-#define VAR_VALUE_P1_4 "|(?:[@\\w/\\d:\\+\\-]|,)+"
-#define VAR_VALUE_P1_5 "|(?:(?:'{1}|\"{1})(?:)(?:'{1}|\"{1}))"
-#define VAR_VALUE_P1_6 "|(?: )+"
-#define VAR_VALUE_P1 "(" VAR_VALUE_P1_1 VAR_VALUE_P1_2 VAR_VALUE_P1_3 VAR_VALUE_P1_4 VAR_VALUE_P1_5 VAR_VALUE_P1_6 ")"
-
 void PgSQL_Set_Stmt_Parser::generateRE_parse1v2() {
-	vector<string> quote_symbol = {"\"", "'", "`"};
-	vector<string> var_patterns = {};
-	{
-		// this block needs to be added at the very beginning, otherwise REPLACE|IFNULL|CONCAT may be considered simple words
-		// sw0 matches:
-		// - single word, quoted or not quoted
-		// - variable name , with double @ (session variable) or single @ (user defiend variable)
-		// - strings that includes words, spaces and commas
-		// - single quote string
-		string  sw0  = "(?:\\w+|\"[\\w, ]+\"|\'[\\w, ]+\'|@(?:|@)\\w+|\'\')";
-		string  mw0  = "(?:" + sw0 + "(?: *, *" + sw0 + ")*)"; // multiple words, separated by comma and random spaces
-		string  fww  = "(?:(?:REPLACE|IFNULL|CONCAT)\\( *" + mw0 + "\\))"; // functions REPLACE|IFNULL|CONCAT having argument multiple words
-		string rfww2 = "(?:(?:REPLACE|IFNULL|CONCAT)\\( *" + fww   + " *, *" + mw0 + "\\))"; //functions REPLACE|IFNULL|CONCAT calling the same functions
-		string rfww3 = "(?:(?:REPLACE|IFNULL|CONCAT)\\( *" + rfww2 + " *, *" + mw0 + "\\))"; //functions REPLACE|IFNULL|CONCAT calling the same functions
-		string rfww4 = "(?:(?:REPLACE|IFNULL|CONCAT)\\( *" + rfww3 + " *, *" + mw0 + "\\))"; //functions REPLACE|IFNULL|CONCAT calling the same functions
-		// all the above function allows space after the open parenthesis
-		string Selfww = "(?:\\(SELECT  *" + fww + "\\))"; // for calls like SET sql_mode=(SELECT CONCAT(@@sql_mode, ',PIPES_AS_CONCAT,NO_ENGINE_SUBSTITUTION'));
-		// FIXME: add error handling in case rfww4 is removed
-#ifdef PARSERDEBUG
-		if (verbosity > 0) {
-			cout << fww << endl;
-			cout << rfww2 << endl;
-			cout << rfww3 << endl;
-			cout << rfww4 << endl;
-			cout << Selfww << endl;
-		}
-#endif
-		var_patterns.push_back(rfww4); // add first function calling function , otherwise functions will be considered simple names
-		var_patterns.push_back(rfww3); // add first function calling function , otherwise functions will be considered simple names
-		var_patterns.push_back(rfww2); // add first function calling function
-		var_patterns.push_back(fww);
-		var_patterns.push_back(Selfww);
-	}
-
-	string vp = "NULL"; // NULL
-	var_patterns.push_back(vp);
-
-	{
-		string vp0 = "(?:\\w|\\d)+"; // single word with letters and digits , for example utf8mb4 and latin1
-		string vp2 = "(?:" + vp0 + "(?:-" + vp0 + ")*)"; // multiple words (letters and digits) separated by dash, WITHOUT any spaces between words . Used also for transaction isolation
-		var_patterns.push_back(vp2);
-		for (auto it = quote_symbol.begin(); it != quote_symbol.end(); it++) {
-			string s = *it + vp2 + *it;
-			var_patterns.push_back(s); // add with quote
-		}
-	}
-
-	vp = "\\w+(?:\\s*,\\s*\\w+|\\s*:\\s*\\w+)+"; // multiple words separated by commas, WITHOUT any spaces between words
-	// NOTE: we do not use multiple words without quotes
-	for (auto it = quote_symbol.begin(); it != quote_symbol.end(); it++) {
-		string s = *it + vp + *it;
-		var_patterns.push_back(s); // add with quote
-	}
-
-	// regex for optimizer_switch
-	{
-		string v1 = "(?:on|off)"; // on|off
-		string v2 = "\\w+=" + v1; // "\\w+=(?:on|off)" , example: index_merge_sort_union=on
-		string v3 = v2 + "(?:," + v2 + ")*"; // "\\w+=(?:on|off)(?:,\\w+=(?:on|off))*"
-				// example index_merge=on,index_merge_union=on,index_merge_sort_union=off
-				// note: spaces are not allowed
-		// NOTE: the whole set of flags must be quoted
-		for (auto it = quote_symbol.begin(); it != quote_symbol.end(); it++) {
-			string s = *it + v3 + *it;
-			var_patterns.push_back(s); // add with quote
-		}
-	}
-
-
-//	DO NOT REMOVE THIS COMMENTED CODE
-//	It helps understanding how a regex was built
-
-//	vp = "\\d+"; // a number integer  N1
-//	var_patterns.push_back(vp);
-//	vp = "\\d+\\.\\d+"; // a decimal  N2
-//	var_patterns.push_back(vp);
-//	vp = "\\d+(?:|\\.\\d+)"; // an integer or decimal N3 , merge of N1 and N2
-//	var_patterns.push_back(vp);
-
-//	vp = " *(?:\\+|\\-) *\\d+"; // a signed number integer with spaces before and after the sign . N4 = sign + N1
-//	var_patterns.push_back(vp);
-//	vp = " *(?:\\+|\\-) *\\d+\\.\\d+"; // a signed decimal with spaces before and after the sign . N5 = sign + N2
-//	var_patterns.push_back(vp);
 	
-//	vp = " *(?:\\+|\\-) *\\d+(?:|\\.\\d+)"; // a signed integer or decimal , N6 = N4 + N5
-//	var_patterns.push_back(vp);
-
-	vp = "(?:| *(?:\\+|\\-) *)\\d+(?:|\\.\\d+)"; // a signed or unsigned integer or decimal , N7 = merge of N3 and N6
-	var_patterns.push_back(vp);
-
-	{
-		// time_zone in numeric format:
-		// - +/- sign
-		// 1 or 2 digits
-		// :
-		// 2 digits
-		string tzd =  "(?:(?:\\+|\\-)(?:|\\d)\\d:\\d\\d)";
-		// time_zone in string format:
-		// word / word
-		string tzw =  "(?:\\w+/\\w+)";
-		vp = "(?:" + tzd + "|" + tzw + ")"; // time_zone in numeric and string format
-	}
-	for (auto it = quote_symbol.begin(); it != quote_symbol.end(); it++) {
-		string s = *it + vp + *it;
-		var_patterns.push_back(s); // add with quote
-	}
-
-	// add just variable name, for example SET time_zone = @old_time_zone
-	vp = "(?:@(?:|@)\\w+)";
-	var_patterns.push_back(vp);
-
-
-	// add empty strings , with optional spaces
-	for (auto it = quote_symbol.begin(); it != quote_symbol.end(); it++) {
-		string s = *it + " *" + *it;
-		var_patterns.push_back(s); // add with quote
-	}
-
-	string var_value = "(";
-	for (auto it = var_patterns.begin(); it != var_patterns.end(); it++) {
-		string s = "(?:" + *it + ")";
-		auto it2 = it;
-		it2++;
-		if (it2 != var_patterns.end())
-			s += "|";
-		var_value += s;
-	}
-	var_value += ")";
-
 #ifdef DEBUG
 	proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "Parsing query %s\n", query.c_str());
 #endif // DEBUG
-	parse1v2_opt2 = new re2::RE2::Options(RE2::Quiet);
-	parse1v2_opt2->set_case_sensitive(false);
-	parse1v2_opt2->set_longest_match(false);
 
-	string var_1_0 = "(?:@\\w+|\\w+)"; // @name|name
-	string var_1 = "(" + var_1_0 + "|`" + var_1_0 + "`)"; // var_1_0|`var_1_0`
-	var_1 = SESSION_P1 + var_1;
-
-	string charset_name = "(?:(?:\\w|\\d)+)";
-	string name_value = "(";
-	for (auto it = quote_symbol.begin(); it != quote_symbol.end(); it++) {
-		string s = "(?:" + *it + charset_name + *it + ")";
-		s += "|";
-		name_value += s;
-	}
-	name_value += charset_name; // without quotes
-	name_value += ")";
+	//const std::string pattern = "(?:(?P<scope>SESSION|LOCAL)\\s+)?(?:(?P<parameter>[^=\\s][^=;]*?)\\s*(?:=|TO)\\s*(?P<value>[^;]+)|(?P<parameter_kw>TIME\\s+ZONE|NAMES|SCHEMA|AUTHORIZATION|TRANSACTION\\s+ISOLATION\\s+LEVEL|CHARACTERISTICS\\s+AS\\s+TRANSACTION\\s+ISOLATION\\s+LEVEL)\\s+(?P<value_kw>[^;]+))\\s*;?\\s*";
 	
-#ifdef PARSERDEBUG
-	if (verbosity > 0) {
-		cout << var_value << endl;
-		cout << name_value << endl;
-	}
-#endif
-
-	std::string pattern = "(?:" NAMES SPACES + name_value + "(?: +COLLATE +" + name_value + "|)" "|" + var_1 + SPACES "(?:|:)(?:TO|=)" SPACES + var_value + ") *,? *";
+	// Function Call: Check if Group 3 is populated.
+	// Literal: Check if Group 4 is populated.
+	//const std::string pattern = "(?:(SESSION|LOCAL)\\s+)?((?:\\S+(?:\\s+\\S+)*?))(?:\\s+(?:TO|=)\\s+|\\s+)(?:(\\w+\\s*\\([^)]*\\))|((?:'(?:''|[^'])*'|-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?|t|true|f|false|on|off|default|\\S+)))\\s*;?";
+	const std::string pattern = "(?:(SESSION|LOCAL)\\s+)?((?:\\S+(?:\\s+\\S+)*?))(?:\\s*(?:TO|=)\\s*|\\s+)(?:(\\w+\s*\\([^)]*\\))|((?:'(?:''|[^'])*'|-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?|t|true|f|false|on|off|default|\\S+)))\\s*;?";
 
 #ifdef DEBUG
 VALGRIND_DISABLE_ERROR_REPORTING;
@@ -248,6 +84,10 @@ VALGRIND_DISABLE_ERROR_REPORTING;
 		cout << pattern << endl;
 	}
 #endif
+	parse1v2_opt2 = new re2::RE2::Options(RE2::Quiet);
+	parse1v2_opt2->set_case_sensitive(false);
+	parse1v2_opt2->set_longest_match(false);
+
 	parse1v2_pattern = pattern;
 	parse1v2_re = new re2::RE2(parse1v2_pattern, *parse1v2_opt2);
 	parse1v2_init = true;
@@ -271,43 +111,34 @@ std::map<std::string,std::vector<std::string>> PgSQL_Set_Stmt_Parser::parse1v2()
 VALGRIND_ENABLE_ERROR_REPORTING;
 #endif // DEBUG
 	std::string var;
-	std::string value1, value2, value3, value4, value5;
+	std::string scope, param_name, param_val, param_val_func;
 	re2::StringPiece input(query);
-	while (re2::RE2::Consume(&input, *parse1v2_re, &value1, &value2, &value3, &value4, &value5)) {
+	while (re2::RE2::Consume(&input, *parse1v2_re, &scope, &param_name, &param_val_func, &param_val)) {
 		// FIXME: verify if we reached end of query. Did we parse everything?
 		std::vector<std::string> op;
 #ifdef DEBUG
-		proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "SET parsing: v1='%s' , v2='%s' , v3='%s' , v4='%s' , v5='%s'\n", value1.c_str(), value2.c_str(), value3.c_str(), value4.c_str(), value5.c_str());
+		proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "SET parsing: scope='%s' , parameter name='%s' , parameter value='%s' parameter_value_func='%s'\n", scope.c_str(), param_name.c_str(), param_val.c_str(), param_val_func.c_str());
 #endif // DEBUG
 		std::string key;
-		if (value1 != "") {
-			// NAMES
-			key = value1;
-			remove_quotes(value2);
-			op.push_back(value2);
-			if (value3 != "") {
-				remove_quotes(value3);
-				op.push_back(value3);
-			}
-		} else if (value4 != "") {
-			// VARIABLE
-			remove_quotes(value4);
-			if (strcasecmp("transaction_isolation", value4.c_str()) == 0) {
-				value4 = "tx_isolation";
-			} else if (strcasecmp("transaction_read_only", value4.c_str()) == 0) {
-				value4 = "tx_read_only";
-			}
-			size_t pos = value5.find_last_not_of(" \n\r\t,");
-			if (pos != value5.npos) {
-				value5.erase(pos+1);
-			}
-			key = value4;
-			if (value5 == "''" || value5 == "\"\"") {
-				op.push_back("");
-			} else {
-				remove_quotes(value5);
-				op.push_back(value5);
-			}
+
+		if (param_val_func.empty() == false) return {};
+
+		if (param_name.empty() || param_val.empty()) {
+			continue;
+		}
+		
+		key = param_name;
+		remove_quotes(key);
+		size_t pos = param_val.find_last_not_of(" \n\r\t,");
+		if (pos != param_val.npos) {
+			param_val.erase(pos+1);
+		}
+
+		if (param_val == "''" || param_val == "\"\"") {
+			op.push_back("");
+		} else {
+			remove_quotes(param_val);
+			op.push_back(param_val);
 		}
 
 		std::transform(key.begin(), key.end(), key.begin(), ::tolower);
@@ -321,7 +152,6 @@ VALGRIND_ENABLE_ERROR_REPORTING;
 #endif
 		result = {};
 	}
-	//delete opt2;
 	return result;
 }
 
