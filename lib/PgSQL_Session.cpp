@@ -82,6 +82,7 @@ static const std::set<std::string> pgsql_variables_boolean = {
 	"standard_conforming_strings",
 	"enable_bitmapscan",
 	"enable_indexscan",
+	"enable_nestloop",
 	"enable_seqscan",
 	"enable_sort",
 	"escape_string_warning",
