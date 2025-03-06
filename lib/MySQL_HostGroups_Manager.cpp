@@ -4095,6 +4095,25 @@ void MySQL_HostGroups_Manager::set_server_current_latency_us(char *hostname, int
 	wrunlock();
 }
 
+void MySQL_HostGroups_Manager::set_ReadySet_status(char *hostname, int port, enum MySerStatus status) {
+	wrlock();
+	MySrvC *mysrvc=NULL;
+	for (unsigned int i=0; i<MyHostGroups->len; i++) {
+	MyHGC *myhgc=(MyHGC *)MyHostGroups->index(i);
+		unsigned int j;
+		unsigned int l=myhgc->mysrvs->cnt();
+		if (l) {
+			for (j=0; j<l; j++) {
+				mysrvc=myhgc->mysrvs->idx(j);
+				if (mysrvc->port==port && strcmp(mysrvc->address,hostname)==0) {
+					mysrvc->set_status(status);
+				}
+			}
+		}
+	}
+	wrunlock();
+}
+
 void MySQL_HostGroups_Manager::p_update_metrics() {
 	p_update_counter(status.p_counter_array[p_hg_counter::servers_table_version], status.servers_table_version);
 	// Update *server_connections* related metrics
