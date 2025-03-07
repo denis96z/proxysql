@@ -23,7 +23,7 @@ using json = nlohmann::json;
 #include "StatCounters.h"
 #include "MySQL_PreparedStatement.h"
 #include "PgSQL_Logger.hpp"
-
+#include "PgSQL_Variables_Validator.h"
 #include <fcntl.h>
 
 using std::vector;
@@ -1290,7 +1290,7 @@ char* PgSQL_Threads_Handler::get_variable_string(char* name) {
 	}
 	if (!strncmp(name, "default_", 8)) {
 		for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-			if (IS_PGTRACKED_VAR_OPTION_SET_GLOBAL_VARIABLE(pgsql_tracked_variables[i]) == false)
+			if (i == PGSQL_NAME_LAST_LOW_WM) 
 				continue;
 			char buf[128];
 			sprintf(buf, "default_%s", pgsql_tracked_variables[i].internal_variable_name);
@@ -1423,12 +1423,12 @@ char* PgSQL_Threads_Handler::get_variable(char* name) {	// this is the public fu
 	if (strlen(name) > 8) {
 		if (strncmp(name, "default_", 8) == 0) {
 			for (unsigned int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-				if (IS_PGTRACKED_VAR_OPTION_SET_GLOBAL_VARIABLE(pgsql_tracked_variables[i])) {
-					size_t var_len = strlen(pgsql_tracked_variables[i].internal_variable_name);
-					if (strlen(name) == (var_len + 8)) {
-						if (!strncmp(name + 8, pgsql_tracked_variables[i].internal_variable_name, var_len)) {
-							return strdup(variables.default_variables[i]);
-						}
+				if (i == PGSQL_NAME_LAST_LOW_WM)
+					continue;
+				size_t var_len = strlen(pgsql_tracked_variables[i].internal_variable_name);
+				if (strlen(name) == (var_len + 8)) {
+					if (!strncmp(name + 8, pgsql_tracked_variables[i].internal_variable_name, var_len)) {
+						return strdup(variables.default_variables[i]);
 					}
 				}
 			}
@@ -1807,21 +1807,22 @@ bool PgSQL_Threads_Handler::set_variable(char* name, const char* value) {	// thi
 			if (i == PGSQL_NAME_LAST_LOW_WM)
 				continue;
 
-			if (IS_PGTRACKED_VAR_OPTION_SET_GLOBAL_VARIABLE(pgsql_tracked_variables[i]) == false)
-				continue;
 			char buf[128];
 			sprintf(buf, "default_%s", pgsql_tracked_variables[i].internal_variable_name);
 			if (!strcmp(name, buf)) {
 
-				if (i == PGSQL_DATESTYLE) {
-					// Ensure a complete DateStyle value is provided by validating both format and order.
-					PgSQL_DateStyle_t datestyle = PgSQL_DateStyle_Util::parse_datestyle(value);
-					if (datestyle.format == DATESTYLE_FORMAT_NONE || datestyle.order == DATESTYLE_ORDER_NONE) {
-						proxy_error("Invalid DateStyle value. Please provide both format and order (e.g., 'ISO, DMY'). %s\n", value);
-						return false;
+				if (pgsql_tracked_variables[i].validator && pgsql_tracked_variables[i].validator->validate && 
+					(*pgsql_tracked_variables[i].validator->validate)(
+						value, &pgsql_tracked_variables[i].validator->params, nullptr, nullptr) == false
+					) {
+					if (i == PGSQL_DATESTYLE) {
+						proxy_error("Invalid \"DateStyle\" value. Please provide both format and order (e.g., 'ISO, DMY'). %s\n", value);
+					} else {
+						proxy_error("Invalid \"%s\" value. %s\n", pgsql_tracked_variables[i].set_variable_name, value);
 					}
+					return false;
 				}
-
+		
 				if (variables.default_variables[i]) free(variables.default_variables[i]);
 				variables.default_variables[i] = NULL;
 				if (vallen) {
@@ -2244,18 +2245,19 @@ char** PgSQL_Threads_Handler::get_variables_list() {
 	unsigned int i;
 	size_t ltv = 0;
 	for (i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-		if (IS_PGTRACKED_VAR_OPTION_SET_GLOBAL_VARIABLE(pgsql_tracked_variables[i]))
-			ltv++;
+		if (i == PGSQL_NAME_LAST_LOW_WM)
+			continue;
+		ltv++;
 	}
 	char** ret = (char**)malloc(sizeof(char*) * (l + ltv)); // not adding + 1 because pgsql_thread_variables_names is already NULL terminated
 	size_t fv = 0;
 	for (i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-		if (IS_PGTRACKED_VAR_OPTION_SET_GLOBAL_VARIABLE(pgsql_tracked_variables[i])) {
-			char* m = (char*)malloc(strlen(pgsql_tracked_variables[i].internal_variable_name) + 1 + strlen((char*)"default_"));
-			sprintf(m, "default_%s", pgsql_tracked_variables[i].internal_variable_name);
-			ret[fv] = m;
-			fv++;
-		}
+		if (i == PGSQL_NAME_LAST_LOW_WM)
+			continue;
+		char* m = (char*)malloc(strlen(pgsql_tracked_variables[i].internal_variable_name) + 1 + strlen((char*)"default_"));
+		sprintf(m, "default_%s", pgsql_tracked_variables[i].internal_variable_name);
+		ret[fv] = m;
+		fv++;
 	}
 	// this is an extra check.
 	assert(fv == ltv);
@@ -2272,12 +2274,12 @@ bool PgSQL_Threads_Handler::has_variable(const char* name) {
 	if (strlen(name) > 8) {
 		if (strncmp(name, "default_", 8) == 0) {
 			for (unsigned int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-				if (IS_PGTRACKED_VAR_OPTION_SET_GLOBAL_VARIABLE(pgsql_tracked_variables[i])) {
-					size_t var_len = strlen(pgsql_tracked_variables[i].internal_variable_name);
-					if (strlen(name) == (var_len + 8)) {
-						if (!strncmp(name + 8, pgsql_tracked_variables[i].internal_variable_name, var_len)) {
-							return true;
-						}
+				if (i == PGSQL_NAME_LAST_LOW_WM)
+					continue;
+				size_t var_len = strlen(pgsql_tracked_variables[i].internal_variable_name);
+				if (strlen(name) == (var_len + 8)) {
+					if (!strncmp(name + 8, pgsql_tracked_variables[i].internal_variable_name, var_len)) {
+						return true;
 					}
 				}
 			}
@@ -3905,15 +3907,15 @@ void PgSQL_Thread::refresh_variables() {
 	*/
 	
 	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
+		if (i == PGSQL_NAME_LAST_LOW_WM)
+			continue;
 		if (pgsql_thread___default_variables[i]) {
 			free(pgsql_thread___default_variables[i]);
 			pgsql_thread___default_variables[i] = NULL;
 		}
 		char buf[128];
-		if (IS_PGTRACKED_VAR_OPTION_SET_GLOBAL_VARIABLE(pgsql_tracked_variables[i])) {
-			sprintf(buf, "default_%s", pgsql_tracked_variables[i].internal_variable_name);
-			pgsql_thread___default_variables[i] = GloPTH->get_variable_string(buf);
-		}
+		sprintf(buf, "default_%s", pgsql_tracked_variables[i].internal_variable_name);
+		pgsql_thread___default_variables[i] = GloPTH->get_variable_string(buf);
 	}
 
 	if (pgsql_thread___init_connect) free(pgsql_thread___init_connect);

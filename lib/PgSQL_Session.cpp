@@ -21,9 +21,10 @@ using json = nlohmann::json;
 #include "MySQL_LDAP_Authentication.hpp"
 #include "MySQL_Protocol.h"
 #include "SQLite3_Server.h"
-#include "MySQL_Variables.h"
+#include "PgSQL_Variables.h"
 #include "ProxySQL_Cluster.hpp"
 #include "PgSQL_Query_Cache.h"
+#include "PgSQL_Variables_Validator.h"
 
 #include "libinjection.h"
 #include "libinjection_sqli.h"
@@ -4314,11 +4315,34 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 								value1 = get_default_session_variable((enum pgsql_variable_name)idx);
 							}
 
-							if (idx == PGSQL_DATESTYLE) {
-								assert(current_datestyle.format != DATESTYLE_FORMAT_NONE);
-								assert(current_datestyle.order != DATESTYLE_ORDER_NONE);
+							char* transformed_value = nullptr;
+							if (pgsql_tracked_variables[idx].validator && pgsql_tracked_variables[idx].validator->validate &&
+								(
+									*pgsql_tracked_variables[idx].validator->validate)(
+									value1.c_str(), &pgsql_tracked_variables[idx].validator->params, this, &transformed_value) == false
+								) {
+								char* m = NULL;
+								char* errmsg = NULL;
+								proxy_error("invalid value for parameter \"%s\": \"%s\"\n", pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
+								m = (char*)"invalid value for parameter \"%s\": \"%s\"";
+								errmsg = (char*)malloc(value1.length() + strlen(pgsql_tracked_variables[idx].set_variable_name) +  strlen(m));
+								sprintf(errmsg, m, pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
 
-								// PostgreSQL strangely accepts an empty value for datestyle, but it does not alter previously set vaclue.
+								client_myds->DSS = STATE_QUERY_SENT_NET;
+								client_myds->myprot.generate_error_packet(true, true, errmsg,
+									PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, false, true);
+								client_myds->DSS = STATE_SLEEP;
+								status = WAITING_CLIENT_DATA;
+								free(errmsg);
+								return true;
+							}
+
+							if (transformed_value) {
+								value1 = transformed_value;
+								free(transformed_value);
+							}
+
+							if (idx == PGSQL_DATESTYLE) {
 								if (value1.empty()) {
 									client_myds->DSS = STATE_QUERY_SENT_NET;
 									unsigned int nTrx = NumActiveTransactions();
@@ -4328,29 +4352,6 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 									l_free(pkt->size, pkt->ptr);
 									return true;
 								}
-
-								// Convert DateStyle to a string. Any missing parts will be filled using the current DateStyle value.
-								// For example:
-								// If current DateStyle is 'ISO, MDY' and the user sets 'DMY' the resulting DateStyle will be 'ISO, DMY'
-								const std::string& value_tmp = PgSQL_DateStyle_Util::datestyle_to_string(value1, current_datestyle);
-								// if something goes wrong, the value will be empty
-								if (value_tmp.empty()) {
-									char* m = NULL;
-									char* errmsg = NULL;
-									proxy_error("invalid value for parameter \"DateStyle\": \"%s\"\n", value1.c_str());
-									m = (char*)"invalid value for parameter \"DateStyle\": \"%s\"";
-									errmsg = (char*)malloc(value1.length() + strlen(m));
-									sprintf(errmsg, m, value1.c_str());
-
-									client_myds->DSS = STATE_QUERY_SENT_NET;
-									client_myds->myprot.generate_error_packet(true, true, errmsg,
-										PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, false, true);
-									client_myds->DSS = STATE_SLEEP;
-									status = WAITING_CLIENT_DATA;
-									free(errmsg);
-									return true;
-								}
-								value1 = value_tmp;
 							} 
 								
 							proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", var.c_str(), value1.c_str());
@@ -4387,6 +4388,34 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 							if ((value1.size() == sizeof("DEFAULT") - 1) && strncasecmp(value1.c_str(), (char*)"DEFAULT", sizeof("DEFAULT") - 1) == 0) {
 								value1 = get_default_session_variable((enum pgsql_variable_name)idx);
 							}
+
+							char* transformed_value = nullptr;
+							if (pgsql_tracked_variables[idx].validator && pgsql_tracked_variables[idx].validator->validate &&
+								(
+									*pgsql_tracked_variables[idx].validator->validate)(
+										value1.c_str(), &pgsql_tracked_variables[idx].validator->params, this, &transformed_value) == false
+								) {
+								char* m = NULL;
+								char* errmsg = NULL;
+								proxy_error("invalid value for parameter \"%s\": \"%s\"\n", pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
+								m = (char*)"invalid value for parameter \"%s\": \"%s\"";
+								errmsg = (char*)malloc(value1.length() + strlen(pgsql_tracked_variables[idx].set_variable_name) + strlen(m));
+								sprintf(errmsg, m, pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
+
+								client_myds->DSS = STATE_QUERY_SENT_NET;
+								client_myds->myprot.generate_error_packet(true, true, errmsg,
+									PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, false, true);
+								client_myds->DSS = STATE_SLEEP;
+								status = WAITING_CLIENT_DATA;
+								free(errmsg);
+								return true;
+							}
+
+							if (transformed_value) {
+								value1 = transformed_value;
+								free(transformed_value);
+							}
+
 							if (pgsql_variables.parse_variable_boolean(this, idx, value1, lock_hostgroup, &send_param_status) == false) {
 								return false;
 							}
@@ -4406,6 +4435,35 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 							if ((value1.size() == sizeof("DEFAULT") - 1) && strncasecmp(value1.c_str(), (char*)"DEFAULT", sizeof("DEFAULT") - 1) == 0) {
 								value1 = get_default_session_variable((enum pgsql_variable_name)idx);
 							}
+
+							char* transformed_value = nullptr;
+							if (pgsql_tracked_variables[idx].validator && pgsql_tracked_variables[idx].validator->validate &&
+								(
+									*pgsql_tracked_variables[idx].validator->validate)(
+										value1.c_str(), &pgsql_tracked_variables[idx].validator->params, this, &transformed_value
+										) == false
+								) {
+								char* m = NULL;
+								char* errmsg = NULL;
+								proxy_error("invalid value for parameter \"%s\": \"%s\"\n", pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
+								m = (char*)"invalid value for parameter \"%s\": \"%s\"";
+								errmsg = (char*)malloc(value1.length() + strlen(pgsql_tracked_variables[idx].set_variable_name) + strlen(m));
+								sprintf(errmsg, m, pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
+
+								client_myds->DSS = STATE_QUERY_SENT_NET;
+								client_myds->myprot.generate_error_packet(true, true, errmsg,
+									PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, false, true);
+								client_myds->DSS = STATE_SLEEP;
+								status = WAITING_CLIENT_DATA;
+								free(errmsg);
+								return true;
+							}
+
+							if (transformed_value) {
+								value1 = transformed_value;
+								free(transformed_value);
+							}
+
 							if (pgsql_variables.parse_variable_number(this, idx, value1, lock_hostgroup, &send_param_status) == false) {
 								return false;
 							}
@@ -6218,25 +6276,25 @@ PgSQL_DateStyle_t PgSQL_DateStyle_Util::parse_datestyle(std::string_view input) 
 
     for (std::string_view token : split_tokens) {
         const char* tok = token.data();
-        if (strncasecmp(tok, "ISO", sizeof("ISO") - 1) == 0) {
+        if (strcasecmp(tok, "ISO") == 0) {
             if (have_style && newDateStyle != DATESTYLE_FORMAT_ISO)
                 ok = false;     /* conflicting styles */
             newDateStyle = DATESTYLE_FORMAT_ISO;
             have_style = true;
         }
-        else if (strncasecmp(tok, "SQL", sizeof("SQL") - 1) == 0) {
+        else if (strcasecmp(tok, "SQL") == 0) {
             if (have_style && newDateStyle != DATESTYLE_FORMAT_SQL)
                 ok = false;     /* conflicting styles */
             newDateStyle = DATESTYLE_FORMAT_SQL;
             have_style = true;
         }
-        else if (strncasecmp(tok, "POSTGRES", sizeof("POSTGRES") - 1) == 0) {
+        else if (strcasecmp(tok, "POSTGRES") == 0) {
             if (have_style && newDateStyle != DATESTYLE_FORMAT_POSTGRES)
                 ok = false;     /* conflicting styles */
             newDateStyle = DATESTYLE_FORMAT_POSTGRES;
             have_style = true;
         }
-        else if (strncasecmp(tok, "GERMAN", sizeof("GERMAN") - 1) == 0) {
+        else if (strcasecmp(tok, "GERMAN") == 0) {
             if (have_style && newDateStyle != DATESTYLE_FORMAT_GERMAN)
                 ok = false;     /* conflicting styles */
             newDateStyle = DATESTYLE_FORMAT_GERMAN;
@@ -6245,22 +6303,22 @@ PgSQL_DateStyle_t PgSQL_DateStyle_Util::parse_datestyle(std::string_view input) 
             if (!have_order)
                 newDateOrder = DATESTYLE_ORDER_DMY;
         }
-        else if (strncasecmp(tok, "YMD", sizeof("YMD") - 1) == 0) {
+        else if (strcasecmp(tok, "YMD") == 0) {
             if (have_order && newDateOrder != DATESTYLE_ORDER_YMD)
                 ok = false;     /* conflicting orders */
             newDateOrder = DATESTYLE_ORDER_YMD;
             have_order = true;
         }
-        else if (strncasecmp(tok, "DMY", sizeof("DMY") - 1) == 0 ||
-            strncasecmp(tok, "EURO", sizeof("EURO") - 1) == 0) {
+        else if (strcasecmp(tok, "DMY") == 0 ||
+			strcasecmp(tok, "EURO") == 0) {
             if (have_order && newDateOrder != DATESTYLE_ORDER_DMY)
                 ok = false;     /* conflicting orders */
             newDateOrder = DATESTYLE_ORDER_DMY;
             have_order = true;
         }
-        else if (strncasecmp(tok, "MDY", sizeof("MDY") - 1) == 0 ||
-            strncasecmp(tok, "US", sizeof("US") - 1) == 0 ||
-            strncasecmp(tok, "NONEURO", sizeof("NONEURO") - 1) == 0) {
+        else if (strcasecmp(tok, "MDY") == 0 ||
+			strcasecmp(tok, "US") == 0 ||
+			strcasecmp(tok, "NONEURO") == 0) {
             if (have_order && newDateOrder != DATESTYLE_ORDER_MDY)
                 ok = false;     /* conflicting orders */
             newDateOrder = DATESTYLE_ORDER_MDY;

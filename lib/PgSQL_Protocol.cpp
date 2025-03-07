@@ -1102,7 +1102,6 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 		pgsql_variables.client_set_value(sess, PGSQL_TIMEZONE, timezone);
 		sess->set_default_session_variable(PGSQL_TIMEZONE, timezone);
 
-		// get intervalstyle from connection parameters
 		const char* intervalstyle = pgsql_thread___default_variables[PGSQL_INTERVALSTYLE];
 		if (intervalstyle) {
 			pgsql_variables.client_set_value(sess, PGSQL_INTERVALSTYLE, intervalstyle);

@@ -10,6 +10,7 @@
 #include "Base_Session.h"
 #include "cpp.h"
 #include "PgSQL_Variables.h"
+#include "PgSQL_Variables_Validator.h"
 #include "Base_Session.h"
 
 
