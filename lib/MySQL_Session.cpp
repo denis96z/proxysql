@@ -4048,7 +4048,7 @@ __get_pkts_from_client:
 									const uint32_t recv_query_sz { pkt.size - 5 };
 
 									proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Processing received query"
-										"   session=%p session_type=%d schemaname=%s query=%.*s\n",
+										"   session=%p session_type=%d schemaname=\"%s\" query=\"%.*s\"\n",
 										this, session_type, schemaname ? schemaname : "", recv_query_sz, recv_query
 									);
 								}
