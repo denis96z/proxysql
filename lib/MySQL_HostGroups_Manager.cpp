@@ -4106,7 +4106,23 @@ void MySQL_HostGroups_Manager::set_ReadySet_status(char *hostname, int port, enu
 			for (j=0; j<l; j++) {
 				mysrvc=myhgc->mysrvs->idx(j);
 				if (mysrvc->port==port && strcmp(mysrvc->address,hostname)==0) {
-					mysrvc->set_status(status);
+					enum MySerStatus prev_status = mysrvc->get_status();
+					if (prev_status != status) {
+						char *src_status = "?"; // this shouldn't display
+						char *dst_status = "?"; // this shouldn't display
+						if (prev_status == MYSQL_SERVER_STATUS_ONLINE) { src_status = "ONLINE"; }
+						else if (prev_status == MYSQL_SERVER_STATUS_OFFLINE_SOFT) { src_status = "OFFLINE_SOFT"; }
+						else if (prev_status == MYSQL_SERVER_STATUS_SHUNNED) { src_status = "SHUNNED"; };
+						if (status == MYSQL_SERVER_STATUS_ONLINE) { src_status = "ONLINE"; }
+						else if (status == MYSQL_SERVER_STATUS_OFFLINE_SOFT) { dst_status = "OFFLINE_SOFT"; }
+						else if (status == MYSQL_SERVER_STATUS_SHUNNED) { dst_status = "SHUNNED"; };
+						if (status == MYSQL_SERVER_STATUS_ONLINE) {
+							proxy_info("Changing ReadySet status for server %s:%d from HG %u from %s to %s", hostname, port, myhgc->hid, src_status, dst_status);
+						} else {
+							proxy_warning("Changing ReadySet status for server %s:%d from HG %u from %s to %s", hostname, port, myhgc->hid, src_status, dst_status);
+						}
+						mysrvc->set_status(status);
+					}
 				}
 			}
 		}
