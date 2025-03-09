@@ -146,7 +146,7 @@ static inline int write_encoded_length(unsigned char *p, uint64_t val, uint8_t l
 	return len;
 }
 
-MySQL_Event::MySQL_Event (log_event_type _et, uint32_t _thread_id, char * _username, char * _schemaname , uint64_t _start_time , uint64_t _end_time , uint64_t _query_digest, char *_client, size_t _client_len) {
+MySQL_Event::MySQL_Event (log_event_type _et, uint32_t _thread_id, char * _username, char * _schemaname , uint64_t _start_time , uint64_t _end_time , uint64_t _query_digest, char *_client, size_t _client_len, MySQL_Session *sess_ptr) {
 	thread_id=_thread_id;
 	username=_username;
 	schemaname=_schemaname;
@@ -167,6 +167,7 @@ MySQL_Event::MySQL_Event (log_event_type _et, uint32_t _thread_id, char * _usern
 	rows_sent=0;
 	client_stmt_id=0;
 	gtid = NULL;
+	session = sess_ptr;
 	errmsg = nullptr;
 	myerrno = 0;
 	free_on_delete = false; // by default, this is false. This because pointers do not belong to this object
@@ -647,6 +648,11 @@ uint64_t MySQL_Event::write_query_format_2_json(std::fstream *f) {
 	if (et == PROXYSQL_COM_STMT_PREPARE || et == PROXYSQL_COM_STMT_EXECUTE) {
 		j["client_stmt_id"] = client_stmt_id;
 	}
+	if (et == PROXYSQL_COM_STMT_EXECUTE) {
+		if (session != nullptr) {
+			extractStmtExecuteMetadataToJson(j);
+		}
+	}
 
 	// for performance reason, we are moving the write lock
 	// right before the write to disk
@@ -657,6 +663,14 @@ uint64_t MySQL_Event::write_query_format_2_json(std::fstream *f) {
 	return total_bytes; // always 0
 }
 
+void MySQL_Event::extractStmtExecuteMetadataToJson(json &j) {
+	if (session == nullptr) {
+		return;
+	}
+	if (et != PROXYSQL_COM_STMT_EXECUTE) {
+		return;
+	}
+}
 extern MySQL_Query_Processor* GloMyQPro;
 
 //MySQL_Logger::MySQL_Logger() : metrics{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} {
@@ -940,7 +954,7 @@ void MySQL_Logger::log_request(MySQL_Session *sess, MySQL_Data_Stream *myds, con
 		sess->CurrentQuery.start_time + curtime_real - curtime_mono,
 		sess->CurrentQuery.end_time + curtime_real - curtime_mono,
 		query_digest,
-		ca, cl
+		ca, cl, sess
 	);
 	char *c = NULL;
 	int ql = 0;
