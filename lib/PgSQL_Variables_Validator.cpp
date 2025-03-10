@@ -246,7 +246,7 @@ const pgsql_variable_validator pgsql_variable_validator_intervalstyle = {
 	.type = VARIABLE_TYPE_STRING,
 	.validate = &pgsql_variable_validate_string,
 	.params = {
-		.string_allowed = (const char* []){ "postgres", "sql_standard", "sql_iso", "sql_invariant", nullptr } 
+		.string_allowed = (const char* []){ "postgres", "sql_standard", "postgres_verbose", "iso_8601", nullptr } 
 	}
 };
 
