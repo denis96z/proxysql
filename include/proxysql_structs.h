@@ -258,6 +258,7 @@ enum pgsql_variable_name {
 	PGSQL_BYTEA_OUTPUT,
 	PGSQL_CLIENT_MIN_MESSAGES,
 	PGSQL_ENABLE_BITMAPSCAN,
+	PGSQL_ENABLE_HASHJOIN,
 	PGSQL_ENABLE_INDEXSCAN,
 	PGSQL_ENABLE_NESTLOOP,
 	PGSQL_ENABLE_SEQSCAN,
@@ -323,10 +324,10 @@ struct mysql_variable_st {
 enum pgsql_tracked_variables_options {
 	PGTRACKED_VAR_OPT_QUOTE				= 0x01, // if the variable needs to be quoted
 	PGTRACKED_VAR_OPT_SET_TRANSACTION	= 0x02, // if related to SET TRANSACTION statement . if false , it will be execute "SET varname = varvalue" . If true, "SET varname varvalue"
-	PGTRACKED_VAR_OPT_NUMBER			= 0x04, // if true, the variable is a number. Special cases should be checked
-	PGTRACKED_VAR_OPT_BOOL				= 0x08, // if true, the variable is a boolean. Special cases should be checked
-	PGTRACKED_VAR_OPT_PARAM_STATUS		= 0x10,  // send parameter status if set
-	PGTRACKED_VAR_OPT_RESERVED			= 0x20  // Unused
+	PGTRACKED_VAR_OPT_PARAM_STATUS		= 0x04, // send parameter status if set
+	PGTRACKED_VAR_OPT_RESERVED_1		= 0x08, // Unused
+	PGTRACKED_VAR_OPT_RESERVED_2		= 0x10, // Unused
+	PGTRACKED_VAR_OPT_RESERVED_3		= 0x20  // Unused
 };
 
 struct pgsql_variable_validator;
@@ -349,8 +350,6 @@ struct pgsql_variable_st {
 
 #define IS_PGTRACKED_VAR_OPTION_SET_QUOTE(opt)			 IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_QUOTE)
 #define IS_PGTRACKED_VAR_OPTION_SET_SET_TRANSACTION(opt) IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_SET_TRANSACTION)
-#define IS_PGTRACKED_VAR_OPTION_SET_NUMBER(opt)			 IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_NUMBER)
-#define IS_PGTRACKED_VAR_OPTION_SET_BOOL(opt)			 IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_BOOL)
 #define IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(opt)	 IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_PARAM_STATUS)
 
 inline bool variable_name_exists(const pgsql_variable_st& var, const char* variable_name) {
@@ -1769,6 +1768,18 @@ mysql_variable_st mysql_tracked_variables[] {
 	*/
 };
 
+#else
+extern mysql_variable_st mysql_tracked_variables[];
+extern var_track_err_st perm_track_errs[];
+#endif // PROXYSQL_EXTERN
+#endif // MYSQL_TRACKED_VARIABLES
+
+#ifndef PGSQL_TRACKED_VARIABLES
+#define PGSQL_TRACKED_VARIABLES
+#ifdef PROXYSQL_EXTERN
+
+#ifndef EXCLUDE_TRACKING_VARAIABLES
+
 extern const pgsql_variable_validator pgsql_variable_validator_bool;
 extern const pgsql_variable_validator pgsql_variable_validator_intervalstyle;
 extern const pgsql_variable_validator pgsql_variable_validator_synchronous_commit;
@@ -1779,30 +1790,30 @@ extern const pgsql_variable_validator pgsql_variable_validator_bytea_output;
 extern const pgsql_variable_validator pgsql_variable_validator_extra_float_digits;
 extern const pgsql_variable_validator pgsql_variable_validator_maintenance_work_mem;
 
-pgsql_variable_st pgsql_tracked_variables[] {
+pgsql_variable_st pgsql_tracked_variables[]{
 	{ PGSQL_CLIENT_ENCODING,       SETTING_CHARSET,	    "client_encoding", "client_encoding", "UTF8", (PGTRACKED_VAR_OPT_SET_TRANSACTION | PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), nullptr, { "names", nullptr } },
 	{ PGSQL_DATESTYLE,			   SETTING_VARIABLE,	"datestyle", "datestyle", "ISO, MDY" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_datestyle, nullptr },
-	{ PGSQL_INTERVALSTYLE,		   SETTING_VARIABLE,	"intervalstyle", "intervalstyle", "postgres" , (PGTRACKED_VAR_OPT_QUOTE  | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_intervalstyle, nullptr },
-	{ PGSQL_STANDARD_CONFORMING_STRINGS, SETTING_VARIABLE, "standard_conforming_strings", "standard_conforming_strings", "on", (PGTRACKED_VAR_OPT_BOOL | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_INTERVALSTYLE,		   SETTING_VARIABLE,	"intervalstyle", "intervalstyle", "postgres" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_intervalstyle, nullptr },
+	{ PGSQL_STANDARD_CONFORMING_STRINGS, SETTING_VARIABLE, "standard_conforming_strings", "standard_conforming_strings", "on", (PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_bool, nullptr },
 	{ PGSQL_TIMEZONE,			   SETTING_VARIABLE,	"timezone", "timezone", "GMT" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), nullptr, { "TIME ZONE", nullptr } },
 	{ PGSQL_NAME_LAST_LOW_WM,      session_status___NONE, "placeholder", "placeholder", "0" , 0, nullptr, nullptr },  // this is just a placeholder to separate the previous index from the next block
-	{ PGSQL_ALLOW_IN_PLACE_TABLESPACES,	   SETTING_VARIABLE,	"allow_in_place_tablespaces", "allow_in_place_tablespaces", "off", (PGTRACKED_VAR_OPT_BOOL), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ALLOW_IN_PLACE_TABLESPACES,	   SETTING_VARIABLE,	"allow_in_place_tablespaces", "allow_in_place_tablespaces", "off", (0), &pgsql_variable_validator_bool, nullptr },
 	{ PGSQL_BYTEA_OUTPUT,		   SETTING_VARIABLE,	"bytea_output", "bytea_output", "hex", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_bytea_output,  nullptr },
 	{ PGSQL_CLIENT_MIN_MESSAGES,   SETTING_VARIABLE,	"client_min_messages", "client_min_messages", "notice", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_client_min_messages,  nullptr },
-	{ PGSQL_ENABLE_BITMAPSCAN,	   SETTING_VARIABLE,	"enable_bitmapscan", "enable_bitmapscan", "on", (PGTRACKED_VAR_OPT_BOOL), &pgsql_variable_validator_bool, nullptr },
-	{ PGSQL_ENABLE_INDEXSCAN,	   SETTING_VARIABLE,	"enable_indexscan", "enable_indexscan", "on", (PGTRACKED_VAR_OPT_BOOL), &pgsql_variable_validator_bool, nullptr },
-	{ PGSQL_ENABLE_NESTLOOP,	   SETTING_VARIABLE,	"enable_nestloop", "enable_nestloop", "on", (PGTRACKED_VAR_OPT_BOOL), &pgsql_variable_validator_bool, nullptr },
-	{ PGSQL_ENABLE_SEQSCAN,		   SETTING_VARIABLE,	"enable_seqscan", "enable_seqscan", "on", (PGTRACKED_VAR_OPT_BOOL), &pgsql_variable_validator_bool, nullptr },
-	{ PGSQL_ENABLE_SORT,		   SETTING_VARIABLE,	"enable_sort", "enable_sort", "on", (PGTRACKED_VAR_OPT_BOOL), &pgsql_variable_validator_bool, nullptr },
-	{ PGSQL_ESCAPE_STRING_WARNING, SETTING_VARIABLE,    "escape_string_warning", "escape_string_warning", "on", (PGTRACKED_VAR_OPT_BOOL), &pgsql_variable_validator_bool, nullptr },
-	{ PGSQL_EXTRA_FLOAT_DIGITS,	   SETTING_VARIABLE,    "extra_float_digits", "extra_float_digits", "1", 0, &pgsql_variable_validator_extra_float_digits, nullptr },
-	{ PGSQL_MAINTENANCE_WORK_MEM,  SETTING_VARIABLE,    "maintenance_work_mem", "maintenance_work_mem", "64MB", (PGTRACKED_VAR_OPT_QUOTE ), &pgsql_variable_validator_maintenance_work_mem, nullptr },
+	{ PGSQL_ENABLE_BITMAPSCAN,	   SETTING_VARIABLE,	"enable_bitmapscan", "enable_bitmapscan", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ENABLE_HASHJOIN,	   SETTING_VARIABLE,	"enable_hashjoin", "enable_hashjoin", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ENABLE_INDEXSCAN,	   SETTING_VARIABLE,	"enable_indexscan", "enable_indexscan", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ENABLE_NESTLOOP,	   SETTING_VARIABLE,	"enable_nestloop", "enable_nestloop", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ENABLE_SEQSCAN,		   SETTING_VARIABLE,	"enable_seqscan", "enable_seqscan", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ENABLE_SORT,		   SETTING_VARIABLE,	"enable_sort", "enable_sort", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ESCAPE_STRING_WARNING, SETTING_VARIABLE,    "escape_string_warning", "escape_string_warning", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_EXTRA_FLOAT_DIGITS,	   SETTING_VARIABLE,    "extra_float_digits", "extra_float_digits", "1", (0), &pgsql_variable_validator_extra_float_digits, nullptr },
+	{ PGSQL_MAINTENANCE_WORK_MEM,  SETTING_VARIABLE,    "maintenance_work_mem", "maintenance_work_mem", "64MB", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_maintenance_work_mem, nullptr },
 	{ PGSQL_SYNCHRONOUS_COMMIT,	   SETTING_VARIABLE,	"synchronous_commit", "synchronous_commit", "on", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_synchronous_commit, nullptr},
 };
+#endif //EXCLUDE_TRACKING_VARAIABLES
 
 #else
-extern mysql_variable_st mysql_tracked_variables[];
-extern var_track_err_st perm_track_errs[];
 extern pgsql_variable_st pgsql_tracked_variables[];
 #endif // PROXYSQL_EXTERN
 #endif // PGSQL_TRACKED_VARIABLES

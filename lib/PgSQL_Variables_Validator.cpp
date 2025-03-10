@@ -27,7 +27,7 @@ bool pgsql_variable_validate_bool(const char* value, const params_t* params, PgS
         (strcasecmp(value, (char*)"false") == 0) ||
         (strcasecmp(value, (char*)"off") == 0)) {
         if (transformed_value)
-            *transformed_value = strdup("on");
+            *transformed_value = strdup("off");
         result = true;
     } else if (
         (strcasecmp(value, (char*)"1") == 0) ||
@@ -35,7 +35,7 @@ bool pgsql_variable_validate_bool(const char* value, const params_t* params, PgS
         (strcasecmp(value, (char*)"true") == 0) ||
         (strcasecmp(value, (char*)"on") == 0)) {
         if (transformed_value)
-            *transformed_value = strdup("off");
+            *transformed_value = strdup("on");
         result = true;
     }
     return result;
@@ -114,6 +114,17 @@ bool pgsql_variable_validate_datestyle(const char* value, const params_t* params
 		PgSQL_DateStyle_t datestyle = PgSQL_DateStyle_Util::parse_datestyle(value);
 		if (datestyle.format == DATESTYLE_FORMAT_NONE || datestyle.order == DATESTYLE_ORDER_NONE) {
 			return false;
+		}
+
+		if (transformed_value) {
+			PgSQL_DateStyle_t current_datestyle = { .format = DATESTYLE_FORMAT_NONE, .order = DATESTYLE_ORDER_NONE };
+			const std::string& value_tmp = PgSQL_DateStyle_Util::datestyle_to_string(value, current_datestyle);
+			// if something goes wrong, the value will be empty
+			if (value_tmp.empty()) {
+				return false;
+			}
+
+			*transformed_value = strdup(value_tmp.c_str());
 		}
 		return true;
 	}
@@ -209,7 +220,7 @@ bool pgsql_variable_validate_maintenance_work_mem(const char* value, const param
 	int written = snprintf(output, sizeof(output), has_unit ? "%lld%cb" : "%lldkb",
 		num, unit);
 
-	if (written < 0 || written >= sizeof(output)) return false;
+	if (written < 0 || written >= (int)sizeof(output)) return false;
 
 	if (transformed_value)
 		*transformed_value = strdup(output);

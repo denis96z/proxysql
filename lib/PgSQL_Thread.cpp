@@ -1810,10 +1810,10 @@ bool PgSQL_Threads_Handler::set_variable(char* name, const char* value) {	// thi
 			char buf[128];
 			sprintf(buf, "default_%s", pgsql_tracked_variables[i].internal_variable_name);
 			if (!strcmp(name, buf)) {
-
+				char* transformed_value = nullptr;
 				if (pgsql_tracked_variables[i].validator && pgsql_tracked_variables[i].validator->validate && 
 					(*pgsql_tracked_variables[i].validator->validate)(
-						value, &pgsql_tracked_variables[i].validator->params, nullptr, nullptr) == false
+						value, &pgsql_tracked_variables[i].validator->params, nullptr, &transformed_value) == false
 					) {
 					if (i == PGSQL_DATESTYLE) {
 						proxy_error("Invalid \"DateStyle\" value. Please provide both format and order (e.g., 'ISO, DMY'). %s\n", value);
@@ -1822,15 +1822,21 @@ bool PgSQL_Threads_Handler::set_variable(char* name, const char* value) {	// thi
 					}
 					return false;
 				}
-		
+
 				if (variables.default_variables[i]) free(variables.default_variables[i]);
 				variables.default_variables[i] = NULL;
 				if (vallen) {
-					if (strcmp(value, "(null)"))
-						variables.default_variables[i] = strdup(value);
+					if (strcmp(value, "(null)")) {
+						variables.default_variables[i] = transformed_value ? transformed_value : strdup(value);
+						transformed_value = nullptr;
+					}
 				}
 				if (variables.default_variables[i] == NULL)
 					variables.default_variables[i] = strdup(pgsql_tracked_variables[i].default_value);
+
+				// just in case
+				if (transformed_value)
+					free(transformed_value);
 				return true;
 			}
 		}

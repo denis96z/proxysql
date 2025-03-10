@@ -62,6 +62,7 @@ using json = nlohmann::json;
 using std::function;
 using std::vector;
 
+/*
 static inline char is_digit(char c) {
 	if (c >= '0' && c <= '9')
 		return 1;
@@ -78,32 +79,30 @@ static inline char is_normal_char(char c) {
 		return 1;
 	return 0;
 }
+*/
 
-static const std::set<std::string> pgsql_variables_boolean = {
+static const std::array<std::string,5> pgsql_critical_variables = {
+	"datestyle",
+	"intervalstyle",
 	"standard_conforming_strings",
+	"timezone",
+	"time zone"
+};
+
+static const std::set<std::string> pgsql_other_variables = {
+	"allow_in_place_tablespaces",
+	"bytea_output",
+	"client_min_messages",
 	"enable_bitmapscan",
+	"enable_hashjoin",
 	"enable_indexscan",
 	"enable_nestloop",
 	"enable_seqscan",
 	"enable_sort",
 	"escape_string_warning",
-	"synchronous_commit"
-};
-
-static const std::set<std::string> pgsql_variables_numeric = {
-	
-};
-
-static const std::set<std::string> pgsql_variables_strings = {
-	"datestyle",
-	"intervalstyle",
-	"timezone",
-	"time zone",
-	"allow_in_place_tablespaces",
-	"bytea_output",
-	"client_min_messages",
+	"extra_float_digits",
 	"maintenance_work_mem",
-	"extra_float_digits"
+	"synchronous_commit"
 };
 
 #include "proxysql_find_charset.h"
@@ -4292,21 +4291,15 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 						return false;
 					}
 					auto values = std::begin(it->second);
-					if (pgsql_variables_strings.find(var) != pgsql_variables_strings.end()) {
+					if (std::find(pgsql_critical_variables.begin(), pgsql_critical_variables.end(), var) != pgsql_critical_variables.end() ||
+						pgsql_other_variables.find(var) != pgsql_other_variables.end()) {
 						std::string value1 = *values;
-						std::size_t found_at = value1.find("@");
-						if (found_at != std::string::npos) {
-							unable_to_parse_set_statement(lock_hostgroup);
-							return false;
-						}
+
 						int idx = PGSQL_NAME_LAST_HIGH_WM;
 						for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-							if (IS_PGTRACKED_VAR_OPTION_SET_NUMBER(pgsql_tracked_variables[i]) == false && 
-								IS_PGTRACKED_VAR_OPTION_SET_BOOL(pgsql_tracked_variables[i]) == false) {
-								if (variable_name_exists(pgsql_tracked_variables[i], var.c_str()) == true) {
-									idx = pgsql_tracked_variables[i].idx;
-									break;
-								}
+							if (variable_name_exists(pgsql_tracked_variables[i], var.c_str()) == true) {
+								idx = pgsql_tracked_variables[i].idx;
+								break;
 							}
 						}
 						if (idx != PGSQL_NAME_LAST_HIGH_WM) {
@@ -4371,101 +4364,6 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 								} else {
 									send_param_status = IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx]);
 								}
-							}
-						}
-					} else if (pgsql_variables_boolean.find(var) != pgsql_variables_boolean.end()) {
-						int idx = PGSQL_NAME_LAST_HIGH_WM;
-						for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-							if (IS_PGTRACKED_VAR_OPTION_SET_BOOL(pgsql_tracked_variables[i])) {
-								if (variable_name_exists(pgsql_tracked_variables[i], var.c_str()) == true) {
-									idx = pgsql_tracked_variables[i].idx;
-									break;
-								}
-							}
-						}
-						if (idx != PGSQL_NAME_LAST_HIGH_WM) {
-							std::string value1 = *values;
-							if ((value1.size() == sizeof("DEFAULT") - 1) && strncasecmp(value1.c_str(), (char*)"DEFAULT", sizeof("DEFAULT") - 1) == 0) {
-								value1 = get_default_session_variable((enum pgsql_variable_name)idx);
-							}
-
-							char* transformed_value = nullptr;
-							if (pgsql_tracked_variables[idx].validator && pgsql_tracked_variables[idx].validator->validate &&
-								(
-									*pgsql_tracked_variables[idx].validator->validate)(
-										value1.c_str(), &pgsql_tracked_variables[idx].validator->params, this, &transformed_value) == false
-								) {
-								char* m = NULL;
-								char* errmsg = NULL;
-								proxy_error("invalid value for parameter \"%s\": \"%s\"\n", pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
-								m = (char*)"invalid value for parameter \"%s\": \"%s\"";
-								errmsg = (char*)malloc(value1.length() + strlen(pgsql_tracked_variables[idx].set_variable_name) + strlen(m));
-								sprintf(errmsg, m, pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
-
-								client_myds->DSS = STATE_QUERY_SENT_NET;
-								client_myds->myprot.generate_error_packet(true, true, errmsg,
-									PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, false, true);
-								client_myds->DSS = STATE_SLEEP;
-								status = WAITING_CLIENT_DATA;
-								free(errmsg);
-								return true;
-							}
-
-							if (transformed_value) {
-								value1 = transformed_value;
-								free(transformed_value);
-							}
-
-							if (pgsql_variables.parse_variable_boolean(this, idx, value1, lock_hostgroup, &send_param_status) == false) {
-								return false;
-							}
-						}
-					} else if (pgsql_variables_numeric.find(var) != pgsql_variables_numeric.end()) {
-						int idx = PGSQL_NAME_LAST_HIGH_WM;
-						for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-							if (IS_PGTRACKED_VAR_OPTION_SET_NUMBER(pgsql_tracked_variables[i])) {
-								if (variable_name_exists(pgsql_tracked_variables[i], var.c_str()) == true) {
-									idx = pgsql_tracked_variables[i].idx;
-									break;
-								}
-							}
-						}
-						if (idx != PGSQL_NAME_LAST_HIGH_WM) {
-							std::string value1 = *values;
-							if ((value1.size() == sizeof("DEFAULT") - 1) && strncasecmp(value1.c_str(), (char*)"DEFAULT", sizeof("DEFAULT") - 1) == 0) {
-								value1 = get_default_session_variable((enum pgsql_variable_name)idx);
-							}
-
-							char* transformed_value = nullptr;
-							if (pgsql_tracked_variables[idx].validator && pgsql_tracked_variables[idx].validator->validate &&
-								(
-									*pgsql_tracked_variables[idx].validator->validate)(
-										value1.c_str(), &pgsql_tracked_variables[idx].validator->params, this, &transformed_value
-										) == false
-								) {
-								char* m = NULL;
-								char* errmsg = NULL;
-								proxy_error("invalid value for parameter \"%s\": \"%s\"\n", pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
-								m = (char*)"invalid value for parameter \"%s\": \"%s\"";
-								errmsg = (char*)malloc(value1.length() + strlen(pgsql_tracked_variables[idx].set_variable_name) + strlen(m));
-								sprintf(errmsg, m, pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
-
-								client_myds->DSS = STATE_QUERY_SENT_NET;
-								client_myds->myprot.generate_error_packet(true, true, errmsg,
-									PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, false, true);
-								client_myds->DSS = STATE_SLEEP;
-								status = WAITING_CLIENT_DATA;
-								free(errmsg);
-								return true;
-							}
-
-							if (transformed_value) {
-								value1 = transformed_value;
-								free(transformed_value);
-							}
-
-							if (pgsql_variables.parse_variable_number(this, idx, value1, lock_hostgroup, &send_param_status) == false) {
-								return false;
 							}
 						}
 					} /*else if (var == "time_zone") {
