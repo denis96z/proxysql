@@ -6224,6 +6224,12 @@ PgSQL_DateStyle_t PgSQL_DateStyle_Util::parse_datestyle(std::string_view input) 
         }
     }
 
+	// if the provided datestyle includes both style and order, ensure both values are valid.
+	if (split_tokens.size() == 2 && (have_style && have_order) == false) {
+		proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 5, "Invalid \"datestyle\" value. %s\n", input.data());
+		return { DATESTYLE_FORMAT_NONE, DATESTYLE_ORDER_NONE };
+	}
+
     if (!ok) {
         proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 5, "Conflicting \"datestyle\" value. %s\n", input.data());
         return { DATESTYLE_FORMAT_NONE, DATESTYLE_ORDER_NONE };
