@@ -273,7 +273,7 @@ std::vector<SetTestCase> test_cases = {
         {"SET maintenance_work_mem = '1GB'", true, "1GB"},
 		{"SET maintenance_work_mem = '1024kB'", true, "1MB"},
 		{"SET maintenance_work_mem = '1TB'", true, "1TB"},
-		//{"SET maintenance_work_mem = '1.5GB'", true, "1536MB"}, decimal values not yet supported
+		{"SET maintenance_work_mem = '1.5GB'", true, "1536MB"},
         // Invalid values
         {"SET maintenance_work_mem = '64XB'", false, ""},
         {"SET maintenance_work_mem = '-128MB'", false, ""},
