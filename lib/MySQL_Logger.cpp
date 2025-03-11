@@ -15,6 +15,9 @@ using json = nlohmann::json;
 #include <dirent.h>
 #include <libgen.h>
 
+#include <unordered_map>
+#include <string>
+
 #ifdef DEBUG
 #define DEB "_DEBUG"
 #else
@@ -46,6 +49,205 @@ using ml_gauge_tuple =
 
 using qc_counter_vector = std::vector<ml_counter_tuple>;
 using qc_gauge_vector = std::vector<ml_gauge_tuple>;
+
+
+#include <functional>
+
+using ValueConverter = std::function<void(const MYSQL_BIND*, unsigned long, std::string&)>;
+
+struct BufferTypeInfo {
+	std::string typeName;
+	ValueConverter converter; // Callback to convert the value.
+};
+
+
+// Helper lambda to convert binary data to a hex string.
+auto binaryToHex = [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+	std::ostringstream oss;
+	const unsigned char* data = reinterpret_cast<const unsigned char*>(bind->buffer);
+	for (unsigned long i = 0; i < len; i++) {
+		oss << std::setw(2) << std::setfill('0') << std::hex << (int)data[i];
+	}
+	out = oss.str();
+};
+
+static const std::unordered_map<unsigned int, BufferTypeInfo> bufferTypeInfoMap = {
+	{ MYSQL_TYPE_DECIMAL,
+		{ "DECIMAL", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+		}}
+	},
+	{ MYSQL_TYPE_TINY,
+		{ "TINY", [](const MYSQL_BIND* bind, unsigned long /*len*/, std::string &out) {
+			out = std::to_string(static_cast<int>(*reinterpret_cast<int8_t*>(bind->buffer)));
+		}}
+	},
+	{ MYSQL_TYPE_SHORT,
+		{ "SHORT", [](const MYSQL_BIND* bind, unsigned long /*len*/, std::string &out) {
+			out = std::to_string(*reinterpret_cast<int16_t*>(bind->buffer));
+		}}
+	},
+	{ MYSQL_TYPE_LONG,
+		{ "LONG", [](const MYSQL_BIND* bind, unsigned long /*len*/, std::string &out) {
+			out = std::to_string(*reinterpret_cast<int32_t*>(bind->buffer));
+		}}
+	},
+	{ MYSQL_TYPE_FLOAT,
+		{ "FLOAT", [](const MYSQL_BIND* bind, unsigned long /*len*/, std::string &out) {
+			out = std::to_string(*reinterpret_cast<float*>(bind->buffer));
+		}}
+	},
+	{ MYSQL_TYPE_DOUBLE,
+		{ "DOUBLE", [](const MYSQL_BIND* bind, unsigned long /*len*/, std::string &out) {
+			out = std::to_string(*reinterpret_cast<double*>(bind->buffer));
+		}}
+	},
+	{ MYSQL_TYPE_NULL,
+		{ "NULL", [](const MYSQL_BIND* /*bind*/, unsigned long /*len*/, std::string &out) {
+			out = "NULL";
+		}}
+	},
+	{ MYSQL_TYPE_TIMESTAMP,
+		{ "TIMESTAMP", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_LONGLONG,
+		{ "LONGLONG", [](const MYSQL_BIND* bind, unsigned long /*len*/, std::string &out) {
+			out = std::to_string(*reinterpret_cast<int64_t*>(bind->buffer));
+		}}
+	},
+	{ MYSQL_TYPE_INT24,
+		{ "INT24", [](const MYSQL_BIND* bind, unsigned long /*len*/, std::string &out) {
+			// INT24: stored in 32 bits
+			out = std::to_string(*reinterpret_cast<int32_t*>(bind->buffer));
+		}}
+	},
+	{ MYSQL_TYPE_DATE,
+		{ "DATE", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_TIME,
+		{ "TIME", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_DATETIME,
+		{ "DATETIME", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_YEAR,
+		{ "YEAR", [](const MYSQL_BIND* bind, unsigned long /*len*/, std::string &out) {
+			out = std::to_string(*reinterpret_cast<int16_t*>(bind->buffer));
+		}}
+	},
+	{ MYSQL_TYPE_NEWDATE,
+		{ "NEWDATE", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+		}}
+	},
+	{ MYSQL_TYPE_VARCHAR,
+		{ "VARCHAR", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+		}}
+	},
+	{ MYSQL_TYPE_BIT,
+		{ "BIT", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			// For simplicity, treat BIT as hex.
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_TIMESTAMP2,
+		{ "TIMESTAMP2", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_DATETIME2,
+		{ "DATETIME2", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_TIME2,
+		{ "TIME2", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_JSON,
+		{ "JSON", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+		}}
+	},
+	{ MYSQL_TYPE_NEWDECIMAL,
+		{ "NEWDECIMAL", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+		}}
+	},
+	{ MYSQL_TYPE_ENUM,
+		{ "ENUM", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+		}}
+	},
+	{ MYSQL_TYPE_SET,
+		{ "SET", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+		}}
+	},
+	{ MYSQL_TYPE_TINY_BLOB,
+		{ "TINY_BLOB", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_MEDIUM_BLOB,
+		{ "MEDIUM_BLOB", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_LONG_BLOB,
+		{ "LONG_BLOB", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_BLOB,
+		{ "BLOB", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	},
+	{ MYSQL_TYPE_VAR_STRING,
+		{ "VAR_STRING", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+		}}
+	},
+	{ MYSQL_TYPE_STRING,
+		{ "STRING", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+		}}
+	},
+	{ MYSQL_TYPE_GEOMETRY,
+		{ "GEOMETRY", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
+			binaryToHex(bind, len, out);
+		}}
+	}
+};
+
+/*
+static inline std::string getBufferTypeName(unsigned int buffer_type) {
+	auto it = bufferTypeNameMap.find(buffer_type);
+	return (it != bufferTypeNameMap.end()) ? it->second : "unknown";
+}
+*/
+
+static inline std::pair<std::string, std::string> getValueForBind(const MYSQL_BIND* bind, unsigned long len) {
+	auto it = bufferTypeInfoMap.find(bind->buffer_type);
+	std::string convertedValue;
+	if (it != bufferTypeInfoMap.end()) {
+		it->second.converter(bind, len, convertedValue);
+		return { it->second.typeName, convertedValue };
+	}
+	// Fallback if type is not found.
+	return { "unknown", "unknown" };
+}
 
 const std::tuple<qc_counter_vector, qc_gauge_vector>
 ml_metrics_map = std::make_tuple(
@@ -475,6 +677,40 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 
 	total_bytes+=mysql_encode_length(query_len,NULL)+query_len;
 
+	// --- Account for extra parameters for COM_STMT_EXECUTE ---
+	if (et == PROXYSQL_COM_STMT_EXECUTE) {
+		if (session != nullptr && session->CurrentQuery.stmt_meta != nullptr) {
+			stmt_execute_metadata_t *meta = session->CurrentQuery.stmt_meta;
+			uint16_t num_params = meta->num_params;
+			// Add bytes for encoded parameter count.
+			uint8_t paramCountLen = mysql_encode_length(num_params, NULL);
+			total_bytes += paramCountLen;
+			// Add bytes for the null bitmap.
+			size_t bitmap_size = (num_params + 7) / 8;
+			total_bytes += bitmap_size;
+			// For each parameter:
+			for (uint16_t i = 0; i < num_params; i++) {
+				// 2 bytes for parameter type.
+				total_bytes += sizeof(uint16_t);
+				std::string convertedValue;
+				const MYSQL_BIND *bind = meta->binds ? &meta->binds[i] : nullptr;
+				if (bind != nullptr && !(meta->is_nulls && meta->is_nulls[i])) {
+					unsigned long len = meta->lengths ? meta->lengths[i] : 0;
+					// Use getValueForBind() to produce a string representation.
+					auto[valType, convVal] = getValueForBind(bind, len);
+					convertedValue = convVal;
+				}
+				uint64_t value_len = convertedValue.size();
+				// Add bytes for the encoded length of the value.
+				uint8_t valueLenEnc = mysql_encode_length(value_len, NULL);
+				total_bytes += valueLenEnc;
+				// Add the raw bytes of the parameter value.
+				total_bytes += value_len;
+			}
+		}
+	}
+
+
 	// for performance reason, we are moving the write lock
 	// right before the write to disk
 	//GloMyLogger->wrlock();
@@ -552,6 +788,56 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 	f->write((char *)buf,len);
 	if (query_len) {
 		f->write(query_ptr,query_len);
+	}
+
+	// --- Now write the parameters block for COM_STMT_EXECUTE ---
+	if (et == PROXYSQL_COM_STMT_EXECUTE) {
+		// Ensure stmt_meta is available.
+		if (session != nullptr && session->CurrentQuery.stmt_meta != nullptr) {
+			stmt_execute_metadata_t *meta = session->CurrentQuery.stmt_meta;
+			// Write the number of parameters.
+			uint16_t num_params = meta->num_params;
+			uint8_t paramCountLen = mysql_encode_length(num_params, buf);
+			f->write((char *)buf, paramCountLen);
+
+			// Build and write the null bitmap.
+			size_t bitmap_size = (num_params + 7) / 8;  // one bit per parameter
+			std::vector<unsigned char> null_bitmap(bitmap_size, 0);
+			for (uint16_t i = 0; i < num_params; i++) {
+				if (meta->is_nulls && meta->is_nulls[i]) {
+					null_bitmap[i / 8] |= (1 << (i % 8));
+				}
+			}
+			f->write(reinterpret_cast<char*>(null_bitmap.data()), bitmap_size);
+
+			// For each parameter, write:
+			// - Parameter type as 2 bytes.
+			// - Encoded parameter value (first length, then raw bytes)
+			for (uint16_t i = 0; i < num_params; i++) {
+				const MYSQL_BIND *bind = meta->binds ? &meta->binds[i] : nullptr;
+				uint16_t param_type = (bind ? bind->buffer_type : 0);
+				// Write parameter type (2 bytes).
+				f->write(reinterpret_cast<char*>(&param_type), sizeof(uint16_t));
+
+				// Prepare to write the parameter value.
+				std::string convertedValue;
+				if (bind && bind->buffer && !(meta->is_nulls && meta->is_nulls[i])) {
+					unsigned long len = meta->lengths ? meta->lengths[i] : 0;
+					auto[valType, convVal] = getValueForBind(bind, len);
+					convertedValue = convVal;
+				} else {
+					convertedValue = "";
+				}
+				// Write the length of the parameter value.
+				uint64_t value_len = convertedValue.size();
+				uint8_t valueLenEnc = mysql_encode_length(value_len, buf);
+				f->write((char *)buf, valueLenEnc);
+				// Write the parameter value bytes.
+				if (value_len > 0) {
+					f->write(convertedValue.data(), value_len);
+				}
+			}
+		}
 	}
 
 	return total_bytes;
@@ -670,6 +956,41 @@ void MySQL_Event::extractStmtExecuteMetadataToJson(json &j) {
 	if (et != PROXYSQL_COM_STMT_EXECUTE) {
 		return;
 	}
+	if (session->CurrentQuery.stmt_info == nullptr) {
+		return;
+	}
+	if (session->CurrentQuery.stmt_meta == nullptr) {
+		return;
+	}
+
+	stmt_execute_metadata_t *meta = session->CurrentQuery.stmt_meta;
+
+	// Create a JSON vector of objects each with "type" and "value"
+	json jparams = json::array();
+	for (uint16_t i = 0; i < meta->num_params; i++) {
+		json jparam;
+		// Check if parameter is NULL
+		if (meta->is_nulls && meta->is_nulls[i]) {
+			jparam["type"] = "NULL";
+			jparam["value"] = nullptr;
+		} else {
+			// Extract the MYSQL_BIND for this parameter.
+			MYSQL_BIND *bind = meta->binds ? &meta->binds[i] : nullptr;
+			if (bind && bind->buffer) {
+				// Use the length in meta->lengths[i] if available.
+				unsigned long len = meta->lengths ? meta->lengths[i] : 0;
+				auto[valType, convertedValue] = getValueForBind(bind, len);
+				jparam["type"] = valType;
+				jparam["value"] = convertedValue;
+			} else {
+				jparam["type"] = "unknown";
+				jparam["value"] = nullptr;
+			}
+		}
+		jparams.push_back(jparam);
+	}
+	j["parameters"] = jparams;
+
 }
 extern MySQL_Query_Processor* GloMyQPro;
 
