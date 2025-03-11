@@ -5,27 +5,28 @@
 typedef enum {
 	VARIABLE_TYPE_NONE = 0, /**< No variable type. */
 	VARIABLE_TYPE_INT, /**< Integer variable type. */
+	VARIABLE_TYPE_FLOAT, /**< Float variable type. */
 	VARIABLE_TYPE_BOOL, /**< Boolean variable type. */
 	VARIABLE_TYPE_STRING, /**< String variable type. */
 	VARIABLE_TYPE_DATESTYLE, /**< DateStyle variable type. */
 	VARIABLE_TYPE_MAINTENANCE_WORK_MEM
 } pgsql_variable_type_t;
 
-/**
- * @struct int_range_t
- * @brief Struct representing a range of integer values.
- */
-typedef struct {
-	int min; /**< Minimum value of the range. */
-	int max; /**< Maximum value of the range. */
-} int_range_t;
+
+template<typename T> 
+struct range_t {
+	T min; /**< Minimum value of the range. */
+	T max; /**< Maximum value of the range. */
+};
 
 /**
  * @union params_t
  * @brief Union representing the parameters for variable validation.
  */
 typedef union {
-	int_range_t int_range; /**< Integer range parameters. */
+	range_t<int> int_range; /**< Integer range parameters. */
+	range_t<unsigned int> uint_range; /**< Integer range parameters. */
+	range_t<float> float_range; /**< Float range parameters. */
 	const char** string_allowed; /**< Allowed string values. */
 } params_t;
 
