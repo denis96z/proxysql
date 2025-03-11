@@ -1117,6 +1117,7 @@ void ProxySQL_Admin::flush_logs() {
 		}
 		free(ssl_keylog_file);
 	}
+	proxy_debug(PROXY_DEBUG_ADMIN, 1, "Running PROXYSQL FLUSH LOGS\n");
 }
 
 
@@ -2234,7 +2235,7 @@ void * admin_main_loop(void *arg) {
 	int *callback_func=((struct _main_args *)arg)->callback_func;
 	volatile int *shutdown=((struct _main_args *)arg)->shutdown;
 	char *socket_names[MAX_ADMIN_LISTENERS];
-	set_thread_name("Admin");
+	set_thread_name("Admin", GloVars.set_thread_name);
 	for (i=0;i<MAX_ADMIN_LISTENERS;i++) { socket_names[i]=NULL; }
 	pthread_attr_t attr;
   pthread_attr_init(&attr);

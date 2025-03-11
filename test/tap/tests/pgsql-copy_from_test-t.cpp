@@ -281,7 +281,7 @@ int is_string_in_result(PGresult* result, const char* target_str) {
 }
 
 bool check_logs_for_command(std::fstream& f_proxysql_log, const std::string& command_regex) {
-    std::vector<line_match_t> cmd_lines{ get_matching_lines(f_proxysql_log, command_regex) };
+    const auto& [_, cmd_lines] { get_matching_lines(f_proxysql_log, command_regex) };
 	return cmd_lines.empty() ? false : true;
 }
 
