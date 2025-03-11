@@ -1,6 +1,6 @@
 /**
  * @file pgsql-set_parameter_validation_test-t.cpp
- * @brief This TAP test does session parameter validation within ProxySQL.
+ * @brief This TAP test validates if session parameter validation is working correctly.
  */
 
 #include <unistd.h>
