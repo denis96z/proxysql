@@ -2973,7 +2973,7 @@ __exit_monitor_replication_lag_thread:
 			SAFE_SQLITE3_STEP2(statement);
 			rc=(*proxy_sqlite3_clear_bindings)(statement); ASSERT_SQLITE_OK(rc, mmsd->mondb);
 			rc=(*proxy_sqlite3_reset)(statement); ASSERT_SQLITE_OK(rc, mmsd->mondb);
-			MyHGM->set_ReadySet_status(mmsd->hostname, mmsd->port, status);
+			MyHGM->set_Readyset_status(mmsd->hostname, mmsd->port, status);
 			(*proxy_sqlite3_finalize)(statement);
 			if (mmsd->mysql_error_msg == NULL) {
 				replication_lag_success = true;
@@ -8150,7 +8150,7 @@ bool MySQL_Monitor::monitor_replication_lag_process_ready_tasks(const std::vecto
 			SAFE_SQLITE3_STEP2(statement);
 			rc=(*proxy_sqlite3_clear_bindings)(statement); ASSERT_SQLITE_OK(rc, mmsd->mondb);
 			rc=(*proxy_sqlite3_reset)(statement); ASSERT_SQLITE_OK(rc, mmsd->mondb);
-			MyHGM->set_ReadySet_status(mmsd->hostname, mmsd->port, status);
+			MyHGM->set_Readyset_status(mmsd->hostname, mmsd->port, status);
 			(*proxy_sqlite3_finalize)(statement);
 		}
 	}

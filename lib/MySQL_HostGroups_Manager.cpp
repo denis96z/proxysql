@@ -4095,7 +4095,7 @@ void MySQL_HostGroups_Manager::set_server_current_latency_us(char *hostname, int
 	wrunlock();
 }
 
-void MySQL_HostGroups_Manager::set_ReadySet_status(char *hostname, int port, enum MySerStatus status) {
+void MySQL_HostGroups_Manager::set_Readyset_status(char *hostname, int port, enum MySerStatus status) {
 	wrlock();
 	MySrvC *mysrvc=NULL;
 	for (unsigned int i=0; i<MyHostGroups->len; i++) {
@@ -4113,13 +4113,13 @@ void MySQL_HostGroups_Manager::set_ReadySet_status(char *hostname, int port, enu
 						if (prev_status == MYSQL_SERVER_STATUS_ONLINE) { src_status = "ONLINE"; }
 						else if (prev_status == MYSQL_SERVER_STATUS_OFFLINE_SOFT) { src_status = "OFFLINE_SOFT"; }
 						else if (prev_status == MYSQL_SERVER_STATUS_SHUNNED) { src_status = "SHUNNED"; };
-						if (status == MYSQL_SERVER_STATUS_ONLINE) { src_status = "ONLINE"; }
+						if (status == MYSQL_SERVER_STATUS_ONLINE) { dst_status = "ONLINE"; }
 						else if (status == MYSQL_SERVER_STATUS_OFFLINE_SOFT) { dst_status = "OFFLINE_SOFT"; }
 						else if (status == MYSQL_SERVER_STATUS_SHUNNED) { dst_status = "SHUNNED"; };
 						if (status == MYSQL_SERVER_STATUS_ONLINE) {
-							proxy_info("Changing ReadySet status for server %s:%d from HG %u from %s to %s", hostname, port, myhgc->hid, src_status, dst_status);
+							proxy_info("Changing Readyset status for server %s:%d from HG %u from %s to %s\n", hostname, port, myhgc->hid, src_status, dst_status);
 						} else {
-							proxy_warning("Changing ReadySet status for server %s:%d from HG %u from %s to %s", hostname, port, myhgc->hid, src_status, dst_status);
+							proxy_warning("Changing Readyset status for server %s:%d from HG %u from %s to %s\n", hostname, port, myhgc->hid, src_status, dst_status);
 						}
 						mysrvc->set_status(status);
 					}
