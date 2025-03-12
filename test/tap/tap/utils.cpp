@@ -1116,8 +1116,11 @@ int get_proxysql_cpu_usage(const CommandLine& cl, double& cpu_usage, uint32_t in
 		sleep(1);
 	}
 
-	MYSQL_QUERY(admin, "SELECT * FROM system_cpu ORDER BY timestamp DESC LIMIT 2");
-	MYSQL_RES* admin_res = mysql_store_result(admin);
+	MYSQL_QUERY(admin, "SELECT * FROM system_cpu ORDER BY timestamp DESC LIMIT 5");
+	MYSQL_RES* admin_res { mysql_store_result(admin) };
+	const string sys_cpu_str { dump_as_table(admin_res) };
+	diag("Dumping latest 5 entries from 'system_cpu':\n%s", sys_cpu_str.c_str());
+
 	MYSQL_ROW row = mysql_fetch_row(admin_res);
 
 	double s_clk = (1000.0 / sysconf(_SC_CLK_TCK));
