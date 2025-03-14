@@ -8,6 +8,36 @@
 
 class MySQL_Logger;
 
+struct p_ml_counter {
+	enum metric {
+		memory_copy_count = 0,
+		disk_copy_count,
+		get_all_events_calls_count,
+		get_all_events_events_count,
+		total_memory_copy_time_us,
+		total_disk_copy_time_us,
+		total_get_all_events_time_us,
+		total_events_copied_to_memory,
+		total_events_copied_to_disk,
+		circular_buffer_events_added_count,
+		circular_buffer_events_dropped_count,
+		__size
+	};
+};
+
+struct p_ml_gauge {
+	enum metric {
+		circular_buffer_events_size,
+		__size
+	};
+};
+
+struct ml_metrics_map_idx {
+	enum index {
+		counters = 0,
+		gauges
+	};
+};
 
 /**
  * @class MySQL_Event
@@ -327,7 +357,7 @@ private:
 		/** @brief Total time spent copying events to the on-disk database (microseconds). */
 		std::atomic<unsigned long long> totalDiskCopyTimeMicros;
 		/** @brief Total time spent in `get_all_events` (microseconds). */
-		std::atomic<unsigned long long> totalGetAllEventsDiskCopyTimeMicros;
+		std::atomic<unsigned long long> totalGetAllEventsTimeMicros;
 		/** @brief Total number of events copied to the in-memory database. */
 		std::atomic<unsigned long long> totalEventsCopiedToMemory;
 		/** @brief Total number of events copied to the on-disk database. */
@@ -335,6 +365,14 @@ private:
 		std::atomic<unsigned long long> eventsAddedToBufferCount;     ///< Total number of events added to the buffer.
 		std::atomic<unsigned long long> eventsCurrentlyInBufferCount; ///< Number of events currently in the buffer.
 	} metrics;
+
+	/**
+	 * @brief Structure holding the exposed Prometheus metrics for MySQL event logger.
+	 */
+	struct {
+		std::array<prometheus::Counter*, p_ml_counter::__size> p_counter_array {};
+		std::array<prometheus::Gauge*, p_ml_gauge::__size> p_gauge_array {};
+	} prom_metrics;
 
 	// Mutex or rwlock for thread safety
 #ifdef PROXYSQL_LOGGER_PTHREAD_MUTEX
@@ -513,6 +551,14 @@ public:
 	 * The function ensures thread safety by acquiring a lock on the circular buffer's mutex before accessing its internal metrics.
 	 */
 	std::unordered_map<std::string, unsigned long long> getAllMetrics() const;
+
+	/**
+	 * @brief Implements the prometheus metrics update hook for the module.
+	 * @details Every module exporting prometheus metrics exposes this function, which is meant to be called
+	 *   from `ProxySQL_Admin` registered serial exposer. This way the metrics update is performed lazily every
+	 *   time the `serial_exposer` requires it.
+	 */
+	void p_update_metrics();
 };
 
 
