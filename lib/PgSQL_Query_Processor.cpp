@@ -576,7 +576,7 @@ PgSQL_Query_Processor_Rule_t* PgSQL_Query_Processor::new_query_rule(const PgSQL_
 
 SQLite3_result* PgSQL_Query_Processor::get_current_query_rules() {
 	proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "Dumping current query rules, using Global version %d\n", version);
-	SQLite3_result* result = new SQLite3_result(34);
+	SQLite3_result* result = new SQLite3_result(35);
 	PgSQL_Query_Processor_Rule_t* qr1;
 	rdlock();
 	result->add_column_definition(SQLITE_TEXT, "rule_id");

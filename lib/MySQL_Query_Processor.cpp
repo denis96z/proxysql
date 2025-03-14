@@ -941,7 +941,7 @@ MySQL_Query_Processor_Rule_t* MySQL_Query_Processor::new_query_rule(const MySQL_
 
 SQLite3_result* MySQL_Query_Processor::get_current_query_rules() {
 	proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "Dumping current query rules, using Global version %d\n", version);
-	SQLite3_result* result = new SQLite3_result(35);
+	SQLite3_result* result = new SQLite3_result(36);
 	MySQL_Query_Processor_Rule_t* qr1;
 	rdlock();
 	result->add_column_definition(SQLITE_TEXT, "rule_id");
