@@ -16,6 +16,7 @@
 #include "PgSQL_Query_Cache.h"
 #include "MySQL_Query_Processor.h"
 #include "PgSQL_Query_Processor.h"
+#include "MySQL_Logger.hpp"
 
 #define SAFE_SQLITE3_STEP(_stmt) do {\
   do {\
@@ -41,6 +42,8 @@ extern MySQL_STMT_Manager_v14 *GloMyStmt;
 extern MySQL_Query_Processor* GloMyQPro;
 extern PgSQL_Query_Processor* GloPgQPro;
 extern ProxySQL_Cluster *GloProxyCluster;
+
+extern MySQL_Logger *GloMyLogger;
 
 void ProxySQL_Admin::p_update_metrics() {
 	// Update proxysql_uptime
@@ -597,11 +600,8 @@ void ProxySQL_Admin::stats___mysql_global() {
 		const string prefix = "MySQL_Logger_";
 		std::unordered_map<std::string, unsigned long long> metrics = GloMyLogger->getAllMetrics();
 		for (std::unordered_map<std::string, unsigned long long>::iterator it = metrics.begin(); it != metrics.end(); it++) {
-			unsigned int l = strlen(a) + prefix.length() + it->first.length() + 32;
-			char *query = (char *)malloc(l);
-			sprintf(query, a, string(prefix + it->first).c_str(),std::to_string(it->second).c_str());
-			statsdb->execute(query);
-			free(query);
+			string var_name = prefix + it->first;
+			sqlite3_global_stats_row_step(statsdb, row_stmt, var_name.c_str(), it->second);
 		}
 	}
 
