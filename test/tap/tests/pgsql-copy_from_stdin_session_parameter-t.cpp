@@ -147,7 +147,10 @@ void copy_stdin_test(PGconn* conn, const std::string& set_val, std::fstream& f_p
         return;
     }
 
-    usleep(1000); // Wait for the query to be sent
+    PQconsumeInput(conn);
+    while (PQisBusy(conn)) {
+        PQconsumeInput(conn);
+    }
 
     ok(check_logs_for_command(f_proxysql_log, ".*\\[INFO\\].* Switching to Fast Forward mode \\(Session Type:0x06\\)"), "Session Switched to fast forward mode");
 
@@ -213,7 +216,7 @@ void execute_test(bool with_ssl, bool diff_conn, std::fstream& f_proxysql_log) {
         for (int i = 0; i < MAX_ITERATION; i++) {
             if (!setupTestTable(backend_conn.get()))
                 return;
-
+            usleep(1000);
             const std::string& value = setIntervalStyle(backend_conn.get(), i, f_proxysql_log);
  
             if (value.empty())
@@ -237,7 +240,7 @@ void execute_test(bool with_ssl, bool diff_conn, std::fstream& f_proxysql_log) {
 
             if (!setupTestTable(backend_conn.get()))
                 return;
-
+            usleep(1000);
             const std::string& value = setIntervalStyle(backend_conn.get(), i, f_proxysql_log);
 
             if (value.empty())
