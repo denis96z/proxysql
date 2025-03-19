@@ -127,6 +127,8 @@ std::string setIntervalStyle(PGconn* conn, int idx, std::fstream& f_proxysql_log
 	if (!executeQueries(conn, { query.c_str() }))
         return "";
     ok(check_logs_for_command(f_proxysql_log, ".*\\[WARNING\\] Unable to parse unknown SET query from client.*") == false, "Should not be locked on a hostgroup");
+    f_proxysql_log.clear(f_proxysql_log.rdstate() & ~std::ios_base::failbit);
+    f_proxysql_log.seekg(f_proxysql_log.tellg());
     return val;
 }
 
