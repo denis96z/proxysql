@@ -36,29 +36,6 @@ using std::vector;
 // Used for 'extract_module_host_port'
 #include "modules_server_test.h"
 
-////////////////////////////////////////////////////////////////////////////////
-//          Borrowed from test_match_eof_conn_cap.cpp - TODO: MERGE
-////////////////////////////////////////////////////////////////////////////////
-
-#include <dirent.h>
-
-#define _S(s) ( std::string {s} )
-#define _TO_S(s) ( std::to_string(s) )
-
-#define SELECT_RUNTIME_VAR "SELECT variable_value FROM runtime_global_variables WHERE variable_name="
-
-#define CHECK_EXT_VAL(val)\
-	do {\
-		if (val.err) {\
-			diag("%s:%d: Query failed   err=\"%s\"", __func__, __LINE__, val.str.c_str());\
-			return EXIT_FAILURE;\
-		}\
-	} while(0)
-
-const uint32_t USLEEP_SQLITE_LOCKED = 100;
-
-////////////////////////////////////////////////////////////////////////////////
-
 int get_query_int_res(MYSQL* admin, const string& q, int& val) {
 	MYSQL_QUERY_T(admin, q.c_str());
 	MYSQL_RES* myres = mysql_store_result(admin);

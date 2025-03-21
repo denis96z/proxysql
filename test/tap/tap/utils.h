@@ -21,6 +21,9 @@
 template <typename T>
 using rc_t = std::pair<int,T>;
 
+#define _S(s) ( std::string {s} )
+#define _TO_S(s) ( std::to_string(s) )
+
 // Improve dependency failure compilation error
 #ifndef DISABLE_WARNING_COUNT_LOGGING
 
@@ -62,6 +65,12 @@ my_bool mysql_stmt_close_override(MYSQL_STMT* stmt, const char* file, int line);
 }
 
 #endif 
+
+/**
+ * @brief Simple macro to use with 'mysql_query' versions.
+ * @details E.g: `mysql_query_ext_val(admin, SELECT_RUNTIME_VAR"'mysql-eventslog_filename'", "")`.
+ */
+#define SELECT_RUNTIME_VAR "SELECT variable_value FROM runtime_global_variables WHERE variable_name="
 
 /**
  * @brief Computes the binomial coefficient C(n, k)
@@ -220,6 +229,19 @@ enum SQ3_RES_T {
  *  In case of failure, ERR field will be populated and others will remain empty.
  */
 sq3_res_t sqlite3_execute_stmt(sqlite3* db, const std::string& query);
+
+/**
+ * @brief Utility one-liner macro to check for query failure on a 'ext_val_t<T>'.
+ * @param val The 'ext_val_t<T>' to be checked.
+ * @return In case of failure, 'EXIT_FAILURE' after logging the error, continues otherwise.
+ */
+#define CHECK_EXT_VAL(val)\
+	do {\
+		if (val.err) {\
+			diag("%s:%d: Query failed   err=\"%s\"", __func__, __LINE__, val.str.c_str());\
+			return EXIT_FAILURE;\
+		}\
+	} while(0)
 
 /**
  * @brief Holds the result of an `mysql_query_ext_val` operation.
