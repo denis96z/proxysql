@@ -105,6 +105,15 @@ int find_min_elems(double tg_prob, int M);
 std::string to_string(std::thread::id id);
 
 /**
+ * @brief Replaces all occurrences of a substring in a given string with another substring.
+ * @param str The string which matches are to be replaced.
+ * @param match The string which occurrences shall be replaced.
+ * @param repl The string used to replace 'match' occurrences.
+ * @return A new string with all 'match' occurrences replaced by 'repl'.
+ */
+std::string replace_str(const std::string& str, const std::string& match, const std::string& repl);
+
+/**
  * @brief Helper function to disable Core nodes scheduler from ProxySQL Cluster nodes.
  * @details In the CI environment, 'Scheduler' is used to induce extra load via Admin interface on
  *  all the cluster nodes. Disabling this allows for more accurate measurements on the primary.
