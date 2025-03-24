@@ -680,8 +680,8 @@ MySQL_Query_Processor_Output* MySQL_Query_Processor::process_query(MySQL_Session
 MySQL_Query_Processor_Rule_t* MySQL_Query_Processor::new_query_rule(int rule_id, bool active, const char* username, const char* schemaname, int flagIN, const char* client_addr,
 	const char* proxy_addr, int proxy_port, const char* digest, const char* match_digest, const char* match_pattern, bool negate_match_pattern,
 	const char* re_modifiers, int flagOUT, const char* replace_pattern, int destination_hostgroup, int cache_ttl, int cache_empty_result,
-	int cache_timeout, int reconnect, int timeout, int retries, int delay, int next_query_flagIN, int mirror_hostgroup,
-	int mirror_flagOUT, const char* error_msg, const char* OK_msg, int sticky_conn, int multiplex, int gtid_from_hostgroup, int log,
+	int cache_timeout, int reconnect, int timeout, int retries, int delay, int next_query_flagIN, int mirror_flagOUT, 
+	int mirror_hostgroup, const char* error_msg, const char* OK_msg, int sticky_conn, int multiplex, int gtid_from_hostgroup, int log,
 	bool apply, const char* attributes, const char* comment) {
 
 	MySQL_Query_Processor_Rule_t* newQR = (MySQL_Query_Processor_Rule_t*)malloc(sizeof(MySQL_Query_Processor_Rule_t));
@@ -941,7 +941,7 @@ MySQL_Query_Processor_Rule_t* MySQL_Query_Processor::new_query_rule(const MySQL_
 
 SQLite3_result* MySQL_Query_Processor::get_current_query_rules() {
 	proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "Dumping current query rules, using Global version %d\n", version);
-	SQLite3_result* result = new SQLite3_result(35);
+	SQLite3_result* result = new SQLite3_result(36);
 	MySQL_Query_Processor_Rule_t* qr1;
 	rdlock();
 	result->add_column_definition(SQLITE_TEXT, "rule_id");
