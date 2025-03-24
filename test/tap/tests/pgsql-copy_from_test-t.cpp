@@ -654,7 +654,10 @@ void testSTDIN_MULTISTATEMENT(PGconn* admin_conn, PGconn* conn, std::fstream& f_
         return;
     }
 
-    usleep(1000); // Wait for the query to be sent
+    PQconsumeInput(conn);
+    while (PQisBusy(conn)) {
+        PQconsumeInput(conn);
+    }
 
     ok(check_logs_for_command(f_proxysql_log, ".*\\[INFO\\].* Switching to Fast Forward mode \\(Session Type:0x06\\)"), "Session Switched to fast forward mode");
 
