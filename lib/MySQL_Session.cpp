@@ -4140,6 +4140,17 @@ __get_pkts_from_client:
 						}
 						switch ((enum_mysql_command)c) {
 							case _MYSQL_COM_QUERY:
+								{
+									const char* schemaname { client_myds->myconn->userinfo->schemaname };
+									const char* recv_query { static_cast<char*>(pkt.ptr) + 5 };
+									const uint32_t recv_query_sz { pkt.size - 5 };
+
+									proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Processing received query"
+										"   session=%p session_type=%d schemaname=\"%s\" query=\"%.*s\"\n",
+										this, session_type, schemaname ? schemaname : "", recv_query_sz, recv_query
+									);
+								}
+
 								__sync_add_and_fetch(&thread->status_variables.stvar[st_var_queries],1);
 								if (session_type == PROXYSQL_SESSION_MYSQL) {
 									bool rc_break=false;
@@ -4948,7 +4959,6 @@ handler_again:
 		case PROCESSING_STMT_PREPARE:
 		case PROCESSING_STMT_EXECUTE:
 		case PROCESSING_QUERY:
-			//fprintf(stderr,"PROCESSING_QUERY\n");
 			// Pause Check
 			// It checks if pause_until is greater than the current time (thread->curtime).
 			// If so, it returns handler_ret immediately, indicating that processing should be paused until a later time.
@@ -5813,7 +5823,7 @@ void MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 	if (session_type == PROXYSQL_SESSION_MYSQL) {
 		__sync_fetch_and_add(&MyHGM->status.frontend_use_db, 1);
 		string nq=string((char *)pkt->ptr+sizeof(mysql_hdr)+1,pkt->size-sizeof(mysql_hdr)-1);
-		SetParser parser(nq);
+		MySQL_Set_Stmt_Parser parser(nq);
 		string errmsg = "";
 		string schemaname = parser.parse_USE_query(errmsg);
 		if (schemaname != "") {
@@ -6091,7 +6101,7 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 			) {
 				proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Parsing SET command %s\n", nq.c_str());
 				proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 5, "Parsing SET command = %s\n", nq.c_str());
-				SetParser parser(nq);
+				MySQL_Set_Stmt_Parser parser(nq);
 				std::map<std::string, std::vector<std::string>> set = {};
 				if (mysql_thread___set_parser_algorithm == 1) { // legacy behavior
 					set = parser.parse1();
@@ -6644,7 +6654,7 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 					}
 				}
 			} else if (match_regexes && match_regexes[2]->match(dig)) {
-				SetParser parser(nq);
+				MySQL_Set_Stmt_Parser parser(nq);
 				std::map<std::string, std::vector<std::string>> set = parser.parse2();
 
 				for(auto it = std::begin(set); it != std::end(set); ++it) {
@@ -6709,7 +6719,7 @@ bool MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 					}
 				}
 			} else if (match_regexes && match_regexes[3]->match(dig)) {
-				SetParser parser(nq);
+				MySQL_Set_Stmt_Parser parser(nq);
 				std::string charset = parser.parse_character_set();
 				const MARIADB_CHARSET_INFO * c;
 				if (!charset.empty()) {

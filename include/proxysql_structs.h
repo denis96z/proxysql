@@ -243,6 +243,33 @@ enum mysql_variable_name {
 	SQL_NAME_LAST_HIGH_WM,
 };
 
+/* NOTE:
+	make special ATTENTION that the order in mysql_variable_name
+	and pgsql_tracked_variables[] is THE SAME
+*/
+enum pgsql_variable_name {
+	PGSQL_CLIENT_ENCODING,
+	PGSQL_DATESTYLE,
+	PGSQL_INTERVALSTYLE,
+	PGSQL_STANDARD_CONFORMING_STRINGS,
+	PGSQL_TIMEZONE,
+	PGSQL_NAME_LAST_LOW_WM,
+	PGSQL_ALLOW_IN_PLACE_TABLESPACES,
+	PGSQL_BYTEA_OUTPUT,
+	PGSQL_CLIENT_MIN_MESSAGES,
+	PGSQL_ENABLE_BITMAPSCAN,
+	PGSQL_ENABLE_HASHJOIN,
+	PGSQL_ENABLE_INDEXSCAN,
+	PGSQL_ENABLE_NESTLOOP,
+	PGSQL_ENABLE_SEQSCAN,
+	PGSQL_ENABLE_SORT,
+	PGSQL_ESCAPE_STRING_WARNING,
+	PGSQL_EXTRA_FLOAT_DIGITS,
+	PGSQL_MAINTENANCE_WORK_MEM,
+	PGSQL_SYNCHRONOUS_COMMIT,
+	PGSQL_NAME_LAST_HIGH_WM
+};
+
 enum session_status {
 	CONNECTING_CLIENT,
 	CONNECTING_SERVER,
@@ -278,7 +305,8 @@ enum session_status {
 };
 
 #ifdef __cplusplus
-typedef struct {
+
+struct mysql_variable_st {
 	enum mysql_variable_name idx;     // index number
 	enum session_status status; // what status should be changed after setting this variables
 	bool quote;                 // if the variable needs to be quoted
@@ -291,7 +319,58 @@ typedef struct {
 							// if NULL , MySQL_Variables::MySQL_Variables will set it to set_variable_name during initialization
 	char * default_value;       // default value
 	bool is_global_variable;	// is it a global variable?
-} mysql_variable_st;
+} ;
+
+enum pgsql_tracked_variables_options {
+	PGTRACKED_VAR_OPT_QUOTE				= 0x01, // if the variable needs to be quoted
+	PGTRACKED_VAR_OPT_SET_TRANSACTION	= 0x02, // if related to SET TRANSACTION statement . if false , it will be execute "SET varname = varvalue" . If true, "SET varname varvalue"
+	PGTRACKED_VAR_OPT_PARAM_STATUS		= 0x04, // send parameter status if set
+	PGTRACKED_VAR_OPT_RESERVED_1		= 0x08, // Unused
+	PGTRACKED_VAR_OPT_RESERVED_2		= 0x10, // Unused
+	PGTRACKED_VAR_OPT_RESERVED_3		= 0x20  // Unused
+};
+
+struct pgsql_variable_validator;
+
+struct pgsql_variable_st {
+	enum pgsql_variable_name idx;     // index number
+	enum session_status status; // what status should be changed after setting this variables
+	const char* set_variable_name;   // what variable name (or string) will be used when setting it to backend
+	const char* internal_variable_name; // variable name as displayed in admin , WITHOUT "default_"
+	// Also used in INTERNAL SESSION
+	// if NULL , MySQL_Variables::MySQL_Variables will set it to set_variable_name during initialization
+	const char* default_value;       // default value
+	uint8_t options;			// options
+	const pgsql_variable_validator* validator; // validate value
+	const char* alias[2];				// alias for the variable
+};
+
+#define IS_PGTRACKED_VAR_OPTION_SET(opt, flag) ((opt & flag) == flag)
+#define IS_PGTRACKED_VAR_OPTION_UNSET(opt, flag) ((opt & flag) == 0)
+
+#define IS_PGTRACKED_VAR_OPTION_SET_QUOTE(opt)			 IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_QUOTE)
+#define IS_PGTRACKED_VAR_OPTION_SET_SET_TRANSACTION(opt) IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_SET_TRANSACTION)
+#define IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(opt)	 IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_PARAM_STATUS)
+
+inline bool variable_name_exists(const pgsql_variable_st& var, const char* variable_name) {
+	
+	if (strcasecmp(var.set_variable_name, variable_name) == 0)
+		return true;
+
+	const char* const* ptr = var.alias;
+
+	while (*ptr != nullptr) {
+		if (strcasecmp(*ptr, variable_name) == 0) {
+			return true;
+		}
+		++ptr;
+	}
+
+	return false;
+}
+
+//using mysql_variable_st = variable_tracking<enum mysql_variable_name>;
+//using pgsql_variable_st = variable_tracking<enum pgsql_variable_name>;
 
 typedef struct {
 	int err;
@@ -991,7 +1070,7 @@ PgSQL_HostGroups_Manager* PgHGM;
 __thread int pgsql_thread___authentication_method;
 __thread int pgsql_thread___show_processlist_extended;
 __thread char *pgsql_thread___server_version;
-__thread char *pgsql_thread___default_client_encoding;
+__thread char *pgsql_thread___server_encoding;
 __thread bool pgsql_thread___have_ssl;
 __thread int pgsql_thread___max_connections;
 __thread bool pgsql_thread___use_tcp_keepalive;
@@ -1108,6 +1187,10 @@ __thread char* pgsql_thread___monitor_dbname;
 __thread int pgsql_thread___query_cache_size_MB;
 __thread int pgsql_thread___query_cache_soft_ttl_pct;
 __thread int pgsql_thread___query_cache_handle_warnings;
+
+__thread bool pgsql_thread___session_idle_show_processlist;
+__thread char* pgsql_thread___default_variables[PGSQL_NAME_LAST_HIGH_WM];
+__thread int pgsql_thread___handle_unknown_charset;
 //---------------------------
 
 __thread char *mysql_thread___default_schema;
@@ -1290,7 +1373,7 @@ extern PgSQL_HostGroups_Manager *PgHGM;
 extern __thread int pgsql_thread___authentication_method;
 extern __thread int pgsql_thread___show_processlist_extended;
 extern __thread char *pgsql_thread___server_version;
-extern __thread char* pgsql_thread___default_client_encoding;
+extern __thread char* pgsql_thread___server_encoding;
 extern __thread bool pgsql_thread___have_ssl;
 extern __thread int pgsql_thread___max_connections;
 extern __thread bool pgsql_thread___use_tcp_keepalive;
@@ -1405,6 +1488,10 @@ extern __thread char* pgsql_thread___monitor_dbname;
 extern __thread int pgsql_thread___query_cache_size_MB;
 extern __thread int pgsql_thread___query_cache_soft_ttl_pct;
 extern __thread int pgsql_thread___query_cache_handle_warnings;
+
+extern __thread bool pgsql_thread___session_idle_show_processlist;
+extern __thread char* pgsql_thread___default_variables[PGSQL_NAME_LAST_HIGH_WM];
+extern __thread int pgsql_thread___handle_unknown_charset;
 //---------------------------
 
 extern __thread char *mysql_thread___default_schema;
@@ -1683,8 +1770,53 @@ mysql_variable_st mysql_tracked_variables[] {
 	session_track_transaction_info
 	*/
 };
+
 #else
 extern mysql_variable_st mysql_tracked_variables[];
 extern var_track_err_st perm_track_errs[];
 #endif // PROXYSQL_EXTERN
 #endif // MYSQL_TRACKED_VARIABLES
+
+#ifndef PGSQL_TRACKED_VARIABLES
+#define PGSQL_TRACKED_VARIABLES
+#ifdef PROXYSQL_EXTERN
+
+#ifndef EXCLUDE_TRACKING_VARAIABLES
+
+extern const pgsql_variable_validator pgsql_variable_validator_bool;
+extern const pgsql_variable_validator pgsql_variable_validator_intervalstyle;
+extern const pgsql_variable_validator pgsql_variable_validator_synchronous_commit;
+extern const pgsql_variable_validator pgsql_variable_validator_datestyle;
+extern const pgsql_variable_validator pgsql_variable_validator_integer;
+extern const pgsql_variable_validator pgsql_variable_validator_client_min_messages;
+extern const pgsql_variable_validator pgsql_variable_validator_bytea_output;
+extern const pgsql_variable_validator pgsql_variable_validator_extra_float_digits;
+extern const pgsql_variable_validator pgsql_variable_validator_maintenance_work_mem;
+
+pgsql_variable_st pgsql_tracked_variables[]{
+	{ PGSQL_CLIENT_ENCODING,       SETTING_CHARSET,	    "client_encoding", "client_encoding", "UTF8", (PGTRACKED_VAR_OPT_SET_TRANSACTION | PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), nullptr, { "names", nullptr } },
+	{ PGSQL_DATESTYLE,			   SETTING_VARIABLE,	"datestyle", "datestyle", "ISO, MDY" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_datestyle, nullptr },
+	{ PGSQL_INTERVALSTYLE,		   SETTING_VARIABLE,	"intervalstyle", "intervalstyle", "postgres" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_intervalstyle, nullptr },
+	{ PGSQL_STANDARD_CONFORMING_STRINGS, SETTING_VARIABLE, "standard_conforming_strings", "standard_conforming_strings", "on", (PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_TIMEZONE,			   SETTING_VARIABLE,	"timezone", "timezone", "GMT" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), nullptr, { "TIME ZONE", nullptr } },
+	{ PGSQL_NAME_LAST_LOW_WM,      session_status___NONE, "placeholder", "placeholder", "0" , 0, nullptr, nullptr },  // this is just a placeholder to separate the previous index from the next block
+	{ PGSQL_ALLOW_IN_PLACE_TABLESPACES,	   SETTING_VARIABLE,	"allow_in_place_tablespaces", "allow_in_place_tablespaces", "off", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_BYTEA_OUTPUT,		   SETTING_VARIABLE,	"bytea_output", "bytea_output", "hex", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_bytea_output,  nullptr },
+	{ PGSQL_CLIENT_MIN_MESSAGES,   SETTING_VARIABLE,	"client_min_messages", "client_min_messages", "notice", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_client_min_messages,  nullptr },
+	{ PGSQL_ENABLE_BITMAPSCAN,	   SETTING_VARIABLE,	"enable_bitmapscan", "enable_bitmapscan", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ENABLE_HASHJOIN,	   SETTING_VARIABLE,	"enable_hashjoin", "enable_hashjoin", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ENABLE_INDEXSCAN,	   SETTING_VARIABLE,	"enable_indexscan", "enable_indexscan", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ENABLE_NESTLOOP,	   SETTING_VARIABLE,	"enable_nestloop", "enable_nestloop", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ENABLE_SEQSCAN,		   SETTING_VARIABLE,	"enable_seqscan", "enable_seqscan", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ENABLE_SORT,		   SETTING_VARIABLE,	"enable_sort", "enable_sort", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_ESCAPE_STRING_WARNING, SETTING_VARIABLE,    "escape_string_warning", "escape_string_warning", "on", (0), &pgsql_variable_validator_bool, nullptr },
+	{ PGSQL_EXTRA_FLOAT_DIGITS,	   SETTING_VARIABLE,    "extra_float_digits", "extra_float_digits", "1", (0), &pgsql_variable_validator_extra_float_digits, nullptr },
+	{ PGSQL_MAINTENANCE_WORK_MEM,  SETTING_VARIABLE,    "maintenance_work_mem", "maintenance_work_mem", "64MB", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_maintenance_work_mem, nullptr },
+	{ PGSQL_SYNCHRONOUS_COMMIT,	   SETTING_VARIABLE,	"synchronous_commit", "synchronous_commit", "on", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_synchronous_commit, nullptr},
+};
+#endif //EXCLUDE_TRACKING_VARAIABLES
+
+#else
+extern pgsql_variable_st pgsql_tracked_variables[];
+#endif // PROXYSQL_EXTERN
+#endif // PGSQL_TRACKED_VARIABLES

@@ -1117,6 +1117,7 @@ void ProxySQL_Admin::flush_logs() {
 		}
 		free(ssl_keylog_file);
 	}
+	proxy_debug(PROXY_DEBUG_ADMIN, 1, "Running PROXYSQL FLUSH LOGS\n");
 }
 
 
@@ -1681,20 +1682,24 @@ bool ProxySQL_Admin::GenericRefreshStatistics(const char *query_no_space, unsign
 		}
 		//pthread_mutex_unlock(&admin_mutex);
 	}
-	if (
-		stats_mysql_processlist || stats_mysql_connection_pool || stats_mysql_connection_pool_reset ||
-		stats_mysql_query_digest || stats_mysql_query_digest_reset || stats_mysql_errors ||
-		stats_mysql_errors_reset || stats_mysql_global || stats_memory_metrics || 
-		stats_mysql_commands_counters || stats_mysql_query_rules || stats_mysql_users ||
-		stats_mysql_gtid_executed || stats_mysql_free_connections || 
-		stats_pgsql_global || stats_pgsql_connection_pool || stats_pgsql_connection_pool_reset ||
-		stats_pgsql_free_connections || stats_pgsql_users || stats_pgsql_processlist ||
-		stats_pgsql_errors || stats_pgsql_errors_reset || stats_pgsql_query_rules || stats_pgsql_commands_counters ||
-		stats_pgsql_query_digest || stats_pgsql_query_digest_reset
-	) {
-		ret = true;
+
+	int freelist_count = statsdb->return_one_int("PRAGMA freelist_count");
+	if (freelist_count < 1000) {
+		ret = false;
+	} else {
+		int page_count  = statsdb->return_one_int("PRAGMA page_count");
+		ret = (freelist_count * 100 / page_count) > 20;
+
+#ifdef DEBUG
+		if (ret) {
+			proxy_debug(PROXY_DEBUG_ADMIN, 4,
+				"VACUUM required for 'stats_db'   page_count=%d freelist_count=%d\n",
+				page_count, freelist_count
+			);
+		}
+#endif
 	}
-	
+
 	return ret;
 }
 
