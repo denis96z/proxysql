@@ -591,6 +591,7 @@ void ProxySQL_Admin::stats___mysql_global() {
 	}
 
 	sqlite3_global_stats_row_step(statsdb, row_stmt, "mysql_listener_paused", admin_proxysql_mysql_paused);
+	sqlite3_global_stats_row_step(statsdb, row_stmt, "OpenSSL_Version_Num", OpenSSL_version_num());
 
 	statsdb->execute("COMMIT");
 }
