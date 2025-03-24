@@ -545,7 +545,7 @@ int test_conn_acquisition(MYSQL* admin, const test_cnf_t& test_conf) {
 	};
 
 	diag("Check ProxySQL log for connection mismatches   regex=\"%s\"", conn_match_regex.c_str());
-	vector<line_match_t> match_lines { get_matching_lines(logfile_fs, conn_match_regex)};
+	const auto& [_a, match_lines] { get_matching_lines(logfile_fs, conn_match_regex)};
 	diag("Found General log matching lines   count=%ld", match_lines.size());
 
 	uint32_t exp_lines { exp_conns == 1 || exp_conns == 0 ? 0 : exp_conns };
@@ -556,7 +556,7 @@ int test_conn_acquisition(MYSQL* admin, const test_cnf_t& test_conf) {
 	);
 
 	diag("Check Audit log for connections attempts on SQLite3");
-	vector<line_match_t> audit_lines { get_matching_lines(auditlog_fs,
+	const auto& [_b, audit_lines] { get_matching_lines(auditlog_fs,
 		"SQLite3_Connect_OK.*" + _S(FF_USER)
 	)};
 	diag("Found Audit log matching lines   count=%ld", audit_lines.size());
@@ -708,7 +708,7 @@ int test_conn_acquisition(
 	};
 
 	diag("Check ProxySQL log for connection mismatches   regex=\"%s\"", conn_match_regex.c_str());
-	vector<line_match_t> match_lines { get_matching_lines(logfile_fs, conn_match_regex)};
+	const auto& [_a, match_lines] { get_matching_lines(logfile_fs, conn_match_regex)};
 	diag("Found General log matching lines   count=%ld", match_lines.size());
 
 	bool exp_lines  {};
@@ -719,7 +719,7 @@ int test_conn_acquisition(
 	);
 
 	diag("Check Audit log for connections attempts on SQLite3");
-	vector<line_match_t> audit_lines { get_matching_lines(auditlog_fs,
+	const auto& [_b, audit_lines] { get_matching_lines(auditlog_fs,
 		"SQLite3_Connect_OK.*" + _S(FF_USER)
 	)};
 	diag("Found Audit log matching lines   count=%ld", audit_lines.size());
