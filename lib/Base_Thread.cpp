@@ -92,8 +92,13 @@ S Base_Thread::create_new_session_and_client_data_stream(int _fd) {
 		int prevflags = fcntl(_fd, F_GETFL, 0);
 		if (prevflags == -1) {
 			proxy_error("For FD %d fcntl() returned -1 errno %d\n", _fd, errno);
-			if (shutdown == 0)
+			if (
+				(shutdown == 0)
+				&&
+				(glovars.shutdown == 0) // this is specific for modules that do not refresh `shutdown`
+			) {
 				assert(prevflags != -1);
+			}
 		}
 		int nb = fcntl(_fd, F_SETFL, prevflags | O_NONBLOCK);
 		if (nb == -1) {
