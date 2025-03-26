@@ -235,8 +235,8 @@ int main() {
     }
 
 
-    // Run 200 "SELECT 1" queries
-    for (int i = 0; i < 200; ++i) {
+    // Run num_selects "SELECT 1" queries
+    for (int i = 0; i < num_selects; ++i) {
         if (mysql_query(proxy, "SELECT 1")) {
             diag("Error executing 'SELECT 1' query (iteration %d): %s", i, mysql_error(proxy));
             mysql_close(admin_conn);
@@ -308,7 +308,7 @@ int main() {
 
     // Expected results for both queries
     std::map<int, int> expectedResults = {
-        {0, 200},
+        {0, num_selects},
         {1064, 1},
         {9001, 1},
         {9002, 1}
