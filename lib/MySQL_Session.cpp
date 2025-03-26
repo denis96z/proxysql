@@ -2815,7 +2815,6 @@ bool MySQL_Session::handler_again___status_CONNECTING_SERVER(int *_rc) {
 				thread->status_variables.stvar[st_var_max_connect_timeout_err]++;
 			}
 			client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,9001,(char *)"HY000", errmsg.c_str(), true);
-			RequestEnd(mybe->server_myds);
 			MyHGM->add_mysql_errors(current_hostgroup, (char *)"", 0, client_myds->myconn->userinfo->username, (client_myds->addr.addr ? client_myds->addr.addr : (char *)"unknown" ), client_myds->myconn->userinfo->schemaname, 9001, (char *)errmsg.c_str());
 			RequestEnd(mybe->server_myds, 9001, errmsg.c_str());
 
