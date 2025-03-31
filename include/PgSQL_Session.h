@@ -414,12 +414,6 @@ public:
 	int current_hostgroup;
 	int default_hostgroup;
 	int previous_hostgroup;
-	/**
-	 * @brief Charset directly specified by the client. Supplied and updated via 'HandshakeResponse'
-	 *   and 'COM_CHANGE_USER' packets.
-	 * @details Used when session needs to be restored via 'COM_RESET_CONNECTION'.
-	 */
-	int default_charset;
 	int locked_on_hostgroup;
 	int next_query_flagIN;
 	int mirror_hostgroup;

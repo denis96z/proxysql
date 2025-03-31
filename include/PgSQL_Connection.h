@@ -70,74 +70,131 @@ enum PgSQL_Param_Name {
 	PG_TARGET_SESSION_ATTRS,  // Determines whether the session must have certain properties to be acceptable
 	PG_LOAD_BALANCE_HOSTS,  // Controls the order in which the client tries to connect to the available hosts and addresses
 	// Environment Options
-	PG_DATESTYLE,  // Sets the value of the DateStyle parameter
-	PG_TIMEZONE,  // Sets the value of the TimeZone parameter
-	PG_GEQO,  // Enables or disables the use of the GEQO query optimizer
+	//PG_DATESTYLE,  // Sets the value of the DateStyle parameter
+	//PG_TIMEZONE,  // Sets the value of the TimeZone parameter
+	//PG_GEQO,  // Enables or disables the use of the GEQO query optimizer
 
 	PG_PARAM_SIZE
-};
-
-static const char* PgSQL_Param_Name_Str[] = {
-	"host",
-	"hostaddr",
-	"port",
-	"database",
-	"user",
-	"password",
-	"passfile",
-	"require_auth",
-	"channel_binding",
-	"connect_timeout",
-	"client_encoding",
-	"options",
-	"application_name",
-	"fallback_application_name",
-	"keepalives",
-	"keepalives_idle",
-	"keepalives_interval",
-	"keepalives_count",
-	"tcp_user_timeout",
-	"replication",
-	"gsseencmode",
-	"sslmode",
-	"requiressl",
-	"sslcompression",
-	"sslcert",
-	"sslkey",
-	"sslpassword",
-	"sslcertmode",
-	"sslrootcert",
-	"sslcrl",
-	"sslcrldir",
-	"sslsni",
-	"requirepeer",
-	"ssl_min_protocol_version",
-	"ssl_max_protocol_version",
-	"krbsrvname",
-	"gsslib",
-	"gssdelegation",
-	"service",
-	"target_session_attrs",
-	"load_balance_hosts",
-	// Environment Options
-	"datestyle",
-	"timezone",
-	"geqo"
 };
 
 struct Param_Name_Validation {
 	const char** accepted_values;
 	int default_value_idx;
-
 };
 
-static const Param_Name_Validation require_auth			{(const char*[]){"password","md5","gss","sspi","scram-sha-256","none",nullptr},-1};
-static const Param_Name_Validation replication			{(const char*[]){"true","on","yes","1","database","false","off","no","0",nullptr},-1};
-static const Param_Name_Validation gsseencmode			{(const char*[]){"disable","prefer","require",nullptr},1};
-static const Param_Name_Validation sslmode				{(const char*[]){"disable","allow","prefer","require","verify-ca","verify-full",nullptr},2};
-static const Param_Name_Validation sslcertmode			{(const char*[]){"disable","allow","require",nullptr},1};
-static const Param_Name_Validation target_session_attrs {(const char*[]){"any","read-write","read-only","primary","standby","prefer-standby",nullptr},0 };
-static const Param_Name_Validation load_balance_hosts	{(const char*[]){"disable","random",nullptr},-1};
+static const Param_Name_Validation require_auth{ (const char* []) { "password","md5","gss","sspi","scram-sha-256","none",nullptr },-1 };
+static const Param_Name_Validation replication{ (const char* []) { "true","on","yes","1","database","false","off","no","0",nullptr },-1 };
+static const Param_Name_Validation gsseencmode{ (const char* []) { "disable","prefer","require",nullptr },1 };
+static const Param_Name_Validation sslmode{ (const char* []) { "disable","allow","prefer","require","verify-ca","verify-full",nullptr },2 };
+static const Param_Name_Validation sslcertmode{ (const char* []) { "disable","allow","require",nullptr },1 };
+static const Param_Name_Validation target_session_attrs{ (const char* []) { "any","read-write","read-only","primary","standby","prefer-standby",nullptr },0 };
+static const Param_Name_Validation load_balance_hosts{ (const char* []) { "disable","random",nullptr },-1 };
+
+
+#define PARAMETER_LIST \
+    PARAM("host", nullptr) \
+    PARAM("hostaddr", nullptr) \
+    PARAM("port", nullptr) \
+    PARAM("database", nullptr) \
+    PARAM("user", nullptr) \
+    PARAM("password", nullptr) \
+    PARAM("passfile", nullptr) \
+    PARAM("require_auth", &require_auth) \
+    PARAM("channel_binding", nullptr) \
+    PARAM("connect_timeout", nullptr) \
+    PARAM("client_encoding", nullptr) \
+    PARAM("options", nullptr) \
+    PARAM("application_name", nullptr) \
+    PARAM("fallback_application_name", nullptr) \
+    PARAM("keepalives", nullptr) \
+    PARAM("keepalives_idle", nullptr) \
+    PARAM("keepalives_interval", nullptr) \
+    PARAM("keepalives_count", nullptr) \
+    PARAM("tcp_user_timeout", nullptr) \
+    PARAM("replication", &replication) \
+    PARAM("gsseencmode", &gsseencmode) \
+    PARAM("sslmode", &sslmode) \
+    PARAM("requiressl", nullptr) \
+    PARAM("sslcompression", nullptr) \
+    PARAM("sslcert", nullptr) \
+    PARAM("sslkey", nullptr) \
+    PARAM("sslpassword", nullptr) \
+    PARAM("sslcertmode", &sslcertmode) \
+    PARAM("sslrootcert", nullptr) \
+    PARAM("sslcrl", nullptr) \
+    PARAM("sslcrldir", nullptr) \
+    PARAM("sslsni", nullptr) \
+    PARAM("requirepeer", nullptr) \
+    PARAM("ssl_min_protocol_version", nullptr) \
+    PARAM("ssl_max_protocol_version", nullptr) \
+    PARAM("krbsrvname", nullptr) \
+    PARAM("gsslib", nullptr) \
+    PARAM("gssdelegation", nullptr) \
+    PARAM("service", nullptr) \
+    PARAM("target_session_attrs", &target_session_attrs) \
+    PARAM("load_balance_hosts", &load_balance_hosts)
+
+// Generate parameter array
+constexpr const char* param_name[] = {
+#define PARAM(name, val) name,
+	PARAMETER_LIST
+#undef PARAM
+};
+
+static const std::unordered_map<std::string_view, const Param_Name_Validation*> PgSQL_Param_Name_Str = {
+#define PARAM(name, val) {name, val},
+	PARAMETER_LIST
+#undef PARAM
+};
+
+#if 0
+static const std::unordered_map<const char*, const Param_Name_Validation*> PgSQL_Param_Name_Str = {
+	{ "host", nullptr },
+	{ "hostaddr", nullptr},
+	{ "port", nullptr },
+	{ "database", nullptr},
+	{ "user", nullptr},
+	{ "password", nullptr},
+	{ "passfile", nullptr},
+	{ "require_auth", &require_auth},
+	{ "channel_binding", nullptr},
+	{ "connect_timeout", nullptr},
+	{ "client_encoding", nullptr},
+	{ "options", nullptr},
+	{ "application_name", nullptr},
+	{ "fallback_application_name", nullptr},
+	{ "keepalives", nullptr},
+	{ "keepalives_idle", nullptr},
+	{ "keepalives_interval", nullptr},
+	{ "keepalives_count", nullptr},
+	{ "tcp_user_timeout", nullptr},
+	{ "replication", &replication},
+	{ "gsseencmode", &gsseencmode},
+	{ "sslmode", &sslmode},
+	{ "requiressl", nullptr},
+	{ "sslcompression", nullptr},
+	{ "sslcert", nullptr},
+	{ "sslkey", nullptr},
+	{ "sslpassword", nullptr},
+	{ "sslcertmode", &sslcertmode},
+	{ "sslrootcert", nullptr},
+	{ "sslcrl", nullptr},
+	{ "sslcrldir", nullptr},
+	{ "sslsni", nullptr},
+	{ "requirepeer", nullptr},
+	{ "ssl_min_protocol_version", nullptr},
+	{ "ssl_max_protocol_version", nullptr},
+	{ "krbsrvname", nullptr},
+	{ "gsslib", nullptr},
+	{ "gssdelegation", nullptr},
+	{ "service", nullptr},
+	{ "target_session_attrs", &target_session_attrs},
+	{ "load_balance_hosts", &load_balance_hosts},
+	// Environment Options
+	{ "datestyle", nullptr},
+	{ "timezone", nullptr},
+	{ "geqo", nullptr}
+};
 
 static const Param_Name_Validation* PgSQL_Param_Name_Accepted_Values[PG_PARAM_SIZE] = {
 	nullptr,
@@ -185,6 +242,7 @@ static const Param_Name_Validation* PgSQL_Param_Name_Accepted_Values[PG_PARAM_SI
 	nullptr,
 	nullptr
 };
+#endif
 
 #define PG_EVENT_NONE	 0x00
 #define PG_EVENT_READ	 0x01
@@ -192,6 +250,7 @@ static const Param_Name_Validation* PgSQL_Param_Name_Accepted_Values[PG_PARAM_SI
 #define PG_EVENT_EXCEPT  0x04
 #define PG_EVENT_TIMEOUT 0x08
 
+#if 0
 class PgSQL_Conn_Param {
 private:
 	bool validate(PgSQL_Param_Name key, const char* val) {
@@ -269,6 +328,50 @@ public:
 
 	std::vector<PgSQL_Param_Name> param_set;
 	char* param_value[PG_PARAM_SIZE]{};
+};
+#endif
+
+class PgSQL_Conn_Param {
+public:
+	PgSQL_Conn_Param() {}
+	~PgSQL_Conn_Param() {}
+	bool set_value(const char* key, const char* val) {
+		if (key == nullptr || val == nullptr) return false;
+		connection_parameters[key] = val;
+		return true;
+	}
+
+	inline
+	const char* get_value(PgSQL_Param_Name key) const {
+		return get_value(param_name[key]);
+	}
+
+	const char* get_value(const char* key) const {
+		auto it = connection_parameters.find(key);
+		if (it != connection_parameters.end()) {
+			return it->second.c_str();
+		}
+		return nullptr;
+	}
+	bool remove_value(const char* key) {
+		auto it = connection_parameters.find(key);
+		if (it != connection_parameters.end()) {
+			connection_parameters.erase(it);
+			return true;
+		}
+		return false;
+	}
+	bool is_empty() const {
+		return connection_parameters.empty();
+	}
+	void clear() {
+		connection_parameters.clear();
+	}
+
+private:
+	std::map<std::string, std::string> connection_parameters;
+	friend class PgSQL_Session; 
+	friend class PgSQL_Protocol;
 };
 
 class PgSQL_Variable {
@@ -418,7 +521,6 @@ public:
 	PGresult* get_result();
 	void next_multi_statement_result(PGresult* result);
 	bool set_single_row_mode();
-	void optimize() {}
 	void update_bytes_recv(uint64_t bytes_recv);
 	void update_bytes_sent(uint64_t bytes_sent);
 	void ProcessQueryAndSetStatusFlags(char* query_digest_text);

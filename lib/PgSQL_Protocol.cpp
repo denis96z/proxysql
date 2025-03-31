@@ -630,26 +630,34 @@ unsigned int get_string(const char* data, unsigned int len, const char** dst_p)
 	return (nul + 1 - data);
 }
 
-void PgSQL_Protocol::load_conn_parameters(pgsql_hdr* pkt, bool startup)
+bool PgSQL_Protocol::load_conn_parameters(pgsql_hdr* pkt)
 {
-	const char* key, * val;
-	unsigned int read_pos = 0;
+	int32_t offset = 0; 
 
-	while (1) {
+	while (offset < pkt->data.size) {
+		char* nameptr = (char*)pkt->data.ptr + offset;
+		int32_t valoffset;
+		char* valptr;
 
-		int pos = get_string(((const char*)pkt->data.ptr) + read_pos, pkt->data.size - read_pos, &key);
-		if (pos == 0) return;
+		if (*nameptr == '\0')
+			break;			/* found packet terminator */
+		valoffset = offset + strlen(nameptr) + 1;
+		if (valoffset >= pkt->data.size)
+			break;			/* missing value, will complain below */
+		valptr = (char*)pkt->data.ptr + valoffset;
 
-		read_pos += pos;
+		(*myds)->myconn->conn_params.set_value(nameptr, valptr);
 
-		pos = get_string(((const char*)pkt->data.ptr) + read_pos, pkt->data.size - read_pos, &val);
-		if (pos == 0) return;
-
-		read_pos += pos;
-
-		//slog_debug(server, "S: param: %s = %s", key, val);
-		(*myds)->myconn->conn_params.set_value(key, val);
+		offset = valoffset + strlen(valptr) + 1;
 	}
+
+	if (offset != pkt->data.size - 1) {
+		proxy_error("Malformed startup packet was received from client %s:%d\n", (*myds)->addr.addr, (*myds)->addr.port);
+		return false;
+	}
+
+	return true;
+
 }
 
 bool PgSQL_Protocol::process_startup_packet(unsigned char* pkt, unsigned int len, bool& ssl_request) {
@@ -677,13 +685,19 @@ bool PgSQL_Protocol::process_startup_packet(unsigned char* pkt, unsigned int len
 		return false;
 	}
 
-	load_conn_parameters(&hdr, true);
+	if (!load_conn_parameters(&hdr)) {
+		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p. malformed startup packet.\n", (*myds)->sess, (*myds));
+		generate_error_packet(true, false, "invalid startup packet layout: expected terminator as last byte", 
+			PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
+		return false;
+	}
 
 	const unsigned char* user = (unsigned char*)(*myds)->myconn->conn_params.get_value(PG_USER);
 
 	if (!user || *user == '\0') {
-		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p. no username supplied.\n", (*myds), (*myds)->sess);
-		generate_error_packet(true, false, "no username supplied", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
+		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p. no username supplied.\n", (*myds)->sess, (*myds));
+		generate_error_packet(true, false, "no PostgreSQL user name specified in startup packet", 
+			PGSQL_ERROR_CODES::ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION, true);
 		return false;
 	}
 
@@ -825,8 +839,6 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 		generate_error_packet(true, false, "Client charset not supported", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
 		return EXECUTION_STATE::FAILED;
 	}
-
-	(*myds)->sess->default_charset = charset_encoding;
 	
 	user = (char*)(*myds)->myconn->conn_params.get_value(PG_USER);
 
@@ -1058,92 +1070,176 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 		userinfo->username = strdup((const char*)user);
 		userinfo->password = strdup((const char*)password);
 
-		const char* db = (*myds)->myconn->conn_params.get_value(PG_DATABASE);
-		userinfo->set_dbname(db ? db : userinfo->username);
+		std::vector<std::pair<std::string, std::string>> parameters;
+		std::vector<std::pair<std::string, std::string>> options_list;
 
-		assert(sess);
-		assert(sess->client_myds);
+		parameters.reserve((*myds)->myconn->conn_params.connection_parameters.size());
 
-		PgSQL_Connection* myconn = sess->client_myds->myconn;
-		assert(myconn);
-		myconn->set_charset(charset);
-		sess->set_default_session_variable(PGSQL_CLIENT_ENCODING, charset);
+		// new implementation
+		for (const auto& [param_name, param_val] : (*myds)->myconn->conn_params.connection_parameters) {
+			std::string param_name_lowercase(param_name);
+			std::transform(param_name_lowercase.cbegin(), param_name_lowercase.cend(), param_name_lowercase.begin(), ::tolower);
 
-		// get datestyle from connection parameters
-		const char* datestyle_tmp = (*myds)->myconn->conn_params.get_value(PG_DATESTYLE);
-		std::string datestyle = datestyle_tmp ? datestyle_tmp : "";
+			auto it = PgSQL_Param_Name_Str.find(param_name_lowercase.c_str());
+			if (it != PgSQL_Param_Name_Str.end()) {
 
-		if (datestyle.empty()) {
-			// No need to validate default DateStyle again; it is already verified in PgSQL_Threads_Handler::set_variable.
-			datestyle = pgsql_thread___default_variables[PGSQL_DATESTYLE];
-		} else {
-			PgSQL_DateStyle_t datestyle_parsed = PgSQL_DateStyle_Util::parse_datestyle(datestyle);
+				if (param_name_lowercase.compare("user") == 0 || param_name_lowercase.compare("password") == 0) {
+					continue;
+				}
 
-			// If DateStyle provided in the connection parameters is incomplete, the missing parts will be taken from the default DateStyle.
-			if (datestyle_parsed.format == DATESTYLE_FORMAT_NONE || datestyle_parsed.order == DATESTYLE_ORDER_NONE) {
-				PgSQL_DateStyle_t datestyle_default = PgSQL_DateStyle_Util::parse_datestyle(pgsql_thread___default_variables[PGSQL_DATESTYLE]);
-				datestyle = PgSQL_DateStyle_Util::datestyle_to_string(datestyle_parsed, datestyle_default);
+				bool is_validation_success = false;
+				const Param_Name_Validation* validation = it->second;
+
+				if (validation != nullptr && validation->accepted_values) {
+					const char** accepted_value = validation->accepted_values;
+					while (accepted_value != nullptr) {
+						if (strcmp(param_val.c_str(), *accepted_value) == 0) {
+							is_validation_success = true;
+							break;
+						}
+					}
+				} else {
+					is_validation_success = true;
+				}
+
+				if (is_validation_success == false) {
+					char* m = NULL;
+					char* errmsg = NULL;
+					proxy_error("invalid value for parameter \"%s\": \"%s\"\n", param_name.c_str(), param_val.c_str());
+					m = (char*)"invalid value for parameter \"%s\": \"%s\"";
+					errmsg = (char*)malloc(param_val.length() + param_name.length() + strlen(m));
+					sprintf(errmsg, m, param_name.c_str(), param_val.c_str());
+					generate_error_packet(true, false, errmsg, PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, true);
+					free(errmsg);	
+					ret = EXECUTION_STATE::FAILED;
+					free(userinfo->username);
+					free(userinfo->password);
+					userinfo->username = strdup("");
+					userinfo->password = strdup("");
+					goto __exit_process_pkt_handshake_response;
+				}
+
+				if (param_name_lowercase.compare("database") == 0) {
+					userinfo->set_dbname(param_val.empty() ? user : param_val.c_str());
+				} else if (param_name_lowercase.compare("client_encoding") == 0) {
+					assert(sess);
+					assert(sess->client_myds);
+					PgSQL_Connection* myconn = sess->client_myds->myconn;
+					assert(myconn);
+					myconn->set_charset(charset);
+					sess->set_default_session_variable(PGSQL_CLIENT_ENCODING, charset);
+				} else if (param_name_lowercase.compare("options") == 0) {
+					options_list = parse_options(param_val.c_str());
+				}
+			} else {
+				parameters.push_back(std::make_pair(param_name_lowercase, param_val));
 			}
 		}
 
-		assert(datestyle.empty() == false);
-
-		if (pgsql_variables.client_set_value(sess, PGSQL_DATESTYLE, datestyle.c_str())) {
-			// change current datestyle
-			sess->current_datestyle = PgSQL_DateStyle_Util::parse_datestyle(datestyle);
-			sess->set_default_session_variable(PGSQL_DATESTYLE, datestyle.c_str());
+		if (userinfo->dbname == nullptr) {
+			userinfo->set_dbname(user);
 		}
 
-		// get timezone from connection parameters
-		const char* timezone = (*myds)->myconn->conn_params.get_value(PG_TIMEZONE);
-		if (timezone == NULL)
-			timezone = pgsql_thread___default_variables[PGSQL_TIMEZONE];
-
-		pgsql_variables.client_set_value(sess, PGSQL_TIMEZONE, timezone);
-		sess->set_default_session_variable(PGSQL_TIMEZONE, timezone);
-
-		const char* intervalstyle = pgsql_thread___default_variables[PGSQL_INTERVALSTYLE];
-		if (intervalstyle) {
-			pgsql_variables.client_set_value(sess, PGSQL_INTERVALSTYLE, intervalstyle);
-			sess->set_default_session_variable(PGSQL_INTERVALSTYLE, intervalstyle);
+		if (options_list.empty() == false) {
+			options_list.reserve(parameters.size() + options_list.size());
+			options_list.insert(options_list.end(), std::make_move_iterator(parameters.begin()), std::make_move_iterator(parameters.end()));
+			parameters = std::move(options_list);
 		}
 
-		// get standard_conforming_strings from connection parameters
-		const char* standard_conforming_strings = pgsql_thread___default_variables[PGSQL_STANDARD_CONFORMING_STRINGS];
-		if (standard_conforming_strings) {
-			pgsql_variables.client_set_value(sess, PGSQL_STANDARD_CONFORMING_STRINGS, standard_conforming_strings);
-			sess->set_default_session_variable(PGSQL_STANDARD_CONFORMING_STRINGS, standard_conforming_strings);
-		}
+		// assign default datestyle to current datestyle
+		sess->current_datestyle = PgSQL_DateStyle_Util::parse_datestyle(pgsql_thread___default_variables[PGSQL_DATESTYLE]);
 
-		const char* options = (*myds)->myconn->conn_params.get_value(PG_OPTIONS);
+		for (const auto&[key, val] : parameters) {
 
-		auto options_list = parse_options(options);
-
-		for (auto& option : options_list) {
 			int idx = PGSQL_NAME_LAST_HIGH_WM;
 			for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-				if (i == PGSQL_NAME_LAST_LOW_WM) 
+				if (i == PGSQL_NAME_LAST_LOW_WM)
 					continue;
-				if (variable_name_exists(pgsql_tracked_variables[i], option.first.c_str()) == true) {
+				if (strcmp(pgsql_tracked_variables[i].set_variable_name, key.c_str()) == 0) {
 					idx = i;
 					break;
-				} 
+				}
 			}
 
 			if (idx != PGSQL_NAME_LAST_HIGH_WM) {
-				pgsql_variables.client_set_value(sess, idx, option.second.c_str());
-				sess->set_default_session_variable((enum pgsql_variable_name)idx, option.second.c_str());
+				std::string value1 = val;
+
+				char* transformed_value = nullptr;
+				if (pgsql_tracked_variables[idx].validator && pgsql_tracked_variables[idx].validator->validate &&
+					(
+						*pgsql_tracked_variables[idx].validator->validate)(
+							value1.c_str(), &pgsql_tracked_variables[idx].validator->params, sess, &transformed_value) == false
+					) {
+					char* m = NULL;
+					char* errmsg = NULL;
+					proxy_error("invalid value for parameter \"%s\": \"%s\"\n", pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
+					m = (char*)"invalid value for parameter \"%s\": \"%s\"";
+					errmsg = (char*)malloc(value1.length() + strlen(pgsql_tracked_variables[idx].set_variable_name) + strlen(m));
+					sprintf(errmsg, m, pgsql_tracked_variables[idx].set_variable_name, value1.c_str());
+					generate_error_packet(true, false, errmsg, PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, true);
+					free(errmsg);
+					ret = EXECUTION_STATE::FAILED;
+					free(userinfo->username);
+					free(userinfo->password);
+					userinfo->username = strdup("");
+					userinfo->password = strdup("");
+					goto __exit_process_pkt_handshake_response;
+				}
+
+				if (transformed_value) {
+					value1 = transformed_value;
+					free(transformed_value);
+				}
+
+				if (idx == PGSQL_DATESTYLE) {
+					// get datestyle from connection parameters
+					std::string datestyle = val.empty() == false ? val : "";
+
+					if (datestyle.empty()) {
+						// No need to validate default DateStyle again; it is already verified in PgSQL_Threads_Handler::set_variable.
+						datestyle = pgsql_thread___default_variables[PGSQL_DATESTYLE];
+					}
+					else {
+						PgSQL_DateStyle_t datestyle_parsed = PgSQL_DateStyle_Util::parse_datestyle(datestyle);
+
+						// If DateStyle provided in the connection parameters is incomplete, the missing parts will be taken from the default DateStyle.
+						if (datestyle_parsed.format == DATESTYLE_FORMAT_NONE || datestyle_parsed.order == DATESTYLE_ORDER_NONE) {
+							PgSQL_DateStyle_t datestyle_default = PgSQL_DateStyle_Util::parse_datestyle(pgsql_thread___default_variables[PGSQL_DATESTYLE]);
+							datestyle = PgSQL_DateStyle_Util::datestyle_to_string(datestyle_parsed, datestyle_default);
+						}
+					}
+
+					assert(datestyle.empty() == false);
+
+					if (pgsql_variables.client_set_value(sess, PGSQL_DATESTYLE, datestyle.c_str())) {
+						// change current datestyle
+						sess->current_datestyle = PgSQL_DateStyle_Util::parse_datestyle(datestyle);
+						sess->set_default_session_variable(PGSQL_DATESTYLE, datestyle.c_str());
+					}
+				} else {
+					pgsql_variables.client_set_value(sess, idx, val.c_str());
+					sess->set_default_session_variable((enum pgsql_variable_name)idx, val.c_str());
+				}
 			} else {
-				const char* val = option.second.c_str();
-				const char* escaped_str = escape_string_backslash_spaces(val);
-				sess->untracked_option_parameters = "-c " + option.first + "=" + escaped_str + " ";
+				proxy_warning("Unrecognized connection parameter. Please report this as a bug for future enhancements:%s:%s\n", key.c_str(), val.c_str());
+				const char* escaped_str = escape_string_backslash_spaces(val.c_str());
+				sess->untracked_option_parameters = "-c " + key + "=" + escaped_str + " ";
 				if (escaped_str != val)
 					free((char*)escaped_str);
 			}
 		}
 
-		//if (charset)
-		//	(*myds)->sess->default_charset = charset;
+		// set mandatory variables if not sent by client
+		for (int i = 0; i < PGSQL_NAME_LAST_LOW_WM; i++) {
+			//if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[i])) {
+			//	continue;
+			//}
+			if (pgsql_variables.client_get_hash(sess, i) != 0)
+				continue;
+			const char* val = pgsql_thread___default_variables[i];
+			pgsql_variables.client_set_value(sess, i, val);
+			sess->set_default_session_variable((pgsql_variable_name)i, val);
+		}
 	}
 	else {
 		// we always duplicate username and password, or crashes happen

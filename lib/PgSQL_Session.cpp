@@ -825,10 +825,9 @@ void PgSQL_Session::generate_proxysql_internal_session_json(json& j) {
 			//j["conn"]["ps"]["client_stmt_to_global_ids"] = client_myds->myconn->local_stmts->client_stmt_to_global_ids;
 			
 			const PgSQL_Conn_Param& conn_params = client_myds->myconn->conn_params;
-			for (size_t i = 0; i < conn_params.param_set.size(); i++) {
-				if (conn_params.param_value[conn_params.param_set[i]] != NULL) {
-					j["client"]["conn"]["connection_options"][PgSQL_Param_Name_Str[conn_params.param_set[i]]] = conn_params.param_value[conn_params.param_set[i]];
-				}
+
+			for (const auto& [key, val] : conn_params.connection_parameters) {
+				j["client"]["conn"]["connection_options"][key.c_str()] = val.c_str();
 			}
 		}
 	}
@@ -3928,7 +3927,7 @@ void PgSQL_Session::handler___status_CONNECTING_CLIENT___STATE_SERVER_HANDSHAKE(
 		else {
 			client_addr = strdup((char*)"");
 		}
-		if (client_myds->myconn->userinfo->username) {
+		if (client_myds->myconn->userinfo->username && client_myds->myconn->userinfo->username[0] != '\0') {
 			char* _s = (char*)malloc(strlen(client_myds->myconn->userinfo->username) + 100 + strlen(client_addr));
 			uint8_t _pid = 2;
 			if (client_myds->switching_auth_stage) _pid += 2;
