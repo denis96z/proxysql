@@ -81,7 +81,8 @@ static inline char is_normal_char(char c) {
 }
 */
 
-static const std::array<std::string,5> pgsql_critical_variables = {
+static const std::array<std::string,6> pgsql_critical_variables = {
+	"client_encoding",
 	"datestyle",
 	"intervalstyle",
 	"standard_conforming_strings",
@@ -1507,98 +1508,6 @@ bool PgSQL_Session::handler_again___status_SETTING_INIT_CONNECT(int* _rc) {
 	return ret;
 }
 
-bool PgSQL_Session::handler_again___status_CHANGING_CHARSET(int* _rc) {
-	assert(mybe->server_myds->myconn);
-	PgSQL_Data_Stream* myds = mybe->server_myds;
-	PgSQL_Connection* myconn = myds->myconn;
-
-	/* Validate that server can support client's charset */
-	if (!validate_charset(this, PGSQL_CLIENT_ENCODING, *_rc)) {
-		return false;
-	}
-
-	myds->DSS = STATE_MARIADB_QUERY;
-	enum session_status st = status;
-	if (myds->mypolls == NULL) {
-		thread->mypolls.add(POLLIN | POLLOUT, mybe->server_myds->fd, mybe->server_myds, thread->curtime);
-	}
-
-	std::string charset = pgsql_variables.client_get_value(this, PGSQL_CLIENT_ENCODING);
-	std::string query = "SET CLIENT_ENCODING TO '" + charset + "'";
-
-	int rc = myconn->async_send_simple_command(myds->revents, (char*)query.c_str(),query.length());
-
-	if (rc == 0) {
-		__sync_fetch_and_add(&PgHGM->status.backend_set_client_encoding, 1);
-		myds->DSS = STATE_MARIADB_GENERIC;
-		st = previous_status.top();
-		previous_status.pop();
-		NEXT_IMMEDIATE_NEW(st);
-	} else {
-		if (rc == -1) {
-			// the command failed
-			const bool error_present = myconn->is_error_present();
-			PgHGM->p_update_pgsql_error_counter(
-				p_pgsql_error_type::pgsql,
-				myconn->parent->myhgc->hid,
-				myconn->parent->address,
-				myconn->parent->port,
-				(error_present ? 9999 : ER_PROXYSQL_OFFLINE_SRV) // TOFIX: 9999 is a placeholder for the actual error code
-			);
-			if (error_present == false || (error_present == true && myconn->is_connection_in_reusable_state() == false)) {
-				bool retry_conn = false;
-				// client error, serious
-				proxy_error(
-					"Client trying to set a charset (%s) not supported by backend (%s:%d). Changing it to %s\n",
-					charset.c_str(), myconn->parent->address, myconn->parent->port, pgsql_tracked_variables[PGSQL_CLIENT_ENCODING].default_value
-				);
-				detected_broken_connection(__FILE__, __LINE__, __func__, "during SET CLIENT_ENCODING", myconn);
-				if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false) {
-					retry_conn = true;
-				}
-				myds->destroy_MySQL_Connection_From_Pool(false);
-				myds->fd = 0;
-				if (retry_conn) {
-					myds->DSS = STATE_NOT_INITIALIZED;
-					NEXT_IMMEDIATE_NEW(CONNECTING_SERVER);
-				}
-				*_rc = -1;
-				return false;
-			} else {
-				proxy_warning("Error during SET CLIENT_ENCODING: %s\n", myconn->get_error_code_with_message().c_str());
-				// we won't go back to PROCESSING_QUERY
-				st = previous_status.top();
-				previous_status.pop();
-				client_myds->myprot.generate_error_packet(true, true, myconn->get_error_message().c_str(), myconn->get_error_code(), false);
-				myds->destroy_MySQL_Connection_From_Pool(true);
-				myds->fd = 0;
-				RequestEnd(myds); //fix bug #682
-			}
-		} else {
-			if (rc == -2) {
-				bool retry_conn = false;
-				proxy_error("Timeout during SET CLIENT_ENCODING on %s , %d\n", myconn->parent->address, myconn->parent->port);
-				PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::pgsql, myconn->parent->myhgc->hid, myconn->parent->address, myconn->parent->port, ER_PROXYSQL_CHANGE_USER_TIMEOUT);
-				if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false) {
-					retry_conn = true;
-				}
-				myds->destroy_MySQL_Connection_From_Pool(false);
-				myds->fd = 0;
-				if (retry_conn) {
-					myds->DSS = STATE_NOT_INITIALIZED;
-					NEXT_IMMEDIATE_NEW(CONNECTING_SERVER);
-				}
-				*_rc = -1;
-				return false;
-			}
-			else {
-				// rc==1 , nothing to do for now
-			}
-		}
-	}
-	return false;
-}
-
 bool PgSQL_Session::handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, const char* var_name, const char* var_value, 
 	bool no_quote, bool set_transaction) {
 	bool ret = false;
@@ -1649,6 +1558,9 @@ bool PgSQL_Session::handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, co
 		query = NULL;
 	}
 	if (rc == 0) {
+		if (strncasecmp(var_name, "client_encoding", sizeof("client_encoding")-1) == 0) {
+			__sync_fetch_and_add(&PgHGM->status.backend_set_client_encoding, 1);
+		}
 		myds->revents |= POLLOUT;	// we also set again POLLOUT to send a query immediately!
 		myds->DSS = STATE_MARIADB_GENERIC;
 		st = previous_status.top();
@@ -3313,11 +3225,6 @@ handler_again:
 						}
 						if (locked_on_hostgroup == -1 || locked_on_hostgroup_and_all_variables_set == false) {
 
-							// verify charset
-							if (verify_set_names(this)) {
-								goto handler_again;
-							}
-
 							for (auto i = 0; i < PGSQL_NAME_LAST_LOW_WM; i++) {
 								auto client_hash = client_myds->myconn->var_hash[i];
 #ifdef DEBUG
@@ -3596,9 +3503,6 @@ bool PgSQL_Session::handler_again___multiple_statuses(int* rc) {
 	// TODO: fix this
 	//case SETTING_INIT_CONNECT:
 	//	ret = handler_again___status_SETTING_INIT_CONNECT(rc);
-		break;
-	case SETTING_CHARSET:
-		ret = handler_again___status_CHANGING_CHARSET(rc);
 		break;
 	default:
 		break;
@@ -4349,7 +4253,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 							proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", var.c_str(), value1.c_str());
 							uint32_t var_hash_int = SpookyHash::Hash32(value1.c_str(), value1.length(), 10);
 							if (pgsql_variables.client_get_hash(this, pgsql_tracked_variables[idx].idx) != var_hash_int) {
-								if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[idx].idx, value1.c_str())) {
+								if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[idx].idx, value1.c_str(), true)) {
 									return false;
 								}
 								if (idx == PGSQL_DATESTYLE) {
@@ -4629,7 +4533,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				l_free(pkt->size, pkt->ptr);
 				return true;
 
-			}*/ else if (match_regexes && match_regexes[3]->match(dig)) {
+			} else if (match_regexes && match_regexes[3]->match(dig)) {
 				std::vector<std::pair<std::string, std::string>> param_status;
 				PgSQL_Set_Stmt_Parser parser(nq);
 				std::string charset = parser.parse_character_set();
@@ -4681,7 +4585,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				RequestEnd(NULL);
 				l_free(pkt->size, pkt->ptr);
 				return true;
-			} else {
+			}*/ else {
 				unable_to_parse_set_statement(lock_hostgroup);
 				return false;
 			}
@@ -4720,25 +4624,40 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 
 			if (strncasecmp(nq.c_str(), "ALL", 3) == 0) {
 
-				for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
+				for (int idx = 0; idx < PGSQL_NAME_LAST_LOW_WM; idx++) {
 
-					if (i == PGSQL_NAME_LAST_LOW_WM) 
-						continue;
+					const char* name = pgsql_tracked_variables[idx].set_variable_name;
+					const char* value = get_default_session_variable((enum pgsql_variable_name)idx);
 
-					const char* name = pgsql_tracked_variables[i].set_variable_name;
-					const char* value = get_default_session_variable((enum pgsql_variable_name)i);
-					
 					proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
 					uint32_t var_hash_int = SpookyHash::Hash32(value, strlen(value), 10);
-					if (pgsql_variables.client_get_hash(this, pgsql_tracked_variables[i].idx) != var_hash_int) {
-						if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[i].idx, value)) {
+					if (pgsql_variables.client_get_hash(this, pgsql_tracked_variables[idx].idx) != var_hash_int) {
+						if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[idx].idx, value, false)) {
 							return false;
 						}
-						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[i])) {
+						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {
 							param_status.push_back(std::make_pair(name, value));
 						}
 					}
 				}
+
+				for (int idx : client_myds->myconn->dynamic_variables_idx) {
+					assert(idx < PGSQL_NAME_LAST_HIGH_WM);
+					const char* name = pgsql_tracked_variables[idx].set_variable_name;
+					const char* value = get_default_session_variable((enum pgsql_variable_name)idx);
+					proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
+					uint32_t var_hash_int = SpookyHash::Hash32(value, strlen(value), 10);
+					if (pgsql_variables.client_get_hash(this, pgsql_tracked_variables[idx].idx) != var_hash_int) {
+						if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[idx].idx, value, false)) {
+							return false;
+						}
+						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {
+							param_status.push_back(std::make_pair(name, value));
+						}
+					}
+				}
+
+				client_myds->myconn->reorder_dynamic_variables_idx();
 
 			} else if (std::find(pgsql_variables.ignore_vars.begin(), pgsql_variables.ignore_vars.end(), nq) != pgsql_variables.ignore_vars.end()) {
 				// this is a variable we parse but ignore
@@ -4765,7 +4684,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 
 					uint32_t var_hash_int = SpookyHash::Hash32(value, strlen(value), 10);
 					if (pgsql_variables.client_get_hash(this, pgsql_tracked_variables[idx].idx) != var_hash_int) {
-						if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[idx].idx, value)) {
+						if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[idx].idx, value, true)) {
 							return false;
 						}
 						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {

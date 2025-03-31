@@ -1791,9 +1791,10 @@ extern const pgsql_variable_validator pgsql_variable_validator_client_min_messag
 extern const pgsql_variable_validator pgsql_variable_validator_bytea_output;
 extern const pgsql_variable_validator pgsql_variable_validator_extra_float_digits;
 extern const pgsql_variable_validator pgsql_variable_validator_maintenance_work_mem;
+extern const pgsql_variable_validator pgsql_variable_validator_client_encoding;
 
 pgsql_variable_st pgsql_tracked_variables[]{
-	{ PGSQL_CLIENT_ENCODING,       SETTING_CHARSET,	    "client_encoding", "client_encoding", "UTF8", (PGTRACKED_VAR_OPT_SET_TRANSACTION | PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), nullptr, { "names", nullptr } },
+	{ PGSQL_CLIENT_ENCODING,       SETTING_VARIABLE,	"client_encoding", "client_encoding", "UTF8", (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_client_encoding, { "names", nullptr } },
 	{ PGSQL_DATESTYLE,			   SETTING_VARIABLE,	"datestyle", "datestyle", "ISO, MDY" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_datestyle, nullptr },
 	{ PGSQL_INTERVALSTYLE,		   SETTING_VARIABLE,	"intervalstyle", "intervalstyle", "postgres" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_intervalstyle, nullptr },
 	{ PGSQL_STANDARD_CONFORMING_STRINGS, SETTING_VARIABLE, "standard_conforming_strings", "standard_conforming_strings", "on", (PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_bool, nullptr },

@@ -283,9 +283,6 @@ private:
 	bool handler_again___status_SETTING_LDAP_USER_VARIABLE(int*);
 	bool handler_again___status_SETTING_SQL_MODE(int*);
 	bool handler_again___status_SETTING_SESSION_TRACK_GTIDS(int*);
-#endif // 0
-	bool handler_again___status_CHANGING_CHARSET(int* _rc);
-#if 0
 	bool handler_again___status_CHANGING_SCHEMA(int*);
 #endif // 0
 	bool handler_again___status_CONNECTING_SERVER(int*);

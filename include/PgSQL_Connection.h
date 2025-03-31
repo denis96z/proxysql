@@ -38,7 +38,6 @@ enum PgSQL_Param_Name {
 	PG_REQUIRE_AUTH,  // Specifies the authentication method that the client requires from the server
 	PG_CHANNEL_BINDING,  // Controls the client's use of channel binding
 	PG_CONNECT_TIMEOUT,  // Maximum time to wait while connecting, in seconds
-	PG_CLIENT_ENCODING,  // Sets the client_encoding configuration parameter for this connection
 	PG_OPTIONS,  // Specifies command-line options to send to the server at connection start
 	PG_APPLICATION_NAME,  // Specifies a value for the application_name configuration parameter
 	PG_FALLBACK_APPLICATION_NAME,  // Specifies a fallback value for the application_name configuration parameter
@@ -90,7 +89,7 @@ static const Param_Name_Validation sslcertmode{ (const char* []) { "disable","al
 static const Param_Name_Validation target_session_attrs{ (const char* []) { "any","read-write","read-only","primary","standby","prefer-standby",nullptr },0 };
 static const Param_Name_Validation load_balance_hosts{ (const char* []) { "disable","random",nullptr },-1 };
 
-
+// Excluding client_encoding since it is managed as part of the session variables
 #define PARAMETER_LIST \
     PARAM("host", nullptr) \
     PARAM("hostaddr", nullptr) \
@@ -102,7 +101,6 @@ static const Param_Name_Validation load_balance_hosts{ (const char* []) { "disab
     PARAM("require_auth", &require_auth) \
     PARAM("channel_binding", nullptr) \
     PARAM("connect_timeout", nullptr) \
-    PARAM("client_encoding", nullptr) \
     PARAM("options", nullptr) \
     PARAM("application_name", nullptr) \
     PARAM("fallback_application_name", nullptr) \
@@ -141,108 +139,12 @@ constexpr const char* param_name[] = {
 #undef PARAM
 };
 
-static const std::unordered_map<std::string_view, const Param_Name_Validation*> PgSQL_Param_Name_Str = {
+// make sure all the keys are in lower case
+static const std::unordered_map<std::string_view, const Param_Name_Validation*> param_name_map = {
 #define PARAM(name, val) {name, val},
 	PARAMETER_LIST
 #undef PARAM
 };
-
-#if 0
-static const std::unordered_map<const char*, const Param_Name_Validation*> PgSQL_Param_Name_Str = {
-	{ "host", nullptr },
-	{ "hostaddr", nullptr},
-	{ "port", nullptr },
-	{ "database", nullptr},
-	{ "user", nullptr},
-	{ "password", nullptr},
-	{ "passfile", nullptr},
-	{ "require_auth", &require_auth},
-	{ "channel_binding", nullptr},
-	{ "connect_timeout", nullptr},
-	{ "client_encoding", nullptr},
-	{ "options", nullptr},
-	{ "application_name", nullptr},
-	{ "fallback_application_name", nullptr},
-	{ "keepalives", nullptr},
-	{ "keepalives_idle", nullptr},
-	{ "keepalives_interval", nullptr},
-	{ "keepalives_count", nullptr},
-	{ "tcp_user_timeout", nullptr},
-	{ "replication", &replication},
-	{ "gsseencmode", &gsseencmode},
-	{ "sslmode", &sslmode},
-	{ "requiressl", nullptr},
-	{ "sslcompression", nullptr},
-	{ "sslcert", nullptr},
-	{ "sslkey", nullptr},
-	{ "sslpassword", nullptr},
-	{ "sslcertmode", &sslcertmode},
-	{ "sslrootcert", nullptr},
-	{ "sslcrl", nullptr},
-	{ "sslcrldir", nullptr},
-	{ "sslsni", nullptr},
-	{ "requirepeer", nullptr},
-	{ "ssl_min_protocol_version", nullptr},
-	{ "ssl_max_protocol_version", nullptr},
-	{ "krbsrvname", nullptr},
-	{ "gsslib", nullptr},
-	{ "gssdelegation", nullptr},
-	{ "service", nullptr},
-	{ "target_session_attrs", &target_session_attrs},
-	{ "load_balance_hosts", &load_balance_hosts},
-	// Environment Options
-	{ "datestyle", nullptr},
-	{ "timezone", nullptr},
-	{ "geqo", nullptr}
-};
-
-static const Param_Name_Validation* PgSQL_Param_Name_Accepted_Values[PG_PARAM_SIZE] = {
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	&require_auth,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	&replication,
-	&gsseencmode,
-	&sslmode,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	&sslcertmode,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	nullptr,
-	&target_session_attrs,
-	&load_balance_hosts,
-	nullptr,
-	nullptr,
-	nullptr
-};
-#endif
 
 #define PG_EVENT_NONE	 0x00
 #define PG_EVENT_READ	 0x01
@@ -250,91 +152,11 @@ static const Param_Name_Validation* PgSQL_Param_Name_Accepted_Values[PG_PARAM_SI
 #define PG_EVENT_EXCEPT  0x04
 #define PG_EVENT_TIMEOUT 0x08
 
-#if 0
-class PgSQL_Conn_Param {
-private:
-	bool validate(PgSQL_Param_Name key, const char* val) {
-		assert(val);
-		const Param_Name_Validation* validation = PgSQL_Param_Name_Accepted_Values[key];
-
-		if (validation != nullptr && validation->accepted_values) {
-			const char** accepted_value = validation->accepted_values;
-			while (accepted_value != nullptr) {
-				if (strcmp(val, *accepted_value) == 0) {
-					return true;
-				}
-			}
-		} else {
-			return true;
-		}
-		
-		return false;
-	}
-
-public:
-	PgSQL_Conn_Param() {}
-	~PgSQL_Conn_Param() {
-		for (int i = 0; i < PG_PARAM_SIZE; i++) {
-			if (param_value[i])
-				free(param_value[i]);
-		}
-	}
-
-	bool set_value(PgSQL_Param_Name key, const char* val) {
-		if (key == -1) return false;
-		if (validate(key, val)) {
-			if (param_value[key]) {
-				free(param_value[key]);
-			}
-			param_value[key] = strdup(val);
-			param_set.push_back(key);
-			return true;
-		}
-		return false;
-	}
-
-	bool set_value(const char* key, const char* val) {
-		return set_value((PgSQL_Param_Name)get_param_name(key), val);
-	}
-
-	void reset_value(PgSQL_Param_Name key) {
-		if (param_value[key]) {
-			free(param_value[key]);
-		}
-		param_value[key] = nullptr;
-
-		// this has O(n) complexity. need to fix it....
-		param_set.erase(param_set.begin() + static_cast<int>(key));
-	}
-
-	const char* get_value(PgSQL_Param_Name key) const {
-		return param_value[key];
-	}
-
-	int get_param_name(const char* name) {
-		int key = -1;
-
-		for (int i = 0; i < PG_PARAM_SIZE; i++) {
-			if (strcmp(name, PgSQL_Param_Name_Str[i]) == 0) {
-				key = i;
-				break;
-			}
-		}
-		if (key == -1) {
-			proxy_warning("Unrecognized connection option. Please report this as a bug for future enhancements:%s\n", name);
-		}
-		return key;
-	}
-
-	std::vector<PgSQL_Param_Name> param_set;
-	char* param_value[PG_PARAM_SIZE]{};
-};
-#endif
-
 class PgSQL_Conn_Param {
 public:
 	PgSQL_Conn_Param() {}
 	~PgSQL_Conn_Param() {}
+
 	bool set_value(const char* key, const char* val) {
 		if (key == nullptr || val == nullptr) return false;
 		connection_parameters[key] = val;
@@ -353,6 +175,7 @@ public:
 		}
 		return nullptr;
 	}
+
 	bool remove_value(const char* key) {
 		auto it = connection_parameters.find(key);
 		if (it != connection_parameters.end()) {
@@ -361,9 +184,13 @@ public:
 		}
 		return false;
 	}
+
+	inline
 	bool is_empty() const {
 		return connection_parameters.empty();
 	}
+
+	inline
 	void clear() {
 		connection_parameters.clear();
 	}
@@ -524,8 +351,6 @@ public:
 	void update_bytes_recv(uint64_t bytes_recv);
 	void update_bytes_sent(uint64_t bytes_sent);
 	void ProcessQueryAndSetStatusFlags(char* query_digest_text);
-	void set_charset(const char* charset);
-	void connect_start_SetCharset(const char* client_encoding, uint32_t hash = 0);
 
 	inline const PGconn* get_pg_connection() const { return pgsql_conn; }
 	inline int get_pg_server_version() { return PQserverVersion(pgsql_conn); }
