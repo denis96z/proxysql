@@ -768,6 +768,11 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 				// Add the raw bytes of the parameter value.
 				total_bytes += value_len;
 			}
+		} else {
+			// Deterministic binary logging: always report 0 parameters.
+			uint16_t num_params = 0;
+			uint8_t paramCountLen = mysql_encode_length(num_params, buf);
+			total_bytes += paramCountLen;
 		}
 	}
 
@@ -921,6 +926,11 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 					f->write(convertedValue.data(), value_len);
 				}
 			}
+		} else {
+			// Deterministic binary logging: always report 0 parameters.
+			uint16_t num_params = 0;
+			uint8_t paramCountLen = mysql_encode_length(num_params, buf);
+			f->write((char *)buf, paramCountLen);
 		}
 	}
 
