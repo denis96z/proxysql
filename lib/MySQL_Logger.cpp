@@ -650,6 +650,63 @@ void MySQL_Event::write_auth(std::fstream *f, MySQL_Session *sess) {
 	*f << j.dump(-1, ' ', false, json::error_handler_t::replace) << std::endl;
 }
 
+/**
+ * @brief Writes a query event to the given file stream in a specifically encoded format.
+ *
+ * This function assembles and writes a MySQL query event record to the provided std::fstream.
+ * It computes the total byte size of the record by encoding various fields (such as thread ID, username, schema name,
+ * client information, timestamps, and the actual query) and then writes the record in binary format, prefixed by its total length.
+ *
+ * Detailed Process:
+ *   - The function begins by initializing a total_bytes counter, incrementing it by the number of bytes each field will occupy
+ *     after being encoded.
+ *   - It encodes fundamental fields including:
+ *       • Event type (et) encoded in 1 byte.
+ *       • Thread ID, whose encoded length is computed using mysql_encode_length.
+ *       • Username and schema name: their lengths are determined via strlen(), then the lengths are encoded, and finally the raw
+ *         string data is accounted for.
+ *       • Client and server information: similar encoding is applied. For the server details, encoding is conditionally applied only if
+ *         the host id (hid) is not UINT64_MAX.
+ *       • Timestamps (start_time and end_time) along with other numeric fields such as client statement ID, affected_rows, last_insert_id,
+ *         and rows_sent are also encoded based on their variable-length representation.
+ *
+ *   - If a non-standard SQL statement type is detected (specifically, if the event type is PROXYSQL_COM_STMT_EXECUTE),
+ *     additional processing is performed:
+ *       • The function accesses statement execution metadata (stmt_execute_metadata_t) from the current session.
+ *       • It calculates and writes the encoded count of parameters.
+ *       • A null bitmap is constructed to indicate which parameters are NULL, with one bit per parameter.
+ *       • For each parameter, the function writes:
+ *            - The parameter type (2 bytes).
+ *            - The length of the parameter value (using a custom encoding scheme with mysql_encode_length),
+ *              followed by the raw parameter value bytes, which are obtained through a conversion function (getValueForBind)
+ *              producing a string representation.
+ *
+ *   - Before writing the actual data, the total length of the event (total_bytes) is written as a fixed-size 8-byte field.
+ *     Then, each encoded part (event type, field lengths, raw data, and any additional parameters) is sequentially written to the stream.
+ *
+ * Thread Safety & Performance Considerations:
+ *   - The critical write lock (wrlock) for accessing the underlying file or resource is acquired just before writing to disk,
+ *     minimizing the duration for which the resource is locked.
+ *   - The function depends on external helper routines:
+ *       • mysql_encode_length: to determine the number of bytes required to store an integer in a variable-length format.
+ *       • write_encoded_length: to actually write the encoded lengths to the buffer and then to the file stream.
+ *       • getValueForBind: to convert parameter data bound to a query into a string representation.
+ *
+ * @param f[in,out] Pointer to a std::fstream object representing the file stream to write the query event record.
+ *
+ * @return Returns the total size in bytes (as a uint64_t) that was written to the file stream.
+ *
+ * @note The function assumes that the session and associated metadata for prepared statements (stmt_meta) are valid and
+ *       available when processing a COM_STMT_EXECUTE event.
+ *
+ * @warning Ensure that the passed file stream pointer is valid and opened for writing, as no internal checks on the stream's state
+ *          are performed.
+ *
+ * @see mysql_encode_length, write_encoded_length, getValueForBind, stmt_execute_metadata_t, MYSQL_BIND
+ *
+ * Returns:
+ *   The total number of bytes written for the event log.
+ */
 uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 	uint64_t total_bytes=0;
 	total_bytes+=1; // et
@@ -678,7 +735,11 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 	total_bytes+=mysql_encode_length(query_len,NULL)+query_len;
 
 	// --- Account for extra parameters for COM_STMT_EXECUTE ---
+	// When the event type (et) is PROXYSQL_COM_STMT_EXECUTE:
 	if (et == PROXYSQL_COM_STMT_EXECUTE) {
+		// Validate Session and Statement Metadata:
+		// The code checks whether the session pointer and the current query's statement metadata (stmt_meta)
+		// are non-null to ensure that parameter details are available.
 		if (session != nullptr && session->CurrentQuery.stmt_meta != nullptr) {
 			stmt_execute_metadata_t *meta = session->CurrentQuery.stmt_meta;
 			uint16_t num_params = meta->num_params;
@@ -791,16 +852,31 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 	}
 
 	// --- Now write the parameters block for COM_STMT_EXECUTE ---
+	// This section ensures that all parameter-related information for COM_STMT_EXECUTE events are logged
+	// in a consistent and efficiently decodable format. The careful handling of variable-length encoded values,
+	// null bitmap construction, and per-parameter processing facilitates accurate reconstruction of the original
+	// query parameters during later analysis.
 	if (et == PROXYSQL_COM_STMT_EXECUTE) {
 		// Ensure stmt_meta is available.
+		// Validate Session and Statement Metadata:
+		// The code checks whether the session pointer and the current query's statement metadata (stmt_meta)
+		// are non-null to ensure that parameter details are available.
 		if (session != nullptr && session->CurrentQuery.stmt_meta != nullptr) {
 			stmt_execute_metadata_t *meta = session->CurrentQuery.stmt_meta;
 			// Write the number of parameters.
+			// Writing the Encoded Parameter Count:
+			// - Retrieves the number of parameters (num_params) from stmt_meta.
+			// - Encodes the parameter count using mysql_encode_length() and writes the resulting bytes.
 			uint16_t num_params = meta->num_params;
 			uint8_t paramCountLen = mysql_encode_length(num_params, buf);
 			f->write((char *)buf, paramCountLen);
 
 			// Build and write the null bitmap.
+			// Constructing and Writing the Null Bitmap:
+			// - Calculates the required bitmap size as (num_params + 7) / 8 bytes where each bit represents
+			//   whether a parameter value is null.
+			// - Iterates over each parameter, setting the corresponding bit in the bitmap if the parameter is null.
+			// - Writes the complete null bitmap to the file stream.
 			size_t bitmap_size = (num_params + 7) / 8;  // one bit per parameter
 			std::vector<unsigned char> null_bitmap(bitmap_size, 0);
 			for (uint16_t i = 0; i < num_params; i++) {
@@ -814,12 +890,20 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 			// - Parameter type as 2 bytes.
 			// - Encoded parameter value (first length, then raw bytes)
 			for (uint16_t i = 0; i < num_params; i++) {
+				// - Writes the parameter type:
+				//   * Retrieves a 2-byte parameter type from the MYSQL_BIND structure associated with the current parameter.
+				//   * Writes these 2 bytes directly to the file stream.
 				const MYSQL_BIND *bind = meta->binds ? &meta->binds[i] : nullptr;
 				uint16_t param_type = (bind ? bind->buffer_type : 0);
 				// Write parameter type (2 bytes).
 				f->write(reinterpret_cast<char*>(&param_type), sizeof(uint16_t));
 
-				// Prepare to write the parameter value.
+				// - Logging the Parameter Value:
+				//   * If the parameter is not null (as determined by the null bitmap), the code uses getValueForBind() to
+				//       obtain a string representation of the parameter value.
+				//   * Determines the length of this converted value.
+				// * Encodes the length using mysql_encode_length() and writes the encoded length.
+				// * Finally, writes the raw bytes representing the parameter value.
 				std::string convertedValue;
 				if (bind && bind->buffer && !(meta->is_nulls && meta->is_nulls[i])) {
 					unsigned long len = meta->lengths ? meta->lengths[i] : 0;
