@@ -937,6 +937,45 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 	return total_bytes;
 }
 
+/**
+ * @brief Writes the MySQL event details in JSON format to a file stream.
+ *
+ * This method generates a JSON object containing various details about the MySQL event,
+ * including query information, timestamps, execution metadata, error information, and
+ * performance metrics. The resulting JSON string is then written to the provided file stream.
+ *
+ * The JSON object includes the following keys (when applicable):
+ * - "hostgroup_id": The hostgroup identifier if set; otherwise, it defaults to -1.
+ * - "thread_id": The identifier of the thread where the event was logged.
+ * - "event": A string representing the type of event (e.g., "COM_STMT_EXECUTE", "COM_STMT_PREPARE", or "COM_QUERY").
+ * - "username": The username associated with the event.
+ * - "schemaname": The name of the schema related to the event.
+ * - "client": The client information.
+ * - "server": The server details, only logged if the hostgroup ID is valid.
+ * - "rows_affected": Number of rows affected by the query, logged if related data is present.
+ * - "last_insert_id": The last insert identifier if it is non-zero.
+ * - "rows_sent": The number of rows sent in the response.
+ * - "last_gtid": The last GTID (Global Transaction Identifier) if it is available.
+ * - "errno": The error number associated with the event.
+ * - "error": A string describing the error message, if one exists.
+ * - "query": The full SQL query associated with the event, constructed from a pointer and length.
+ * - "starttime_timestamp_us": The event start time in microseconds.
+ * - "starttime": Human-readable start time with microseconds precision.
+ * - "endtime_timestamp_us": The event end time in microseconds.
+ * - "endtime": Human-readable end time with microseconds precision.
+ * - "duration_us": The duration of the event in microseconds.
+ * - "digest": A hexadecimal string representation of the query digest.
+ * - "client_stmt_id": Identifier for the client statement (logged for prepared or executed statements), if present.
+ *
+ * Additionally, for executed statements (PROXYSQL_COM_STMT_EXECUTE), if session data is available,
+ * prepared statement parameters and added to the JSON.
+ *
+ * The generated JSON is dumped into the given file stream with error replacement settings to ensure
+ * proper serialization even in the presence of encoding errors.
+ *
+ * @param[out] f Pointer to a std::fstream where the JSON string will be written.
+ * @return uint64_t Always returns 0, as the current implementation does not compute total bytes written.
+ */
 uint64_t MySQL_Event::write_query_format_2_json(std::fstream *f) {
 	json j = {};
 	uint64_t total_bytes=0;
