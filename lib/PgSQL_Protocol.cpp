@@ -1062,7 +1062,7 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 		/* Note: Failure due to an invalid parameter returned by the PostgreSQL server, differs from ProxySQL's behavior.
 				 PostgreSQL returns an error during the connection handshake phase, whereas in ProxySQL, the connection succeeds, 
 				 but the error is encountered when executing a query. 
-				 This is behavious is intentional, as newer PostgreSQL versions may introduce parameters that ProxySQL is not yet aware of.
+				 This is behaviour is intentional, as newer PostgreSQL versions may introduce parameters that ProxySQL is not yet aware of.
 		*/
 		// New implementation
 		for (const auto& [param_name, param_val] : (*myds)->myconn->conn_params.connection_parameters) {
@@ -1082,11 +1082,12 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 
 				if (validation != nullptr && validation->accepted_values) {
 					const char** accepted_value = validation->accepted_values;
-					while (accepted_value != nullptr) {
+					while (*accepted_value) {
 						if (strcmp(param_val.c_str(), *accepted_value) == 0) {
 							is_validation_success = true;
 							break;
 						}
+						accepted_value++;
 					}
 				} else {
 					is_validation_success = true;
