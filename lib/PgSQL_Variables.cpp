@@ -19,32 +19,32 @@ PgSQL_Variables::PgSQL_Variables() {
 	// NOTE: This variable has been temporarily ignored. Check issues #3442 and #3441.
 	//ignore_vars.push_back("session_track_schema");
 	variables_regexp = "";
+
+	/*
+	   NOTE:
+		make special ATTENTION that the order in pgsql_variable_name
+		and pgsqll_tracked_variables[] is THE SAME
+	   NOTE:
+		PgSQL_Variables::PgSQL_Variables() has a built-in check to make sure that the order is correct,
+		and that variables are in alphabetical order
+	*/
 	for (auto i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
+		//Array index and enum value (idx) should be same
+		assert(i == pgsql_tracked_variables[i].idx);
+
+		if (i > PGSQL_NAME_LAST_LOW_WM + 1) {
+			assert(strcmp(pgsql_tracked_variables[i].set_variable_name, pgsql_tracked_variables[i - 1].set_variable_name) > 0);
+		}
+
 		// we initialized all the internal_variable_name if set to NULL
 		if (pgsql_tracked_variables[i].internal_variable_name == NULL) {
 			pgsql_tracked_variables[i].internal_variable_name = pgsql_tracked_variables[i].set_variable_name;
 		}
-	}
-/*
-   NOTE:
-	make special ATTENTION that the order in pgsql_variable_name
-	and pgsqll_tracked_variables[] is THE SAME
-   NOTE:
-	PgSQL_Variables::PgSQL_Variables() has a built-in check to make sure that the order is correct,
-	and that variables are in alphabetical order
-*/
-	for (int i = PGSQL_NAME_LAST_LOW_WM; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-		assert(i == pgsql_tracked_variables[i].idx);
-		if (i > PGSQL_NAME_LAST_LOW_WM+1) {
-			assert(strcmp(pgsql_tracked_variables[i].set_variable_name, pgsql_tracked_variables[i-1].set_variable_name) > 0);
-		}
-	}
-	for (auto i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
 
 		PgSQL_Variables::verifiers[i] = verify_server_variable;
 		PgSQL_Variables::updaters[i] = update_server_variable;
-		
-		if (pgsql_tracked_variables[i].status == SETTING_VARIABLE) { 
+
+		if (pgsql_tracked_variables[i].status == SETTING_VARIABLE) {
 			variables_regexp += pgsql_tracked_variables[i].set_variable_name;
 			variables_regexp += "|";
 
@@ -56,6 +56,7 @@ PgSQL_Variables::PgSQL_Variables() {
 			}
 		}
 	}
+
 	for (std::vector<std::string>::iterator it=ignore_vars.begin(); it != ignore_vars.end(); it++) {
 		variables_regexp += *it;
 		variables_regexp += "|";

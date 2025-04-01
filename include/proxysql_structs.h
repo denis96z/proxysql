@@ -244,7 +244,7 @@ enum mysql_variable_name {
 };
 
 /* NOTE:
-	make special ATTENTION that the order in mysql_variable_name
+	make special ATTENTION that the order in pgsql_variable_name
 	and pgsql_tracked_variables[] is THE SAME
 */
 enum pgsql_variable_name {
@@ -337,8 +337,6 @@ struct pgsql_variable_st {
 	enum session_status status; // what status should be changed after setting this variables
 	const char* set_variable_name;   // what variable name (or string) will be used when setting it to backend
 	const char* internal_variable_name; // variable name as displayed in admin , WITHOUT "default_"
-	// Also used in INTERNAL SESSION
-	// if NULL , MySQL_Variables::MySQL_Variables will set it to set_variable_name during initialization
 	const char* default_value;       // default value
 	uint8_t options;			// options
 	const pgsql_variable_validator* validator; // validate value
@@ -1814,6 +1812,7 @@ pgsql_variable_st pgsql_tracked_variables[]{
 	{ PGSQL_MAINTENANCE_WORK_MEM,  SETTING_VARIABLE,    "maintenance_work_mem", "maintenance_work_mem", "64MB", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_maintenance_work_mem, nullptr },
 	{ PGSQL_SYNCHRONOUS_COMMIT,	   SETTING_VARIABLE,	"synchronous_commit", "synchronous_commit", "on", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_synchronous_commit, nullptr},
 };
+
 #endif //EXCLUDE_TRACKING_VARAIABLES
 
 #else

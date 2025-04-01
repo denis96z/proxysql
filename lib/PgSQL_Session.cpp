@@ -4201,7 +4201,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 						int idx = PGSQL_NAME_LAST_HIGH_WM;
 						for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
 							if (variable_name_exists(pgsql_tracked_variables[i], var.c_str()) == true) {
-								idx = pgsql_tracked_variables[i].idx;
+								idx = i;
 								break;
 							}
 						}
@@ -4252,8 +4252,8 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 								
 							proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", var.c_str(), value1.c_str());
 							uint32_t var_hash_int = SpookyHash::Hash32(value1.c_str(), value1.length(), 10);
-							if (pgsql_variables.client_get_hash(this, pgsql_tracked_variables[idx].idx) != var_hash_int) {
-								if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[idx].idx, value1.c_str(), true)) {
+							if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
+								if (!pgsql_variables.client_set_value(this, idx, value1.c_str(), true)) {
 									return false;
 								}
 								if (idx == PGSQL_DATESTYLE) {
@@ -4631,8 +4631,8 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 
 					proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
 					uint32_t var_hash_int = SpookyHash::Hash32(value, strlen(value), 10);
-					if (pgsql_variables.client_get_hash(this, pgsql_tracked_variables[idx].idx) != var_hash_int) {
-						if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[idx].idx, value, false)) {
+					if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
+						if (!pgsql_variables.client_set_value(this, idx, value, false)) {
 							return false;
 						}
 						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {
@@ -4647,8 +4647,8 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 					const char* value = get_default_session_variable((enum pgsql_variable_name)idx);
 					proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
 					uint32_t var_hash_int = SpookyHash::Hash32(value, strlen(value), 10);
-					if (pgsql_variables.client_get_hash(this, pgsql_tracked_variables[idx].idx) != var_hash_int) {
-						if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[idx].idx, value, false)) {
+					if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
+						if (!pgsql_variables.client_set_value(this, idx, value, false)) {
 							return false;
 						}
 						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {
@@ -4683,8 +4683,8 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 					const char* value = get_default_session_variable((enum pgsql_variable_name)idx);
 
 					uint32_t var_hash_int = SpookyHash::Hash32(value, strlen(value), 10);
-					if (pgsql_variables.client_get_hash(this, pgsql_tracked_variables[idx].idx) != var_hash_int) {
-						if (!pgsql_variables.client_set_value(this, pgsql_tracked_variables[idx].idx, value, true)) {
+					if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
+						if (!pgsql_variables.client_set_value(this, idx, value, true)) {
 							return false;
 						}
 						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {

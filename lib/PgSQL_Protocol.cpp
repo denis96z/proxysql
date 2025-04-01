@@ -403,7 +403,7 @@ bool PgSQL_Protocol::generate_pkt_initial_handshake(bool send, void** _ptr, unsi
 		if (RAND_bytes((*myds)->tmp_login_salt, sizeof((*myds)->tmp_login_salt)) != 1) {
 			// Fallback method: using a basic pseudo-random generator
 			srand((unsigned int)time(NULL));  
-			for (int i = 0; i < sizeof((*myds)->tmp_login_salt); i++) {
+			for (size_t i = 0; i < sizeof((*myds)->tmp_login_salt); i++) {
 				(*myds)->tmp_login_salt[i] = rand() % 256;  
 			}
 		}
@@ -632,11 +632,11 @@ unsigned int get_string(const char* data, unsigned int len, const char** dst_p)
 
 bool PgSQL_Protocol::load_conn_parameters(pgsql_hdr* pkt)
 {
-	int32_t offset = 0; 
+	uint32_t offset = 0; 
 
 	while (offset < pkt->data.size) {
 		char* nameptr = (char*)pkt->data.ptr + offset;
-		int32_t valoffset;
+		uint32_t valoffset;
 		char* valptr;
 
 		if (*nameptr == '\0')
