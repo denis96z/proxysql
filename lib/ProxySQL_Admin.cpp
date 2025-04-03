@@ -1134,9 +1134,11 @@ void ProxySQL_Admin::flush_configdb() { // see #923
 	admindb->execute((char *)"DETACH DATABASE disk");
 	delete configdb;
 	configdb=new SQLite3DB();
-	if (access(GloVars.admindb, W_OK) != 0) {
-		proxy_error("Database file '%s' is not writable\n", GloVars.admindb);
-		exit(EXIT_SUCCESS);
+	if (access(GloVars.admindb, F_OK) == 0) {
+		if (access(GloVars.admindb, W_OK) != 0) {
+			proxy_error("Database file '%s' exists but is not writable\n", GloVars.admindb);
+			exit(EXIT_SUCCESS);
+		}
 	}
 	configdb->open((char *)GloVars.admindb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX);
 	__attach_db(admindb, configdb, (char *)"disk");

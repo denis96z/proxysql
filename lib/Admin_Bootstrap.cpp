@@ -520,9 +520,11 @@ bool ProxySQL_Admin::init(const bootstrap_info_t& bootstrap_info) {
 	bool admindb_file_exists=Proxy_file_exists(GloVars.admindb);
 
 	configdb=new SQLite3DB();
-	if (access(GloVars.admindb, W_OK) != 0) {
-		proxy_error("Database file '%s' is not writable\n", GloVars.admindb);
-		exit(EXIT_SUCCESS);
+	if (access(GloVars.admindb, F_OK) == 0) {
+		if (access(GloVars.admindb, W_OK) != 0) {
+			proxy_error("Database file '%s' exists but is not writable\n", GloVars.admindb);
+			exit(EXIT_SUCCESS);
+		}
 	}
 	configdb->open((char *)GloVars.admindb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX);
 	// Fully synchronous is not required. See to #1055
