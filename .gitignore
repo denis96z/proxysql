@@ -50,6 +50,7 @@ src/*pem
 binaries/*deb
 binaries/*rpm
 tools/eventslog_reader_sample
+tools/eventlog_reader_to_json
 src/proxysql-save.cfg
 src/*log*
 
