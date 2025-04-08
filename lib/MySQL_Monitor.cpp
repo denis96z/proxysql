@@ -683,8 +683,12 @@ void MySQL_Monitor_State_Data::init_async() {
 	case MON_REPLICATION_LAG:
 		async_state_machine_ = ASYNC_QUERY_START;
 #ifdef TEST_REPLICATIONLAG
-		query_ = "SELECT SLAVE STATUS "; // replaced SHOW with SELECT to avoid breaking simulator logic
-		query_ += std::string(hostname) + ":" + std::to_string(port);
+		// Simulator syntax allows 'SELECT <REPLICA|SLAVE> STATUS'
+		{
+			const std::string REPLICA { mysql_get_server_version(mysql) < 80023 ? "SLAVE" : "REPLICA" };
+			query_ = "SELECT " + REPLICA + " STATUS ";
+			query_ += std::string(hostname) + ":" + std::to_string(port);
+		}
 #else
 		if (mysql_thread___monitor_replication_lag_use_percona_heartbeat && 
 			mysql_thread___monitor_replication_lag_use_percona_heartbeat[0] != '\0') {
@@ -692,7 +696,11 @@ void MySQL_Monitor_State_Data::init_async() {
 			query_ = "SELECT MAX(ROUND(TIMESTAMPDIFF(MICROSECOND, ts, SYSDATE(6))/1000000)) AS Seconds_Behind_Master FROM ";
 			query_ += mysql_thread___monitor_replication_lag_use_percona_heartbeat;
 		} else {
-			query_ = "SHOW SLAVE STATUS";
+			if (mysql_get_server_version(mysql) < 80023) {
+				query_ = "SHOW SLAVE STATUS";
+			} else {
+				query_ = "SHOW REPLICA STATUS";
+			}
 		}
 #endif
 		task_timeout_ = mysql_thread___monitor_replication_lag_timeout;
@@ -2694,9 +2702,11 @@ void * monitor_replication_lag_thread(void *arg) {
 
 #ifdef TEST_REPLICATIONLAG
 	{
-		std::string s = "SELECT SLAVE STATUS "; // replaced SHOW with SELECT to avoid breaking simulator logic
-		s += std::string(mmsd->hostname) + ":" + std::to_string(mmsd->port);
-		mmsd->async_exit_status = mysql_query_start(&mmsd->interr, mmsd->mysql, s.c_str());
+		const string REPLICA { mysql_get_server_version(mmsd->mysql) < 80023 ? "SLAVE" : "REPLICA" };
+		const string SELECT {
+			"SELECT " + REPLICA + " STATUS " + string(mmsd->hostname) + ":" + std::to_string(mmsd->port)
+		};
+		mmsd->async_exit_status = mysql_query_start(&mmsd->interr, mmsd->mysql, SELECT.c_str());
 	}
 #else
 	if (percona_heartbeat_table) {
@@ -2711,7 +2721,10 @@ void * monitor_replication_lag_thread(void *arg) {
 		}
 	}
 	if (use_percona_heartbeat == false) {
-		mmsd->async_exit_status=mysql_query_start(&mmsd->interr,mmsd->mysql,"SHOW SLAVE STATUS");
+		const char* query {
+			mysql_get_server_version(mmsd->mysql) < 80023 ? "SHOW SLAVE STATUS" : "SHOW REPLICA STATUS"
+		};
+		mmsd->async_exit_status=mysql_query_start(&mmsd->interr,mmsd->mysql, query);
 	}
 #endif // TEST_REPLICATIONLAG
 	while (mmsd->async_exit_status) {
@@ -2819,7 +2832,10 @@ __exit_monitor_replication_lag_thread:
 					{
 						for(k = 0; k < num_fields; k++) {
 							if (fields[k].name) {
-								if (strcmp("Seconds_Behind_Master", fields[k].name)==0) {
+								if (
+									strcmp("Seconds_Behind_Master", fields[k].name)==0
+									|| strcmp("Seconds_Behind_Source", fields[k].name)==0
+								) {
 									j=k;
 								}
 							}
@@ -7909,7 +7925,10 @@ bool MySQL_Monitor::monitor_replication_lag_process_ready_tasks(const std::vecto
 			{
 				for (k = 0; k < num_fields; k++) {
 					if (fields[k].name) {
-						if (strcmp("Seconds_Behind_Master", fields[k].name) == 0) {
+						if (
+							strcmp("Seconds_Behind_Master", fields[k].name)==0
+							|| strcmp("Seconds_Behind_Source", fields[k].name)==0
+						) {
 							j = k;
 						}
 					}

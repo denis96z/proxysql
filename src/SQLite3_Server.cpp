@@ -871,7 +871,13 @@ __run_query:
 			}
 #endif // TEST_READONLY
 #ifdef TEST_REPLICATIONLAG
-			if (strncasecmp("SELECT SLAVE STATUS ", query_no_space, strlen("SELECT SLAVE STATUS ")) == 0) {
+			if (
+				strncasecmp("SELECT SLAVE STATUS ", query_no_space, strlen("SELECT SLAVE STATUS ")) == 0
+				|| strncasecmp("SELECT REPLICA STATUS ", query_no_space, strlen("SELECT REPLICA STATUS ")) == 0
+			) {
+				uint64_t addr_offset {
+					strstr(query_no_space, "REPLICA") ?  strlen("SELECT REPLICA STATUS ") : strlen("SELECT SLAVE STATUS ")
+				};
 				if (strlen(query_no_space) > strlen("SELECT SLAVE STATUS ") + 5) {
 					pthread_mutex_lock(&GloSQLite3Server->test_replicationlag_mutex);
 					// the current test doesn't try to simulate failures, therefore it will return immediately
@@ -879,17 +885,15 @@ __run_query:
 						// probably never initialized
 						GloSQLite3Server->load_replicationlag_table(sess);
 					}
-					const int* rc = GloSQLite3Server->replicationlag_test_value(query_no_space + strlen("SELECT SLAVE STATUS "));
+					const int* rc = GloSQLite3Server->replicationlag_test_value(query_no_space + addr_offset);
 					free(query);
-					if (rc == nullptr) {
-						const char* a = (char*)"SELECT null as Seconds_Behind_Master";
-						query = (char*)malloc(strlen(a) + 2);
-						sprintf(query, a);
-					} else {
-						const char* a = (char*)"SELECT %d as Seconds_Behind_Master";
-						query = (char*)malloc(strlen(a) + 2);
-						sprintf(query, a, *rc);
-					}
+
+					string SELECT { "SELECT " + (rc ? std::to_string(*rc) : string { "null" }) + " AS " };
+					SELECT += strstr(query_no_space, "REPLICA") ? "Seconds_Behind_Source" : "Seconds_Behind_Master";
+
+					query = static_cast<char*>(malloc(SELECT.size() + 1));
+					sprintf(query, SELECT.c_str());
+
 					pthread_mutex_unlock(&GloSQLite3Server->test_replicationlag_mutex);
 				}
 			}
