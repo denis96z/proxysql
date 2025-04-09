@@ -874,56 +874,60 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 			// - Encodes the parameter count using mysql_encode_length() and writes the resulting bytes.
 			uint16_t num_params = meta->num_params;
 			uint8_t paramCountLen = mysql_encode_length(num_params, buf);
+			write_encoded_length(buf, num_params, paramCountLen, buf[0]);
 			f->write((char *)buf, paramCountLen);
 
-			// Build and write the null bitmap.
-			// Constructing and Writing the Null Bitmap:
-			// - Calculates the required bitmap size as (num_params + 7) / 8 bytes where each bit represents
-			//   whether a parameter value is null.
-			// - Iterates over each parameter, setting the corresponding bit in the bitmap if the parameter is null.
-			// - Writes the complete null bitmap to the file stream.
-			size_t bitmap_size = (num_params + 7) / 8;  // one bit per parameter
-			std::vector<unsigned char> null_bitmap(bitmap_size, 0);
-			for (uint16_t i = 0; i < num_params; i++) {
-				if (meta->is_nulls && meta->is_nulls[i]) {
-					null_bitmap[i / 8] |= (1 << (i % 8));
+			if (num_params) {
+				// Build and write the null bitmap.
+				// Constructing and Writing the Null Bitmap:
+				// - Calculates the required bitmap size as (num_params + 7) / 8 bytes where each bit represents
+				//   whether a parameter value is null.
+				// - Iterates over each parameter, setting the corresponding bit in the bitmap if the parameter is null.
+				// - Writes the complete null bitmap to the file stream.
+				size_t bitmap_size = (num_params + 7) / 8;  // one bit per parameter
+				std::vector<unsigned char> null_bitmap(bitmap_size, 0);
+				for (uint16_t i = 0; i < num_params; i++) {
+					if (meta->is_nulls && meta->is_nulls[i]) {
+						null_bitmap[i / 8] |= (1 << (i % 8));
+					}
 				}
-			}
-			f->write(reinterpret_cast<char*>(null_bitmap.data()), bitmap_size);
+				f->write(reinterpret_cast<char*>(null_bitmap.data()), bitmap_size);
 
-			// For each parameter, write:
-			// - Parameter type as 2 bytes.
-			// - Encoded parameter value (first length, then raw bytes)
-			for (uint16_t i = 0; i < num_params; i++) {
-				// - Writes the parameter type:
-				//   * Retrieves a 2-byte parameter type from the MYSQL_BIND structure associated with the current parameter.
-				//   * Writes these 2 bytes directly to the file stream.
-				const MYSQL_BIND *bind = meta->binds ? &meta->binds[i] : nullptr;
-				uint16_t param_type = (bind ? bind->buffer_type : 0);
-				// Write parameter type (2 bytes).
-				f->write(reinterpret_cast<char*>(&param_type), sizeof(uint16_t));
+				// For each parameter, write:
+				// - Parameter type as 2 bytes.
+				// - Encoded parameter value (first length, then raw bytes)
+				for (uint16_t i = 0; i < num_params; i++) {
+					// - Writes the parameter type:
+					//   * Retrieves a 2-byte parameter type from the MYSQL_BIND structure associated with the current parameter.
+					//   * Writes these 2 bytes directly to the file stream.
+					const MYSQL_BIND *bind = meta->binds ? &meta->binds[i] : nullptr;
+					uint16_t param_type = (bind ? bind->buffer_type : 0);
+					// Write parameter type (2 bytes).
+					f->write(reinterpret_cast<char*>(&param_type), sizeof(uint16_t));
 
-				// - Logging the Parameter Value:
-				//   * If the parameter is not null (as determined by the null bitmap), the code uses getValueForBind() to
-				//       obtain a string representation of the parameter value.
-				//   * Determines the length of this converted value.
-				// * Encodes the length using mysql_encode_length() and writes the encoded length.
-				// * Finally, writes the raw bytes representing the parameter value.
-				std::string convertedValue;
-				if (bind && bind->buffer && !(meta->is_nulls && meta->is_nulls[i])) {
-					unsigned long len = meta->lengths ? meta->lengths[i] : 0;
-					auto[valType, convVal] = getValueForBind(bind, len);
-					convertedValue = convVal;
-				} else {
-					convertedValue = "";
-				}
-				// Write the length of the parameter value.
-				uint64_t value_len = convertedValue.size();
-				uint8_t valueLenEnc = mysql_encode_length(value_len, buf);
-				f->write((char *)buf, valueLenEnc);
-				// Write the parameter value bytes.
-				if (value_len > 0) {
-					f->write(convertedValue.data(), value_len);
+					// - Logging the Parameter Value:
+					//   * If the parameter is not null (as determined by the null bitmap), the code uses getValueForBind() to
+					//       obtain a string representation of the parameter value.
+					//   * Determines the length of this converted value.
+					// * Encodes the length using mysql_encode_length() and writes the encoded length.
+					// * Finally, writes the raw bytes representing the parameter value.
+					std::string convertedValue;
+					if (bind && bind->buffer && !(meta->is_nulls && meta->is_nulls[i])) {
+						unsigned long len = meta->lengths ? meta->lengths[i] : 0;
+						auto[valType, convVal] = getValueForBind(bind, len);
+						convertedValue = convVal;
+					} else {
+						convertedValue = "";
+					}
+					// Write the length of the parameter value.
+					uint64_t value_len = convertedValue.size();
+					uint8_t valueLenEnc = mysql_encode_length(value_len, buf);
+					write_encoded_length(buf, value_len, valueLenEnc, buf[0]);
+					f->write((char *)buf, valueLenEnc);
+					// Write the parameter value bytes.
+					if (value_len > 0) {
+						f->write(convertedValue.data(), value_len);
+					}
 				}
 			}
 		} else {

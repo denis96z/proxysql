@@ -403,6 +403,31 @@ int main(int argc, char** argv) {
 	// Reset query digest statistics.
 	MYSQL_QUERY(admin, "TRUNCATE stats_mysql_query_digest");
 
+	{
+		const char* log_query = "SELECT variable_value FROM global_variables WHERE variable_name LIKE 'mysql-eventslog_filename'";
+		if (mysql_query(admin, log_query)) {
+			diag("Failed to query logging file setting: %s", mysql_error(admin));
+			exit(EXIT_FAILURE);
+		}
+		MYSQL_RES* res = mysql_store_result(admin);
+		if (!res) {
+			diag("Failed to store result for logging file setting: %s", mysql_error(admin));
+			exit(EXIT_FAILURE);
+		}
+		int num_rows = mysql_num_rows(res);
+		if (num_rows != 1) {
+			diag("Expected exactly 1 row for logging file setting query, got %d", num_rows);
+			mysql_free_result(res);
+			exit(EXIT_FAILURE);
+		}
+		MYSQL_ROW row = mysql_fetch_row(res);
+		if (!row || !row[0] || strlen(row[0]) == 0) {
+			diag("Logging to file is not enabled: variable `mysql-eventslog_filename` is empty");
+			mysql_free_result(res);
+			exit(EXIT_FAILURE);
+		}
+		mysql_free_result(res);
+	}
 	// Run test in two logging formats: BINARY and JSON.
    
 	for (auto mode : logging_modes) {
