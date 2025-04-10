@@ -419,8 +419,8 @@ bool Base_Session<S,DS,B,T>::handler_special_queries_STATUS(PtrSize_t* pkt) {
 			resultset->add_column_definition(SQLITE_TEXT, "DATABASE()");
 			resultset->add_column_definition(SQLITE_TEXT, "USER()");
 			char* pta[2];
-			pta[0] = client_myds->myconn->userinfo->username;
-			pta[1] = client_myds->myconn->userinfo->schemaname;
+			pta[0] = client_myds->myconn->userinfo->schemaname;
+			pta[1] = client_myds->myconn->userinfo->username;
 			resultset->add_row(pta);
 			bool deprecate_eof_active = client_myds->myconn->options.client_flag & CLIENT_DEPRECATE_EOF;
 			SQLite3_to_MySQL(resultset, NULL, 0, &client_myds->myprot, false, deprecate_eof_active);
