@@ -262,7 +262,7 @@ private:
 	 * @param myds If not null, should point to a PgSQL_Data_Stream (backend connection) which connection status
 	 *   should be updated, and previous query resources cleanup.
 	 */
-	void RequestEnd(PgSQL_Data_Stream*) override;
+	void RequestEnd(PgSQL_Data_Stream*, const unsigned int myerrno = 0, const char * errmsg = nullptr);
 	void LogQuery(PgSQL_Data_Stream*);
 
 	void handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY___create_mirror_session();
@@ -283,9 +283,6 @@ private:
 	bool handler_again___status_SETTING_LDAP_USER_VARIABLE(int*);
 	bool handler_again___status_SETTING_SQL_MODE(int*);
 	bool handler_again___status_SETTING_SESSION_TRACK_GTIDS(int*);
-#endif // 0
-	bool handler_again___status_CHANGING_CHARSET(int* _rc);
-#if 0
 	bool handler_again___status_CHANGING_SCHEMA(int*);
 #endif // 0
 	bool handler_again___status_CONNECTING_SERVER(int*);
@@ -414,12 +411,6 @@ public:
 	int current_hostgroup;
 	int default_hostgroup;
 	int previous_hostgroup;
-	/**
-	 * @brief Charset directly specified by the client. Supplied and updated via 'HandshakeResponse'
-	 *   and 'COM_CHANGE_USER' packets.
-	 * @details Used when session needs to be restored via 'COM_RESET_CONNECTION'.
-	 */
-	int default_charset;
 	int locked_on_hostgroup;
 	int next_query_flagIN;
 	int mirror_hostgroup;

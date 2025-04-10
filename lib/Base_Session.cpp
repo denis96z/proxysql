@@ -313,7 +313,12 @@ void Base_Session<S, DS, B, T>::return_proxysql_internal(PtrSize_t* pkt) {
 		}
 		// default
 		client_myds->DSS = STATE_QUERY_SENT_NET;
-		client_myds->myprot.generate_pkt_ERR(true, NULL, NULL, 1, 1064, (char*)"42000", (char*)"Unknown PROXYSQL INTERNAL command", true);
+		string errmsg = "Unknown PROXYSQL INTERNAL command";
+		client_myds->myprot.generate_pkt_ERR(true, NULL, NULL, 1, 1047, (char*)"08S01", errmsg.c_str(), true);
+		if (mirror == false) {
+			MyHGM->add_mysql_errors(current_hostgroup, (char *)"", 0, client_myds->myconn->userinfo->username, (client_myds->addr.addr ? client_myds->addr.addr : (char *)"unknown" ), client_myds->myconn->userinfo->schemaname, 1047, (char *)errmsg.c_str());
+			RequestEnd(NULL, 1047, errmsg.c_str());
+		}
 	}
 	else if constexpr (std::is_same_v<S, PgSQL_Session>) {
 		if (pkt->size >= (5 + 1 + l) && strncasecmp((char*)"PROXYSQL INTERNAL SESSION", (char*)pkt->ptr + 5, l) == 0) {
@@ -337,7 +342,12 @@ void Base_Session<S, DS, B, T>::return_proxysql_internal(PtrSize_t* pkt) {
 		assert(0);
 	}
 	if (mirror == false) {
-		RequestEnd(NULL);
+		if constexpr (std::is_same_v<S, MySQL_Session>) {
+			// do nothing , logic moded
+		}
+		else if constexpr (std::is_same_v<S, PgSQL_Session>) {
+			RequestEnd(NULL, 0, NULL);
+		}
 	}
 	else {
 		client_myds->DSS = STATE_SLEEP;

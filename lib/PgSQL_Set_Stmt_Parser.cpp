@@ -202,6 +202,7 @@ std::map<std::string,std::vector<std::string>> PgSQL_Set_Stmt_Parser::parse2() {
 	return result;
 }
 
+#if 0
 std::string PgSQL_Set_Stmt_Parser::parse_character_set() {
 #ifdef DEBUG
 	proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "Parsing query %s\n", query.c_str());
@@ -224,7 +225,7 @@ std::string PgSQL_Set_Stmt_Parser::parse_character_set() {
 	delete opt2;
 	return value3;
 }
-
+#endif
 std::string PgSQL_Set_Stmt_Parser::remove_comments(const std::string& q) {
     std::string result = "";
     bool in_multiline_comment = false;

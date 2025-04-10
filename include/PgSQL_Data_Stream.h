@@ -56,6 +56,12 @@ public:
 		pkt.ptr = NULL;
 		QueryPtr = NULL;
 	}
+	void reset() {
+		pkt.size = 0;
+		QuerySize = 0;
+		pkt.ptr = NULL;
+		QueryPtr = NULL;
+	}
 };
 
 enum pgsql_sslstatus { PGSQL_SSLSTATUS_OK, PGSQL_SSLSTATUS_WANT_IO, PGSQL_SSLSTATUS_FAIL };

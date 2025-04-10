@@ -17,6 +17,10 @@
 #include "command_line.h"
 #include "utils.h"
 
+using std::string;
+
+const int MYSQL8_HG = get_env_int("TAP_MYSQL8_BACKEND_HG", 30);
+
 int main(int argc, char** argv) {
 	CommandLine cl;
 
@@ -44,11 +48,21 @@ int main(int argc, char** argv) {
 		return exit_status();
 	}
 
-	std::string var_collation_connection = "collation_connection";
-	std::string var_value;
+	const string select_query {
+		"SELECT /* hostgroup=" + _TO_S(MYSQL8_HG) + ";create_new_connection=1 */ @@collation_connection"
+	};
+	ext_val_t<string> var_ext { mysql_query_ext_val(mysql, select_query, string {}) };
+	if (var_ext.err) {
+		const string err { get_ext_val_err(mysql, var_ext) };
+		diag("Failed query   query:`%s`, err:`%s`", select_query.c_str(), err.c_str());
+		return EXIT_FAILURE;
+	}
 
-	show_variable(mysql, var_collation_connection, var_value, true);
-	ok(var_value.compare("utf8mb4_0900_as_ci") == 0, "collation_connection , Expected utf8mb4_0900_as_ci . Actual %s", var_value.c_str()); // ok_1
+	ok(
+		"utf8mb4_0900_as_ci" == var_ext.val,
+		"collation_connection , Expected utf8mb4_0900_as_ci . Actual %s",
+		var_ext.val.c_str()
+	); // ok_1
 
 	mysql_close(mysql);
 

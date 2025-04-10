@@ -14,10 +14,8 @@ extern void print_backtrace(void);
 typedef bool (*pgsql_verify_var)(PgSQL_Session* session, int idx, uint32_t client_hash, uint32_t server_hash);
 typedef bool (*pgsql_update_var)(PgSQL_Session* session, int idx, int &_rc);
 
-bool validate_charset(PgSQL_Session* session, int idx, int &_rc);
 bool update_server_variable(PgSQL_Session* session, int idx, int &_rc);
 bool verify_server_variable(PgSQL_Session* session, int idx, uint32_t client_hash, uint32_t server_hash);
-bool verify_set_names(PgSQL_Session* session);
 
 class PgSQL_Variables {
 	static pgsql_verify_var verifiers[PGSQL_NAME_LAST_HIGH_WM];
@@ -31,13 +29,13 @@ public:
 	PgSQL_Variables();
 	~PgSQL_Variables();
 
-	bool client_set_value(PgSQL_Session* session, int idx, const std::string& value);
+	bool client_set_value(PgSQL_Session* session, int idx, const std::string& value, bool reorder_dynamic_variables_idx);
 	bool client_set_hash_and_value(PgSQL_Session* session, int idx, const std::string& value, uint32_t hash);
 	void client_reset_value(PgSQL_Session* session, int idx);
 	const char* client_get_value(PgSQL_Session* session, int idx) const;
 	uint32_t client_get_hash(PgSQL_Session* session, int idx) const;
 
-	void server_set_value(PgSQL_Session* session, int idx, const char* value);
+	void server_set_value(PgSQL_Session* session, int idx, const char* value, bool reorder_dynamic_variables_idx);
 	void server_set_hash_and_value(PgSQL_Session* session, int idx, const char* value, uint32_t hash);
 	void server_reset_value(PgSQL_Session* session, int idx);
 	const char* server_get_value(PgSQL_Session* session, int idx) const;

@@ -341,8 +341,15 @@ static void init_locks(void) {
 static bool check_openssl_version() {
 	unsigned long version = OpenSSL_version_num();
 	const unsigned long OPENSSL_3_0_0 = 0x30000000L;
+	const unsigned long OPENSSL_3_2_0 = 0x30200000L;
 
 	proxy_info("Using OpenSSL version: %s\n", OpenSSL_version(OPENSSL_VERSION));
+	if (version > OPENSSL_3_0_0 && version < OPENSSL_3_2_0) {
+		proxy_warning(
+			"Detected OpenSSL version has known performance regressions, please upgrade to '3.2.0' or later."
+			" For further details, please refer to: https://github.com/openssl/openssl/issues/18814\n"
+		);
+	}
 	if (version < OPENSSL_3_0_0) {
 		proxy_error("%s\n", "ProxySQL server required openssl version 3.0.0 or above");
 		return false;

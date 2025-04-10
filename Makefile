@@ -372,6 +372,17 @@ clean:
 	cd test/deps && ${MAKE} clean
 	rm -f pkgroot || true
 
+.PHONY: cleandeps
+cleandeps:
+	cd deps && ${MAKE} cleanall
+	cd lib && ${MAKE} clean
+	cd src && ${MAKE} clean
+
+.PHONY: cleandev
+cleandev:
+	cd lib && ${MAKE} clean
+	cd src && ${MAKE} clean
+
 .PHONY: cleanall
 cleanall:
 	cd deps && ${MAKE} cleanall

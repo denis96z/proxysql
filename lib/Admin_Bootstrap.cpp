@@ -520,6 +520,12 @@ bool ProxySQL_Admin::init(const bootstrap_info_t& bootstrap_info) {
 	bool admindb_file_exists=Proxy_file_exists(GloVars.admindb);
 
 	configdb=new SQLite3DB();
+	if (access(GloVars.admindb, F_OK) == 0) {
+		if (access(GloVars.admindb, W_OK) != 0) {
+			proxy_error("Database file '%s' exists but is not writable\n", GloVars.admindb);
+			exit(EXIT_SUCCESS);
+		}
+	}
 	configdb->open((char *)GloVars.admindb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX);
 	// Fully synchronous is not required. See to #1055
 	// https://sqlite.org/pragma.html#pragma_synchronous
@@ -674,6 +680,7 @@ bool ProxySQL_Admin::init(const bootstrap_info_t& bootstrap_info) {
 	insert_into_tables_defs(tables_defs_stats,"stats_mysql_prepared_statements_info", ADMIN_SQLITE_TABLE_STATS_MYSQL_PREPARED_STATEMENTS_INFO);
 	insert_into_tables_defs(tables_defs_stats,"stats_mysql_client_host_cache", STATS_SQLITE_TABLE_MYSQL_CLIENT_HOST_CACHE);
 	insert_into_tables_defs(tables_defs_stats,"stats_mysql_client_host_cache_reset", STATS_SQLITE_TABLE_MYSQL_CLIENT_HOST_CACHE_RESET);
+	insert_into_tables_defs(tables_defs_stats,"stats_mysql_query_events", ADMIN_SQLITE_TABLE_STATS_MYSQL_QUERY_EVENTS);
 
 	insert_into_tables_defs(tables_defs_stats,"stats_pgsql_global", STATS_SQLITE_TABLE_PGSQL_GLOBAL);
 	insert_into_tables_defs(tables_defs_stats,"stats_pgsql_connection_pool", STATS_SQLITE_TABLE_PGSQL_CONNECTION_POOL);

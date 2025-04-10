@@ -1134,6 +1134,12 @@ void ProxySQL_Admin::flush_configdb() { // see #923
 	admindb->execute((char *)"DETACH DATABASE disk");
 	delete configdb;
 	configdb=new SQLite3DB();
+	if (access(GloVars.admindb, F_OK) == 0) {
+		if (access(GloVars.admindb, W_OK) != 0) {
+			proxy_error("Database file '%s' exists but is not writable\n", GloVars.admindb);
+			exit(EXIT_SUCCESS);
+		}
+	}
 	configdb->open((char *)GloVars.admindb, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX);
 	__attach_db(admindb, configdb, (char *)"disk");
 	// Fully synchronous is not required. See to #1055
@@ -2522,6 +2528,10 @@ void update_modules_metrics() {
 	if (GloProxyCluster) {
 		GloProxyCluster->p_update_metrics();
 	}
+	// Update Logger metrics
+	if (GloMyLogger) {
+		GloMyLogger->p_update_metrics();
+	}
 
 	// Update admin metrics
 	GloAdmin->p_update_metrics();
@@ -2638,12 +2648,14 @@ ProxySQL_Admin::ProxySQL_Admin() :
 	variables.stats_mysql_connections = 60;
 	variables.stats_mysql_query_cache = 60;
 	variables.stats_mysql_query_digest_to_disk = 0;
+	variables.stats_mysql_eventslog_sync_buffer_to_disk = 0;
 	variables.stats_system_cpu = 60;
 	variables.stats_system_memory = 60;
 	GloProxyStats->variables.stats_mysql_connection_pool = 60;
 	GloProxyStats->variables.stats_mysql_connections = 60;
 	GloProxyStats->variables.stats_mysql_query_cache = 60;
 	GloProxyStats->variables.stats_mysql_query_digest_to_disk = 0;
+	GloProxyStats->variables.stats_mysql_eventslog_sync_buffer_to_disk = 0;
 	GloProxyStats->variables.stats_system_cpu = 60;
 #ifndef NOJEM
 	GloProxyStats->variables.stats_system_memory = 60;
@@ -3293,6 +3305,10 @@ char * ProxySQL_Admin::get_variable(char *name) {
 			sprintf(intbuf,"%d",variables.stats_mysql_query_digest_to_disk);
 			return strdup(intbuf);
 		}
+		if (!strcasecmp(name,"stats_mysql_eventslog_sync_buffer_to_disk")) {
+			sprintf(intbuf,"%d",variables.stats_mysql_eventslog_sync_buffer_to_disk);
+			return strdup(intbuf);
+		}
 		if (!strcasecmp(name,"stats_system_cpu")) {
 			sprintf(intbuf,"%d",variables.stats_system_cpu);
 			return strdup(intbuf);
@@ -3619,6 +3635,16 @@ bool ProxySQL_Admin::set_variable(char *name, char *value, bool lock) {  // this
 			if (intv >= 0 && intv <= 24*3600) {
 				variables.stats_mysql_query_digest_to_disk=intv;
 				GloProxyStats->variables.stats_mysql_query_digest_to_disk=intv;
+				return true;
+			} else {
+				return false;
+			}
+		}
+		if (!strcasecmp(name,"stats_mysql_eventslog_sync_buffer_to_disk")) {
+			int intv=atoi(value);
+			if (intv >= 0 && intv <= 24*3600) {
+				variables.stats_mysql_eventslog_sync_buffer_to_disk=intv;
+				GloProxyStats->variables.stats_mysql_eventslog_sync_buffer_to_disk=intv;
 				return true;
 			} else {
 				return false;

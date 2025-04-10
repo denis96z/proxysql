@@ -84,10 +84,10 @@ char* get_password(account_details_t& ad, PASSWORD_TYPE::E passtype) {
 				ret = strdup(ad.password);
 			}
 		} else if (ad.attributes) {
-			nlohmann::json attrs = nlohmann::json::parse(ad.attributes, nullptr, false);
-			string addl_pass { get_nested_elem_val(attrs, { "additional_password" }, string {}) };
-			string uh_addl_pass { unhex(addl_pass) };
-			proxy_info("Password info   length:%ld, val:`%s`, addl_val:`%s`\n", uh_addl_pass.length(), uh_addl_pass.c_str(), addl_pass.c_str());
+			const nlohmann::json attrs = nlohmann::json::parse(ad.attributes, nullptr, false);
+			const string addl_pass { get_nested_elem_val(attrs, { "additional_password" }, string {}) };
+			const string uh_addl_pass { unhex(addl_pass) };
+			proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 3, "Password info   length:%ld, val:`%s`, addl_val:`%s`\n", uh_addl_pass.length(), uh_addl_pass.c_str(), addl_pass.c_str());
 			ret = reinterpret_cast<char*>(strdup(uh_addl_pass.c_str()));
 		}
 	} else {

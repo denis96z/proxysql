@@ -244,7 +244,7 @@ enum mysql_variable_name {
 };
 
 /* NOTE:
-	make special ATTENTION that the order in mysql_variable_name
+	make special ATTENTION that the order in pgsql_variable_name
 	and pgsql_tracked_variables[] is THE SAME
 */
 enum pgsql_variable_name {
@@ -337,8 +337,6 @@ struct pgsql_variable_st {
 	enum session_status status; // what status should be changed after setting this variables
 	const char* set_variable_name;   // what variable name (or string) will be used when setting it to backend
 	const char* internal_variable_name; // variable name as displayed in admin , WITHOUT "default_"
-	// Also used in INTERNAL SESSION
-	// if NULL , MySQL_Variables::MySQL_Variables will set it to set_variable_name during initialization
 	const char* default_value;       // default value
 	uint8_t options;			// options
 	const pgsql_variable_validator* validator; // validate value
@@ -487,6 +485,7 @@ enum MYSQL_COM_QUERY_command {
 	MYSQL_COM_QUERY_BEGIN,
 	MYSQL_COM_QUERY_CALL,
 	MYSQL_COM_QUERY_CHANGE_MASTER,
+	MYSQL_COM_QUERY_CHANGE_REPLICATION_SOURCE,
 	MYSQL_COM_QUERY_COMMIT,
 	MYSQL_COM_QUERY_CREATE_DATABASE,
 	MYSQL_COM_QUERY_CREATE_INDEX,
@@ -518,7 +517,9 @@ enum MYSQL_COM_QUERY_command {
 	MYSQL_COM_QUERY_RELEASE_SAVEPOINT,
 	MYSQL_COM_QUERY_RENAME_TABLE,
 	MYSQL_COM_QUERY_RESET_MASTER,
+	MYSQL_COM_QUERY_RESET_BINARY_LOGS_AND_GTIDS,
 	MYSQL_COM_QUERY_RESET_SLAVE,
+	MYSQL_COM_QUERY_RESET_REPLICA,
 	MYSQL_COM_QUERY_REPLACE,
 	MYSQL_COM_QUERY_REVOKE,
 	MYSQL_COM_QUERY_ROLLBACK,
@@ -1309,6 +1310,9 @@ __thread char * mysql_thread___ssl_p2s_crlpath;
 /* variables used by events log */
 __thread char * mysql_thread___eventslog_filename;
 __thread int mysql_thread___eventslog_filesize;
+__thread int mysql_thread___eventslog_buffer_history_size;
+__thread int mysql_thread___eventslog_table_memory_size;
+__thread int mysql_thread___eventslog_buffer_max_query_length;
 __thread int mysql_thread___eventslog_default_log;
 __thread int mysql_thread___eventslog_format;
 
@@ -1610,6 +1614,9 @@ extern __thread char * mysql_thread___ssl_p2s_crlpath;
 /* variables used by events log */
 extern __thread char * mysql_thread___eventslog_filename;
 extern __thread int mysql_thread___eventslog_filesize;
+extern __thread int mysql_thread___eventslog_buffer_history_size;
+extern __thread int mysql_thread___eventslog_table_memory_size;
+extern __thread int mysql_thread___eventslog_buffer_max_query_length;
 extern __thread int mysql_thread___eventslog_default_log;
 extern __thread int mysql_thread___eventslog_format;
 
@@ -1792,9 +1799,10 @@ extern const pgsql_variable_validator pgsql_variable_validator_client_min_messag
 extern const pgsql_variable_validator pgsql_variable_validator_bytea_output;
 extern const pgsql_variable_validator pgsql_variable_validator_extra_float_digits;
 extern const pgsql_variable_validator pgsql_variable_validator_maintenance_work_mem;
+extern const pgsql_variable_validator pgsql_variable_validator_client_encoding;
 
 pgsql_variable_st pgsql_tracked_variables[]{
-	{ PGSQL_CLIENT_ENCODING,       SETTING_CHARSET,	    "client_encoding", "client_encoding", "UTF8", (PGTRACKED_VAR_OPT_SET_TRANSACTION | PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), nullptr, { "names", nullptr } },
+	{ PGSQL_CLIENT_ENCODING,       SETTING_VARIABLE,	"client_encoding", "client_encoding", "UTF8", (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_client_encoding, { "names", nullptr } },
 	{ PGSQL_DATESTYLE,			   SETTING_VARIABLE,	"datestyle", "datestyle", "ISO, MDY" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_datestyle, nullptr },
 	{ PGSQL_INTERVALSTYLE,		   SETTING_VARIABLE,	"intervalstyle", "intervalstyle", "postgres" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_intervalstyle, nullptr },
 	{ PGSQL_STANDARD_CONFORMING_STRINGS, SETTING_VARIABLE, "standard_conforming_strings", "standard_conforming_strings", "on", (PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_bool, nullptr },
@@ -1814,6 +1822,7 @@ pgsql_variable_st pgsql_tracked_variables[]{
 	{ PGSQL_MAINTENANCE_WORK_MEM,  SETTING_VARIABLE,    "maintenance_work_mem", "maintenance_work_mem", "64MB", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_maintenance_work_mem, nullptr },
 	{ PGSQL_SYNCHRONOUS_COMMIT,	   SETTING_VARIABLE,	"synchronous_commit", "synchronous_commit", "on", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_synchronous_commit, nullptr},
 };
+
 #endif //EXCLUDE_TRACKING_VARAIABLES
 
 #else
