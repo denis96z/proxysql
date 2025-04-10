@@ -37,7 +37,9 @@ class PgSQL_Set_Stmt_Parser {
 	void generateRE_parse1v2();
 	// First implemenation of the parser for TRANSACTION ISOLATION LEVEL and TRANSACTION READ/WRITE
 	std::map<std::string, std::vector<std::string>> parse2();
+#if 0
 	std::string parse_character_set();
+#endif
 	std::string remove_comments(const std::string& q);
 };
 

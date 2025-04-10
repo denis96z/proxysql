@@ -986,7 +986,7 @@ private:
 	 * @note This function iterates through the key-value pairs in the startup
 	 *       packet and stores them in the connection parameters object.
 	 */
-	void load_conn_parameters(pgsql_hdr* pkt, bool startup);
+	bool load_conn_parameters(pgsql_hdr* pkt);
 
 	/**
 	 * @brief Handles the client's first message in a SCRAM-SHA-256

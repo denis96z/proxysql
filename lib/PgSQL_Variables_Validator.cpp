@@ -422,6 +422,31 @@ bool pgsql_variable_validate_maintenance_work_mem_v3(const char* value, const pa
 	return true;
 }
 
+bool pgsql_variable_validate_client_encoding(const char* value, const params_t* params, PgSQL_Session* session, char** transformed_value) {
+	(void)params;
+	if (transformed_value) *transformed_value = nullptr;
+
+	int charset_encoding = PgSQL_Connection::char_to_encoding(value);
+
+	if (charset_encoding == -1) {
+		return false;
+	}
+
+	if (transformed_value) {
+		*transformed_value = strdup(value);
+
+		if (*transformed_value) { // Ensure strdup succeeded
+			char* tmp_val = *transformed_value;
+
+			while (*tmp_val) {
+				*tmp_val = toupper((unsigned char)*tmp_val);
+				tmp_val++;
+			}
+		}
+	}
+
+	return true;
+}
 
 const pgsql_variable_validator pgsql_variable_validator_bool = {
 	.type = VARIABLE_TYPE_BOOL,
@@ -481,4 +506,10 @@ const pgsql_variable_validator pgsql_variable_validator_maintenance_work_mem = {
 	.params = {
 		.uint_range = {.min = 1024, .max = 2147483647 } // this range is in kB
 	}
+};
+
+const pgsql_variable_validator pgsql_variable_validator_client_encoding = {
+	.type = VARIABLE_TYPE_CLIENT_ENCODING,
+	.validate = &pgsql_variable_validate_client_encoding,
+	.params = {}
 };

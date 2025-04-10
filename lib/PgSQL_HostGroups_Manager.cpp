@@ -1789,7 +1789,6 @@ void PgSQL_HostGroups_Manager::push_MyConn_to_pool(PgSQL_Connection *c, bool _lo
 				mysrvc->ConnectionsUsed->add(c); // Add the connection back to the list of used connections
 				destroy_MyConn_from_pool(c, false); // Destroy the connection from the pool
 			} else {*/
-				c->optimize();
 				mysrvc->ConnectionsFree->add(c);
 			//}
 		} else {

@@ -14,103 +14,6 @@ using json = nlohmann::json;
 #include "PgSQL_Query_Processor.h"
 #include "MySQL_Variables.h"
 
-
-#if 0
-// some of the code that follows is from mariadb client library memory allocator
-typedef int     myf;    // Type of MyFlags in my_funcs
-#define MYF(v)      (myf) (v)
-#define MY_KEEP_PREALLOC    1
-#define MY_ALIGN(A,L)    (((A) + (L) - 1) & ~((L) - 1))
-#define ALIGN_SIZE(A)    MY_ALIGN((A),sizeof(double))
-static void ma_free_root(MA_MEM_ROOT *root, myf MyFLAGS);
-static void *ma_alloc_root(MA_MEM_ROOT *mem_root, size_t Size);
-#define MAX(a,b) (((a) > (b)) ? (a) : (b))
-
-
-static void * ma_alloc_root(MA_MEM_ROOT *mem_root, size_t Size)
-{
-  size_t get_size;
-  void * point;
-  MA_USED_MEM *next= 0;
-  MA_USED_MEM **prev;
-
-  Size= ALIGN_SIZE(Size);
-
-  if ((*(prev= &mem_root->free)))
-  {
-    if ((*prev)->left < Size &&
-        mem_root->first_block_usage++ >= 16 &&
-        (*prev)->left < 4096)
-    {
-      next= *prev;
-      *prev= next->next;
-      next->next= mem_root->used;
-      mem_root->used= next;
-      mem_root->first_block_usage= 0;
-    }
-    for (next= *prev; next && next->left < Size; next= next->next)
-      prev= &next->next;
-  }
-  if (! next)
-  {                     /* Time to alloc new block */
-    get_size= MAX(Size+ALIGN_SIZE(sizeof(MA_USED_MEM)),
-              (mem_root->block_size & ~1) * ( (mem_root->block_num >> 2) < 4 ? 4 : (mem_root->block_num >> 2) ) );
-
-    if (!(next = (MA_USED_MEM*) malloc(get_size)))
-    {
-      if (mem_root->error_handler)
-    (*mem_root->error_handler)();
-      return((void *) 0);               /* purecov: inspected */
-    }
-    mem_root->block_num++;
-    next->next= *prev;
-    next->size= get_size;
-    next->left= get_size-ALIGN_SIZE(sizeof(MA_USED_MEM));
-    *prev=next;
-  }
-  point= (void *) ((char*) next+ (next->size-next->left));
-  if ((next->left-= Size) < mem_root->min_malloc)
-  {                     /* Full block */
-    *prev=next->next;               /* Remove block from list */
-    next->next=mem_root->used;
-    mem_root->used=next;
-    mem_root->first_block_usage= 0;
-  }
-  return(point);
-}
-
-
-static void ma_free_root(MA_MEM_ROOT *root, myf MyFlags)
-{ 
-  MA_USED_MEM *next,*old;
-
-  if (!root)
-    return; /* purecov: inspected */
-  if (!(MyFlags & MY_KEEP_PREALLOC))
-    root->pre_alloc=0;
-
-  for ( next=root->used; next ;)
-  {
-    old=next; next= next->next ;
-    if (old != root->pre_alloc)
-      free(old);
-  }
-  for (next= root->free ; next ; )
-  {
-    old=next; next= next->next ;
-    if (old != root->pre_alloc)
-      free(old);
-  }
-  root->used=root->free=0;
-  if (root->pre_alloc)
-  {
-    root->free=root->pre_alloc;
-    root->free->left=root->pre_alloc->size-ALIGN_SIZE(sizeof(MA_USED_MEM));
-    root->free->next=0;
-  }
-}
-#endif // 0
-
 extern char * binary_sha1;
 
 #include "proxysql_find_charset.h"
@@ -841,31 +744,22 @@ void PgSQL_Connection::connect_start() {
 		conninfo << "sslmode='disable' "; // not supporting SSL
 	}
 
-	if (myds && myds->sess) {
-		const char* charset = NULL;
-		uint32_t charset_hash = 0;
-
-		// Take client character set and use it to connect to backend 
-		charset_hash = pgsql_variables.client_get_hash(myds->sess, PGSQL_CLIENT_ENCODING);
-		if (charset_hash != 0)
-			charset = pgsql_variables.client_get_value(myds->sess, PGSQL_CLIENT_ENCODING);
-
-		//if (!charset) {
-		//	charset = pgsql_thread___default_variables[PGSQL_CLIENT_ENCODING];
-		//}
-
+	if (myds && myds->sess && myds->sess->client_myds) {
 		// Client Encoding should be always set
-		assert(charset);
-
-		connect_start_SetCharset(charset, charset_hash);
-
-		escaped_str = escape_string_single_quotes_and_backslashes((char*)charset, false);
+		const char* client_charset = pgsql_variables.client_get_value(myds->sess, PGSQL_CLIENT_ENCODING);
+		assert(client_charset);
+		uint32_t client_charset_hash = pgsql_variables.client_get_hash(myds->sess, PGSQL_CLIENT_ENCODING);
+		assert(client_charset_hash);
+		const char* escaped_str = escape_string_backslash_spaces(client_charset);
 		conninfo << "client_encoding='" << escaped_str << "' ";
-		if (escaped_str != charset)
-			free(escaped_str);
+		if (escaped_str != client_charset)
+			free((char*)escaped_str);
+
+		// charset validation is already done 
+		pgsql_variables.server_set_hash_and_value(myds->sess, PGSQL_CLIENT_ENCODING, client_charset, client_charset_hash);
 
 		std::vector<unsigned int> client_options;
-		client_options.reserve(PGSQL_NAME_LAST_LOW_WM + dynamic_variables_idx.size());
+		client_options.reserve(PGSQL_NAME_LAST_LOW_WM + myds->sess->client_myds->myconn->dynamic_variables_idx.size());
 
 		// excluding PGSQL_CLIENT_ENCODING
 		for (unsigned int idx = 1; idx < PGSQL_NAME_LAST_LOW_WM; idx++) {
@@ -873,9 +767,9 @@ void PgSQL_Connection::connect_start() {
 			client_options.push_back(idx);
 		}
 
-		for (std::vector<unsigned int>::const_iterator it_c = dynamic_variables_idx.begin(); it_c != dynamic_variables_idx.end(); it_c++) {
-			assert(pgsql_variables.client_get_hash(myds->sess, *it_c));
-			client_options.push_back(*it_c);
+		for (uint32_t idx : myds->sess->client_myds->myconn->dynamic_variables_idx) {
+			assert(pgsql_variables.client_get_hash(myds->sess, idx));
+			client_options.push_back(idx);
 		}
 
 		if (client_options.empty() == false ||
@@ -1880,31 +1774,6 @@ void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text) {
 			set_status(false, STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
 		}
 	}
-}
-
-void PgSQL_Connection::set_charset(const char* charset) {
-	proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 4, "Setting client encoding %s\n", charset);
-	pgsql_variables.client_set_value(myds->sess, PGSQL_CLIENT_ENCODING, charset);
-}
-
-void PgSQL_Connection::connect_start_SetCharset(const char* charset, uint32_t hash) {
-	assert(charset);
-
-	int charset_encoding = PgSQL_Connection::char_to_encoding(charset);
-
-	if (charset_encoding == -1) {
-		proxy_error("Cannot find character set [%s]\n", charset);
-		assert(0);
-	}
-
-	/* We are connecting to backend setting charset in connection parameters.
-	 * Client already has sent us a character set and client connection variables have been already set.
-	 * Now we store this charset in server connection variables to avoid updating this variables on backend.
-	 */
-	if (hash == 0)
-		pgsql_variables.server_set_value(myds->sess, PGSQL_CLIENT_ENCODING, charset);
-	else 
-		pgsql_variables.server_set_hash_and_value(myds->sess, PGSQL_CLIENT_ENCODING, charset, hash);
 }
 
 // this function is identical to async_query() , with the only exception that MyRS should never be set
