@@ -152,53 +152,66 @@ static const std::unordered_map<std::string_view, const Param_Name_Validation*> 
 #define PG_EVENT_EXCEPT  0x04
 #define PG_EVENT_TIMEOUT 0x08
 
+
+/**
+ * @class PgSQL_Conn_Param
+ * @brief Stores PostgreSQL connection parameters sent by client.
+ *
+ * This class stores key-value pairs representing connection parameters 
+ * for PostgreSQL connection. 
+ *
+ */
 class PgSQL_Conn_Param {
 public:
-	PgSQL_Conn_Param() {}
-	~PgSQL_Conn_Param() {}
+    PgSQL_Conn_Param() {}
+    ~PgSQL_Conn_Param() {}
 
-	bool set_value(const char* key, const char* val) {
-		if (key == nullptr || val == nullptr) return false;
-		connection_parameters[key] = val;
-		return true;
-	}
+    bool set_value(const char* key, const char* val) {
+        if (key == nullptr || val == nullptr) return false;
+        connection_parameters[key] = val;
+        return true;
+    }
 
-	inline
-	const char* get_value(PgSQL_Param_Name key) const {
-		return get_value(param_name[key]);
-	}
+    inline
+    const char* get_value(PgSQL_Param_Name key) const {
+        return get_value(param_name[key]);
+    }
 
-	const char* get_value(const char* key) const {
-		auto it = connection_parameters.find(key);
-		if (it != connection_parameters.end()) {
-			return it->second.c_str();
-		}
-		return nullptr;
-	}
+    const char* get_value(const char* key) const {
+        auto it = connection_parameters.find(key);
+        if (it != connection_parameters.end()) {
+            return it->second.c_str();
+        }
+        return nullptr;
+    }
 
-	bool remove_value(const char* key) {
-		auto it = connection_parameters.find(key);
-		if (it != connection_parameters.end()) {
-			connection_parameters.erase(it);
-			return true;
-		}
-		return false;
-	}
+    bool remove_value(const char* key) {
+        auto it = connection_parameters.find(key);
+        if (it != connection_parameters.end()) {
+            connection_parameters.erase(it);
+            return true;
+        }
+        return false;
+    }
 
-	inline
-	bool is_empty() const {
-		return connection_parameters.empty();
-	}
+    inline
+    bool is_empty() const {
+        return connection_parameters.empty();
+    }
 
-	inline
-	void clear() {
-		connection_parameters.clear();
-	}
+    inline
+    void clear() {
+        connection_parameters.clear();
+    }
 
 private:
-	std::map<std::string, std::string> connection_parameters;
-	friend class PgSQL_Session; 
-	friend class PgSQL_Protocol;
+    /**
+     * @brief Stores the connection parameters as key-value pairs.
+     */
+    std::map<std::string, std::string> connection_parameters;
+
+    friend class PgSQL_Session; 
+    friend class PgSQL_Protocol;
 };
 
 class PgSQL_Variable {
