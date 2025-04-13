@@ -596,7 +596,218 @@ bool do_prepared_select_generic(MYSQL* conn, string& query, int id, const string
 	mysql_stmt_close(stmt);
 	return true;
 }
-  
+
+// Updated table definition: removed TIMESTAMP2, DATETIME2, and TIME2.
+string create_table_query_full_types() {
+	return string(
+		"CREATE TABLE test.prepared_log_test_full_types ("
+		"id INT PRIMARY KEY AUTO_INCREMENT, "
+		"col_decimal DECIMAL(10,2), "			// MYSQL_TYPE_DECIMAL
+		"col_tiny TINYINT, "					 // MYSQL_TYPE_TINY
+		"col_float FLOAT, "					  // MYSQL_TYPE_FLOAT
+		"col_timestamp TIMESTAMP, "			  // MYSQL_TYPE_TIMESTAMP
+		"col_int24 MEDIUMINT, "				  // MYSQL_TYPE_INT24
+		"col_year YEAR, "						// MYSQL_TYPE_YEAR
+		"col_newdate DATE, "					 // MYSQL_TYPE_NEWDATE (using DATE)
+		"col_varchar VARCHAR(50), "			  // MYSQL_TYPE_VARCHAR
+		//"col_bit BIT(8), "					   // MYSQL_TYPE_BIT
+		// Note: TIMESTAMP2, DATETIME2, TIME2 removed.
+		"col_json JSON, "						// MYSQL_TYPE_JSON - using JSON storage
+		"col_newdecimal DECIMAL(10,3), "		 // MYSQL_TYPE_NEWDECIMAL
+		//"col_enum ENUM('x','y','z'), "		   // MYSQL_TYPE_ENUM
+		//"col_set SET('a','b','c'), "			 // MYSQL_TYPE_SET
+		"col_tiny_blob TINYBLOB, "			   // MYSQL_TYPE_TINY_BLOB
+		"col_medium_blob MEDIUMBLOB, "		   // MYSQL_TYPE_MEDIUM_BLOB
+		"col_long_blob LONGBLOB"			   // MYSQL_TYPE_LONG_BLOB
+		//"col_geometry GEOMETRY"				  // MYSQL_TYPE_GEOMETRY
+		") ENGINE=InnoDB"
+	);
+}
+
+// Updated prepared INSERT for the full_types table without TIMESTAMP2, DATETIME2, and TIME2.
+bool do_prepared_insert_full_types(MYSQL* conn,
+	const string& col_decimal,		   // DECIMAL(10,2) as string
+	int col_tiny,						// TINYINT
+	float col_float,					 // FLOAT
+	const string& col_timestamp,		 // TIMESTAMP as string
+	int col_int24,					   // MEDIUMINT
+	unsigned short col_year,			 // YEAR as SHORT
+	const string& col_newdate,		   // DATE for NEWDATE
+	const string& col_varchar,		   // VARCHAR
+	//const string& col_bit,			   // BIT as string representation
+	// Removed: col_timestamp2, col_datetime2, col_time2.
+	const string& col_json,			  // JSON as string
+	const string& col_newdecimal,		// NEWDECIMAL as string
+	//const string& col_enum,			  // ENUM as string
+	//const string& col_set,			   // SET as string
+	const string& col_tiny_blob,		 // TINYBLOB as string
+	const string& col_medium_blob,	   // MEDIUMBLOB as string
+	const string& col_long_blob,		 // LONGBLOB as string
+	//const string& col_geometry,		  // GEOMETRY as WKT string (e.g. "POINT(1 2)")
+	int* inserted_id)
+{
+	MYSQL_STMT* stmt = mysql_stmt_init(conn);
+	if (!stmt) {
+		diag("mysql_stmt_init failed");
+		return false;
+	}
+	string query = "INSERT INTO test.prepared_log_test_full_types ("
+				   "col_decimal, col_tiny, col_float, col_timestamp, col_int24, col_year, "
+				   "col_newdate, col_varchar, col_json, col_newdecimal, "
+				   "col_tiny_blob, col_medium_blob, col_long_blob"
+				   ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
+	if (mysql_stmt_prepare(stmt, query.c_str(), query.size())) {
+		diag("Full types INSERT prepare failed: %s", mysql_stmt_error(stmt));
+		mysql_stmt_close(stmt);
+		return false;
+	}
+
+	MYSQL_BIND bind[13];
+	memset(bind, 0, sizeof(bind));
+	int idx = 0;
+	// 1. col_decimal (DECIMAL) as string.
+	bind[idx].buffer_type = MYSQL_TYPE_NEWDECIMAL;
+	bind[idx].buffer = (char*)col_decimal.c_str();
+	unsigned long len0 = col_decimal.size();
+	bind[idx].buffer_length = len0;
+	bind[idx].length = &len0;
+	idx++;
+	// 2. col_tiny (TINYINT)
+	bind[idx].buffer_type = MYSQL_TYPE_TINY;
+	bind[idx].buffer = (char*)&col_tiny;
+	bind[idx].length = 0;
+	idx++;
+	// 3. col_float (FLOAT)
+	bind[idx].buffer_type = MYSQL_TYPE_FLOAT;
+	bind[idx].buffer = (char*)&col_float;
+	bind[idx].length = 0;
+	idx++;
+	// 4. col_timestamp (TIMESTAMP) as MYSQL_TIME.
+	MYSQL_TIME ts;
+	sscanf(col_timestamp.c_str(), "%4d-%2d-%2d %2d:%2d:%2d",
+		   &ts.year, &ts.month, &ts.day, &ts.hour, &ts.minute, &ts.second);
+	ts.second_part = 0;
+	ts.neg = 0;
+	bind[idx].buffer_type = MYSQL_TYPE_TIMESTAMP;
+	bind[idx].buffer = (char*)&ts;
+	bind[idx].buffer_length = sizeof(MYSQL_TIME);
+	bind[idx].length = 0;
+	idx++;
+	// 5. col_int24 (MEDIUMINT) as LONG.
+	bind[idx].buffer_type = MYSQL_TYPE_LONG;
+	bind[idx].buffer = (char*)&col_int24;
+	bind[idx].length = 0;
+	idx++;
+	// 6. col_year (YEAR) as SHORT.
+	bind[idx].buffer_type = MYSQL_TYPE_SHORT;
+	bind[idx].buffer = (char*)&col_year;
+	bind[idx].length = 0;
+	idx++;
+	// 7. col_newdate (DATE) using MYSQL_TIME.
+	MYSQL_TIME dt;
+	sscanf(col_newdate.c_str(), "%4d-%2d-%2d", &dt.year, &dt.month, &dt.day);
+	dt.hour = 0;
+	dt.minute = 0;
+	dt.second = 0;
+	dt.second_part = 0;
+	dt.neg = 0;
+	bind[idx].buffer_type = MYSQL_TYPE_DATE;
+	bind[idx].buffer = (char*)&dt;
+	bind[idx].buffer_length = sizeof(dt);
+	bind[idx].length = 0;
+	idx++;
+	// 8. col_varchar (VARCHAR)
+	bind[idx].buffer_type = MYSQL_TYPE_STRING;
+	bind[idx].buffer = (char*)col_varchar.c_str();
+	unsigned long len3 = col_varchar.size();
+	bind[idx].buffer_length = len3;
+	bind[idx].length = &len3;
+	idx++;
+/*
+	// 9. col_bit (BIT) as string.
+	bind[idx].buffer_type = MYSQL_TYPE_STRING;
+	bind[idx].buffer = (char*)col_bit.c_str();
+	unsigned long len4 = col_bit.size();
+	bind[idx].buffer_length = len4;
+	bind[idx].length = &len4;
+	idx++;
+*/
+	// 9. col_json (JSON) as string.
+	bind[idx].buffer_type = MYSQL_TYPE_JSON;
+	bind[idx].buffer = (char*)col_json.c_str();
+	unsigned long len5 = col_json.size();
+	bind[idx].buffer_length = len5;
+	bind[idx].length = &len5;
+	idx++;
+	// 10. col_newdecimal (NEWDECIMAL)
+	bind[idx].buffer_type = MYSQL_TYPE_NEWDECIMAL;
+	bind[idx].buffer = (char*)col_newdecimal.c_str();
+	unsigned long len6 = col_newdecimal.size();
+	bind[idx].buffer_length = len6;
+	bind[idx].length = &len6;
+	idx++;
+	/*
+	// 12. col_enum (ENUM) as string.
+	bind[idx].buffer_type = MYSQL_TYPE_ENUM;
+	bind[idx].buffer = (char*)col_enum.c_str();
+	unsigned long len7 = col_enum.size();
+	bind[idx].buffer_length = len7;
+	bind[idx].length = &len7;
+	idx++;
+	// 14. col_set (SET) as string.
+	bind[idx].buffer_type = MYSQL_TYPE_SET;
+	bind[idx].buffer = (char*)col_set.c_str();
+	unsigned long len8 = col_set.size();
+	bind[idx].buffer_length = len8;
+	bind[idx].length = &len8;
+	idx++;
+	*/
+	// 11. col_tiny_blob (TINYBLOB)
+	bind[idx].buffer_type = MYSQL_TYPE_BLOB;
+	bind[idx].buffer = (char*)col_tiny_blob.c_str();
+	unsigned long len9 = col_tiny_blob.size();
+	bind[idx].buffer_length = len9;
+	bind[idx].length = &len9;
+	idx++;
+	// 12. col_medium_blob (MEDIUMBLOB)
+	bind[idx].buffer_type = MYSQL_TYPE_BLOB;
+	bind[idx].buffer = (char*)col_medium_blob.c_str();
+	unsigned long len10 = col_medium_blob.size();
+	bind[idx].buffer_length = len10;
+	bind[idx].length = &len10;
+	idx++;
+	// 13. col_long_blob (LONGBLOB)
+	bind[idx].buffer_type = MYSQL_TYPE_BLOB;
+	bind[idx].buffer = (char*)col_long_blob.c_str();
+	unsigned long len11 = col_long_blob.size();
+	bind[idx].buffer_length = len11;
+	bind[idx].length = &len11;
+	idx++;
+/*
+	// 18. col_geometry (GEOMETRY) as string.
+	bind[idx].buffer_type = MYSQL_TYPE_GEOMETRY;
+	bind[idx].buffer = (char*)col_geometry.c_str();
+	unsigned long len12 = col_geometry.size();
+	bind[idx].buffer_length = len12;
+	bind[idx].length = &len12;
+	idx++;
+*/
+	if (mysql_stmt_bind_param(stmt, bind)) {
+		diag("Full types INSERT bind failed: %s", mysql_stmt_error(stmt));
+		mysql_stmt_close(stmt);
+		return false;
+	}
+	if (mysql_stmt_execute(stmt)) {
+		diag("Full types INSERT execute failed: %s", mysql_stmt_error(stmt));
+		mysql_stmt_close(stmt);
+		return false;
+	}
+	*inserted_id = (int)mysql_stmt_insert_id(stmt);
+	mysql_stmt_close(stmt);
+	return true;
+}
+
+
 int main(int argc, char** argv) {
 	CommandLine cl;
 	if (cl.getEnv()) {
@@ -635,6 +846,7 @@ int main(int argc, char** argv) {
 	p += 1; // check digest
 	p += 1; // INSERT on prepared_log_test_full
 	p += 1; // SELECT on prepared_log_test_full
+	p += 1; // INSERT on prepared_log_test_full_types
 	p *= 2; // check logging modes
 	plan(p);
 
@@ -696,7 +908,6 @@ int main(int argc, char** argv) {
 		MYSQL_QUERY(proxy, create_table_query_ext().c_str());
 		MYSQL_QUERY(proxy, "DROP TABLE IF EXISTS test.prepared_log_test_full");
 		MYSQL_QUERY(proxy, create_table_query_full().c_str());
-
 		
 		for (int i = 1; i <= NUM_ROWS; i++) {
 			// Use sample values. You may vary these as needed.
@@ -788,6 +999,34 @@ int main(int argc, char** argv) {
 		for (size_t i = 0; i < full_row.size(); i++) {
 			diag("Column %zu: '%s'", i, full_row[i].c_str());
 		}
+
+
+		MYSQL_QUERY(proxy, "DROP TABLE IF EXISTS test.prepared_log_test_full_types");
+		MYSQL_QUERY(proxy, create_table_query_full_types().c_str());
+
+		// Insert a single row using the updated function.
+		int inserted_id_types = 0;
+		bool ins_ok_types = do_prepared_insert_full_types(proxy,
+			"1.23",						 // col_decimal (DECIMAL(10,2)) as string
+			5,							  // col_tiny (TINYINT)
+			4.56f,						  // col_float (FLOAT)
+			"2025-04-03 12:34:56",		   // col_timestamp (TIMESTAMP) as string
+			200,							// col_int24 (MEDIUMINT)
+			2025,						   // col_year (YEAR)
+			"2025-04-01",				   // col_newdate (DATE)
+			"TestType",					 // col_varchar (VARCHAR)
+			//"10101010",					 // col_bit (BIT as string)
+			"{\"key\":\"value\"}",		  // col_json (JSON)
+			"4.567",						// col_newdecimal (NEWDECIMAL) as string
+			//"y",							// col_enum (ENUM)
+			//"a,b",						  // col_set (SET)
+			"TinyBlobData",				 // col_tiny_blob (TINYBLOB)
+			"MediumBlobData",			   // col_medium_blob (MEDIUMBLOB)
+			"LongBlobData",				 // col_long_blob (LONGBLOB)
+			//"POINT(1 2)",				   // col_geometry (GEOMETRY in WKT)
+			&inserted_id_types);
+		ok(ins_ok_types, "Full types prepared INSERT executed");
+		diag("Inserted row id in test.prepared_log_test_full_types: %d", inserted_id_types);
 	}
 
 	mysql_close(proxy);
