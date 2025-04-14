@@ -3247,6 +3247,7 @@ SQLite3_result * PgSQL_HostGroups_Manager::SQL3_Connection_Pool(bool _reset, int
 	return result;
 }
 
+#if 0 // DELETE AFTER 2025-07-14
 void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int read_only) {
 	// define queries
 	const char *Q1B=(char *)"SELECT hostgroup_id,status FROM ( SELECT DISTINCT writer_hostgroup FROM pgsql_replication_hostgroups JOIN pgsql_servers WHERE (hostgroup_id=writer_hostgroup) AND hostname='%s' AND port=%d UNION SELECT DISTINCT writer_hostgroup FROM pgsql_replication_hostgroups JOIN pgsql_servers WHERE (hostgroup_id=reader_hostgroup) AND hostname='%s' AND port=%d) LEFT JOIN pgsql_servers ON hostgroup_id=writer_hostgroup AND hostname='%s' AND port=%d";
@@ -3590,6 +3591,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 	}
 	free(query);
 }
+#endif // 0
 
 /**
  * @brief New implementation of the read_only_action method that does not depend on the admin table.
