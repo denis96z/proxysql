@@ -928,6 +928,7 @@ int main(int argc, char** argv) {
 			ok(ins_ok, "Extended prepared INSERT executed");
 		}
 
+		sleep(2);
 		// For each non-key column, perform a prepared SELECT.
 		// We use the first inserted row's id (assumed to be 1) and the value from that column.
 		int sel_id = 1;
@@ -991,6 +992,7 @@ int main(int argc, char** argv) {
 							  //"POINT(1 2)",		 // col_geometry in WKT
 							  &inserted_id);
 		ok(ins_ok, "Full prepared INSERT executed");
+		sleep(2);
 		vector<string> full_row;
 		bool sel_ok = do_prepared_select_full(proxy, inserted_id, full_row);
 		ok(sel_ok, "Full prepared SELECT executed");
