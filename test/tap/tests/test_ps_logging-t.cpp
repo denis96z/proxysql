@@ -54,16 +54,16 @@ string create_table_query_ext() {
 	return string(
 		"CREATE TABLE test.prepared_log_test ("
 		"id INT PRIMARY KEY AUTO_INCREMENT, "
-		"col_date DATE, "
-		"col_time TIME, "
-		"col_timestamp TIMESTAMP, "
-		"col_datetime DATETIME, "
-		"col_int INT, "
-		"col_longint BIGINT, "
+		"col_date DATE DEFAULT '2025-01-01', "		 // DEFAULT date
+		"col_time TIME DEFAULT '00:00:00', "			  // DEFAULT time
+		"col_timestamp TIMESTAMP DEFAULT '2025-01-01 00:00:00', " // DEFAULT timestamp
+		"col_datetime DATETIME DEFAULT '2025-01-01 00:00:00', "   // DEFAULT datetime
+		"col_int INT DEFAULT 0, "						 // DEFAULT int
+		"col_longint BIGINT DEFAULT 0, "				  // DEFAULT longint
 		"col_blob BLOB, "
-		"col_decimal DECIMAL(10,2), "
-		"col_year YEAR, "
-		"col_set SET('a','b','c','d'), "
+		"col_decimal DECIMAL(10,2) DEFAULT 0.00, "		// DEFAULT decimal
+		"col_year YEAR DEFAULT 2000, "					// DEFAULT year
+		"col_set SET('a','b','c','d') DEFAULT 'a', "	  // DEFAULT set
 		"col_json JSON"
 		") ENGINE=InnoDB"
 	);
@@ -74,28 +74,28 @@ string create_table_query_full() {
 	return string(
 		"CREATE TABLE test.prepared_log_test_full ("
 		"id INT PRIMARY KEY AUTO_INCREMENT, "
-		"col_date DATE, "
-		"col_time TIME, "
-		"col_timestamp TIMESTAMP, "
-		"col_datetime DATETIME, "
-		"col_int INT, "
-		"col_tiny TINYINT, "			  // MYSQL_TYPE_TINY
-		"col_float FLOAT, "			   // MYSQL_TYPE_FLOAT
-		"col_int24 MEDIUMINT, "		   // MYSQL_TYPE_INT24
-		"col_newdate DATE, "			  // MYSQL_TYPE_NEWDATE (using DATE)
-		"col_varchar VARCHAR(50), "	   // MYSQL_TYPE_VARCHAR
-		//"col_bit BIT(8), "				// MYSQL_TYPE_BIT
-		"col_timestamp2 TIMESTAMP(6), "   // MYSQL_TYPE_TIMESTAMP2
-		"col_datetime2 DATETIME(6), "	 // MYSQL_TYPE_DATETIME2
-		"col_time2 TIME(6), "			 // MYSQL_TYPE_TIME2
-		"col_json_extra JSON, "		   // MYSQL_TYPE_JSON
-		"col_newdecimal DECIMAL(10,3), "	// MYSQL_TYPE_NEWDECIMAL
-		"col_enum ENUM('x','y','z'), "	// MYSQL_TYPE_ENUM
-		"col_set_extra SET('a','b','c'), " // MYSQL_TYPE_SET
-		"col_tiny_blob TINYBLOB, "		 // MYSQL_TYPE_TINY_BLOB
-		"col_medium_blob MEDIUMBLOB, "	 // MYSQL_TYPE_MEDIUM_BLOB
-		"col_long_blob LONGBLOB "		 // MYSQL_TYPE_LONG_BLOB
-		//"col_geometry GEOMETRY"		   // MYSQL_TYPE_GEOMETRY
+		"col_date DATE DEFAULT '2025-01-01', "
+		"col_time TIME DEFAULT '00:00:00', "
+		"col_timestamp TIMESTAMP DEFAULT '2025-01-01 00:00:00', "
+		"col_datetime DATETIME DEFAULT '2025-01-01 00:00:00', "
+		"col_int INT DEFAULT 0, "
+		"col_tiny TINYINT DEFAULT 0, "				 // TINYINT default
+		"col_float FLOAT DEFAULT 0.0, "				  // FLOAT default
+		"col_int24 MEDIUMINT DEFAULT 0, "				// MEDIUMINT default
+		"col_newdate DATE DEFAULT '2025-01-01', "		 // NEWDATE default
+		"col_varchar VARCHAR(50) DEFAULT '', "		   // VARCHAR default
+		//"col_bit BIT(8) DEFAULT b'0', "				 // BIT if used
+		"col_timestamp2 TIMESTAMP(6) DEFAULT '2025-01-01 00:00:00.000000', "  // TIMESTAMP2 default
+		"col_datetime2 DATETIME(6) DEFAULT '2025-01-01 00:00:00.000000', "	// DATETIME2 default
+		"col_time2 TIME(6) DEFAULT '00:00:00.000000', "	// TIME2 default
+		"col_json_extra JSON, "			  // JSON
+		"col_newdecimal DECIMAL(10,3) DEFAULT 0.000, "	 // NEWDECIMAL default
+		"col_enum ENUM('x','y','z') DEFAULT 'x', "		 // ENUM default
+		"col_set_extra SET('a','b','c') DEFAULT 'a', "	 // SET default
+		"col_tiny_blob TINYBLOB, "
+		"col_medium_blob MEDIUMBLOB, "
+		"col_long_blob LONGBLOB"
+		//"col_geometry GEOMETRY DEFAULT NULL"		   // GEOMETRY (or omit DEFAULT if not supported)
 		") ENGINE=InnoDB"
 	);
 }
@@ -602,24 +602,23 @@ string create_table_query_full_types() {
 	return string(
 		"CREATE TABLE test.prepared_log_test_full_types ("
 		"id INT PRIMARY KEY AUTO_INCREMENT, "
-		"col_decimal DECIMAL(10,2), "			// MYSQL_TYPE_DECIMAL
-		"col_tiny TINYINT, "					 // MYSQL_TYPE_TINY
-		"col_float FLOAT, "					  // MYSQL_TYPE_FLOAT
-		"col_timestamp TIMESTAMP, "			  // MYSQL_TYPE_TIMESTAMP
-		"col_int24 MEDIUMINT, "				  // MYSQL_TYPE_INT24
-		"col_year YEAR, "						// MYSQL_TYPE_YEAR
-		"col_newdate DATE, "					 // MYSQL_TYPE_NEWDATE (using DATE)
-		"col_varchar VARCHAR(50), "			  // MYSQL_TYPE_VARCHAR
-		//"col_bit BIT(8), "					   // MYSQL_TYPE_BIT
-		// Note: TIMESTAMP2, DATETIME2, TIME2 removed.
-		"col_json JSON, "						// MYSQL_TYPE_JSON - using JSON storage
-		"col_newdecimal DECIMAL(10,3), "		 // MYSQL_TYPE_NEWDECIMAL
-		//"col_enum ENUM('x','y','z'), "		   // MYSQL_TYPE_ENUM
-		//"col_set SET('a','b','c'), "			 // MYSQL_TYPE_SET
-		"col_tiny_blob TINYBLOB, "			   // MYSQL_TYPE_TINY_BLOB
-		"col_medium_blob MEDIUMBLOB, "		   // MYSQL_TYPE_MEDIUM_BLOB
-		"col_long_blob LONGBLOB"			   // MYSQL_TYPE_LONG_BLOB
-		//"col_geometry GEOMETRY"				  // MYSQL_TYPE_GEOMETRY
+		"col_decimal DECIMAL(10,2) DEFAULT 0.00, "	   // DECIMAL default
+		"col_tiny TINYINT DEFAULT 0, "					// TINYINT default
+		"col_float FLOAT DEFAULT 0.0, "				   // FLOAT default
+		"col_timestamp TIMESTAMP DEFAULT '2025-01-01 00:00:00', " // TIMESTAMP default
+		"col_int24 MEDIUMINT DEFAULT 0, "				 // MEDIUMINT default
+		"col_year YEAR DEFAULT 2000, "					// YEAR default
+		"col_newdate DATE DEFAULT '2025-01-01', "		 // NEWDATE default
+		"col_varchar VARCHAR(50) DEFAULT '', "			// VARCHAR default
+		//"col_bit BIT(8) DEFAULT b'0', "				  // BIT if uncommented
+		"col_json JSON, "
+		"col_newdecimal DECIMAL(10,3) DEFAULT 0.000, "	  // NEWDECIMAL default
+		//"col_enum ENUM('x','y','z') DEFAULT 'x', "		// ENUM if uncommented
+		//"col_set SET('a','b','c') DEFAULT 'a', "		  // SET if uncommented
+		"col_tiny_blob TINYBLOB, "
+		"col_medium_blob MEDIUMBLOB, "
+		"col_long_blob LONGBLOB"
+		//"col_geometry GEOMETRY DEFAULT NULL"			 // GEOMETRY (if used)
 		") ENGINE=InnoDB"
 	);
 }
