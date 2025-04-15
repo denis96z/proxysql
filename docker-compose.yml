@@ -15,6 +15,7 @@ services:
       - WITHGCOV
       - NOJEMALLOC
       - WITHASAN
+      - BLD_NAME
     command: bash -l -c /opt/entrypoint/entrypoint.bash
 
 ####################################################################################################
