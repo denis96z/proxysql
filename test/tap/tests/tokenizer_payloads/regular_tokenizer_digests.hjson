@@ -24,7 +24,10 @@
 			"# random_comment\n select 1.1   #final_comment  \n  ",
 			"-- random_comment\n select 1.1 -- final_comment\n   ",
 			"-- random_comment\n select 1.1-- final_comment   \n",
-			"-- random_comment\n select 1.1   -- final_comment  \n  "
+			// NOTE: Reg check for last `-- ` comment with '4' chars
+			"select 1 -- aaaa",
+			// NOTE: Reg check for last `# ` comment with '1' chars
+			"select 1 # a"
 		],
 		"s1": "select ?",
 		"s2": "select ?",
