@@ -778,14 +778,9 @@ enum p_st process_cmnt_type_2(shared_st* shared_st) {
 	if (*shared_st->q == '#' && shared_st->q_cur_pos <= (shared_st->q_len - 2)) {
 		shared_st->q += 1;
 		shared_st->q_cur_pos += 1;
-
-		if (shared_st->q_cur_pos == (shared_st->q_len - 2)) {
-			next_state = st_no_mark_found;
-			return next_state;
-		}
 	}
 
-	if (*shared_st->q == '\n' || *shared_st->q == '\r' || (shared_st->q_cur_pos == shared_st->q_len - 1)) {
+	if (*shared_st->q == '\n' || *shared_st->q == '\r' || (shared_st->q_cur_pos >= shared_st->q_len - 1)) {
 		next_state = st_no_mark_found;
 		shared_st->prev_char = ' ';
 
@@ -818,14 +813,9 @@ enum p_st process_cmnt_type_3(shared_st* shared_st) {
 	) {
 		shared_st->q += 3;
 		shared_st->q_cur_pos += 3;
-
-		if (shared_st->q_cur_pos == (shared_st->q_len - 4)) {
-			next_state = st_no_mark_found;
-			return next_state;
-		}
 	}
 
-	if (*shared_st->q == '\n' || *shared_st->q == '\r' || (shared_st->q_cur_pos == shared_st->q_len - 1)) {
+	if (*shared_st->q == '\n' || *shared_st->q == '\r' || (shared_st->q_cur_pos >= shared_st->q_len - 1)) {
 		next_state = st_no_mark_found;
 		shared_st->prev_char = ' ';
 
