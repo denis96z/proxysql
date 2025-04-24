@@ -1744,9 +1744,20 @@ bool PgSQL_Session::handler_again___status_CONNECTING_SERVER(int* _rc) {
 		if (myds->mypolls == NULL) {
 			// connection yet not in mypolls
 			myds->assign_fd_from_mysql_conn();
-			thread->mypolls.add(POLLIN | POLLOUT, mybe->server_myds->fd, mybe->server_myds, curtime);
+			thread->mypolls.add(POLLIN | POLLOUT, myds->fd, myds, curtime);
 			if (mirror) {
 				PROXY_TRACE();
+			}
+		} else {
+			// See Issue#4919 (https://github.com/sysown/proxysql/issues/4919)
+			// File descriptor was already set previously. Let's verify if it has changed
+			if (myds->fd != myconn->fd)
+			{
+				// PQconnectPoll has changed the file descriptor (FD) during the connection process.
+				// We need to update the new FD in mypolls, replacing the old one,
+				// Note: previous FD is closed by PQconnectPoll
+				myds->assign_fd_from_mysql_conn();
+				thread->mypolls.update_fd_at_index(myds->poll_fds_idx, myds->fd);
 			}
 		}
 		switch (rc) {

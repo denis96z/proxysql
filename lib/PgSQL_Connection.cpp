@@ -884,7 +884,7 @@ void PgSQL_Connection::connect_cont(short event) {
 	case PGRES_POLLING_WRITING:
 		async_exit_status = PG_EVENT_WRITE;
 		break;
-	case PGRES_POLLING_ACTIVE:
+	case PGRES_POLLING_ACTIVE: // Not used
 	case PGRES_POLLING_READING:
 		async_exit_status = PG_EVENT_READ;
 		break;
@@ -897,7 +897,13 @@ void PgSQL_Connection::connect_cont(short event) {
 		const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
 		set_error_from_result(result);
 		proxy_error("Connect failed. %s\n", get_error_code_with_message().c_str());
-		return;
+	}
+	int current_fd = PQsocket(pgsql_conn);
+	if (current_fd != fd) {
+		proxy_warning("PgSQL Connection FD has been changed by PQconnectPoll(). oldFD:%d newFD:%d\n", fd, current_fd);
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5, "PgSQL Connection FD has been changed by PQconnectPoll()"
+			"Session=%p, Conn=%p, myds=%p, oldFD=%d, newFD=%d\n", myds->sess, this, myds, fd, current_fd);
+		fd = current_fd;
 	}
 }
 
