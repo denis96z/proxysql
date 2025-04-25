@@ -64,7 +64,6 @@ struct BufferTypeInfo {
 // Helper lambda to convert binary data to a hex string.
 auto binaryToHex = [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
 	std::ostringstream oss;
-	oss << "0x";
 	const unsigned char* data = reinterpret_cast<const unsigned char*>(bind->buffer);
 	for (unsigned long i = 0; i < len; i++) {
 		oss << std::setw(2) << std::setfill('0') << std::hex << (int)data[i];
@@ -758,6 +757,17 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 				const MYSQL_BIND *bind = meta->binds ? &meta->binds[i] : nullptr;
 				if (bind != nullptr && !(meta->is_nulls && meta->is_nulls[i])) {
 					unsigned long len = meta->lengths ? meta->lengths[i] : 0;
+					auto bt = bind->buffer_type;
+					switch (bt) {
+						case MYSQL_TYPE_TIMESTAMP:
+						case MYSQL_TYPE_DATE:
+						case MYSQL_TYPE_TIME:
+						case MYSQL_TYPE_DATETIME:
+							len = sizeof(MYSQL_TIME);
+							break;
+						default:
+							break;
+					}
 					// Use getValueForBind() to produce a string representation.
 					auto[valType, convVal] = getValueForBind(bind, len);
 					convertedValue = convVal;
@@ -915,6 +925,17 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 					std::string convertedValue;
 					if (bind && bind->buffer && !(meta->is_nulls && meta->is_nulls[i])) {
 						unsigned long len = meta->lengths ? meta->lengths[i] : 0;
+						auto bt = bind->buffer_type;
+						switch (bt) {
+							case MYSQL_TYPE_TIMESTAMP:
+							case MYSQL_TYPE_DATE:
+							case MYSQL_TYPE_TIME:
+							case MYSQL_TYPE_DATETIME:
+								len = sizeof(MYSQL_TIME);
+								break;
+							default:
+								break;
+						}
 						auto[valType, convVal] = getValueForBind(bind, len);
 						convertedValue = convVal;
 					} else {
