@@ -33,6 +33,9 @@ echo "==> Setting SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
 if [[ -z ${PROXYSQL_BUILD_TYPE:-} ]] ; then
 	deps_target="build_deps"
 	build_target=""
+elif [[ ${BLD_NAME} =~ \-test|\-tap ]]; then
+	deps_target="build_deps"
+	build_target="build_tap_test_debug"
 else
 	deps_target="build_deps_$PROXYSQL_BUILD_TYPE"
 	build_target="$PROXYSQL_BUILD_TYPE"
@@ -40,18 +43,10 @@ fi
 
 # clean is expensive, do it before, outside of container
 #${MAKE} cleanbuild
-${MAKE} ${MAKEOPT} "${deps_target}"
+${MAKE} ${MAKEOPT} ${deps_target}
+${MAKE} ${MAKEOPT} ${build_target}
 
-if [[ -z ${build_target} ]] ; then
-	${MAKE} ${MAKEOPT}
-else
-	${MAKE} ${MAKEOPT} "${build_target}"
-fi
 touch /opt/proxysql/src/proxysql
-
-if [[ ${BLD_NAME} =~ \-test|\-tap ]]; then
-	${MAKE} ${MAKEOPT} build_tap_test_debug
-fi
 
 # Prepare package files and build DEB
 echo "==> Packaging"
