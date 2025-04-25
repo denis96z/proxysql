@@ -64,6 +64,7 @@ struct BufferTypeInfo {
 // Helper lambda to convert binary data to a hex string.
 auto binaryToHex = [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
 	std::ostringstream oss;
+	oss << "0x";
 	const unsigned char* data = reinterpret_cast<const unsigned char*>(bind->buffer);
 	for (unsigned long i = 0; i < len; i++) {
 		oss << std::setw(2) << std::setfill('0') << std::hex << (int)data[i];
@@ -216,12 +217,12 @@ static const std::unordered_map<unsigned int, BufferTypeInfo> bufferTypeInfoMap 
 	},
 	{ MYSQL_TYPE_VAR_STRING,
 		{ "VAR_STRING", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
-			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+			binaryToHex(bind, len, out);
 		}}
 	},
 	{ MYSQL_TYPE_STRING,
 		{ "STRING", [](const MYSQL_BIND* bind, unsigned long len, std::string &out) {
-			out.assign(reinterpret_cast<char*>(bind->buffer), len);
+			binaryToHex(bind, len, out);
 		}}
 	},
 	{ MYSQL_TYPE_GEOMETRY,
