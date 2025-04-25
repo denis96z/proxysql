@@ -1314,6 +1314,7 @@ __thread int mysql_thread___eventslog_table_memory_size;
 __thread int mysql_thread___eventslog_buffer_max_query_length;
 __thread int mysql_thread___eventslog_default_log;
 __thread int mysql_thread___eventslog_format;
+__thread int mysql_thread___eventslog_stmt_parameters;
 
 /* variables used by audit log */
 __thread char * mysql_thread___auditlog_filename;
@@ -1618,6 +1619,7 @@ extern __thread int mysql_thread___eventslog_table_memory_size;
 extern __thread int mysql_thread___eventslog_buffer_max_query_length;
 extern __thread int mysql_thread___eventslog_default_log;
 extern __thread int mysql_thread___eventslog_format;
+extern __thread int mysql_thread___eventslog_stmt_parameters;
 
 /* variables used by audit log */
 extern __thread char * mysql_thread___auditlog_filename;

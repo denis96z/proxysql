@@ -741,7 +741,7 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 		// Validate Session and Statement Metadata:
 		// The code checks whether the session pointer and the current query's statement metadata (stmt_meta)
 		// are non-null to ensure that parameter details are available.
-		if (session != nullptr && session->CurrentQuery.stmt_meta != nullptr) {
+		if (mysql_thread___eventslog_stmt_parameters > 0 && session != nullptr && session->CurrentQuery.stmt_meta != nullptr) {
 			stmt_execute_metadata_t *meta = session->CurrentQuery.stmt_meta;
 			uint16_t num_params = meta->num_params;
 			// Add bytes for encoded parameter count.
@@ -878,7 +878,7 @@ uint64_t MySQL_Event::write_query_format_1(std::fstream *f) {
 		// Validate Session and Statement Metadata:
 		// The code checks whether the session pointer and the current query's statement metadata (stmt_meta)
 		// are non-null to ensure that parameter details are available.
-		if (session != nullptr && session->CurrentQuery.stmt_meta != nullptr) {
+		if (mysql_thread___eventslog_stmt_parameters > 0 && session != nullptr && session->CurrentQuery.stmt_meta != nullptr) {
 			stmt_execute_metadata_t *meta = session->CurrentQuery.stmt_meta;
 			// Write the number of parameters.
 			// Writing the Encoded Parameter Count:
@@ -1096,7 +1096,9 @@ uint64_t MySQL_Event::write_query_format_2_json(std::fstream *f) {
 	}
 	if (et == PROXYSQL_COM_STMT_EXECUTE) {
 		if (session != nullptr) {
-			extractStmtExecuteMetadataToJson(j);
+			if (mysql_thread___eventslog_stmt_parameters != 0) {
+				extractStmtExecuteMetadataToJson(j);
+			}
 		}
 	}
 

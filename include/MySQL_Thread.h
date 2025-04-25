@@ -533,6 +533,7 @@ class MySQL_Threads_Handler
 		int eventslog_buffer_max_query_length;
 		int eventslog_default_log;
 		int eventslog_format;
+		int eventslog_stmt_parameters;
 		char *auditlog_filename;
 		int auditlog_filesize;
 		// SSL related, proxy to server
