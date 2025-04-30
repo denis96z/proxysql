@@ -197,7 +197,7 @@ void PG_pkt::write_RowDescription(const char *tupdesc, ...) {
 }
 
 
-void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error, int affected_rows, const char *query_type) {
+void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error, int affected_rows, const char *query_type, char txn_state) {
 	assert(psa != NULL);
 	const char *fs = strchr(query_type, ' ');
 	int qtlen = strlen(query_type);
@@ -257,7 +257,7 @@ void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error,
 			pkt.write_CommandComplete(buf);
 		}
 		pkt.to_PtrSizeArray(psa);
-		pkt.write_ReadyForQuery();
+		pkt.write_ReadyForQuery(txn_state);
 		pkt.to_PtrSizeArray(psa);
 	} else { // no resultset
 		PG_pkt pkt(64);
@@ -289,7 +289,7 @@ void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error,
 			}
 		}
 		pkt.to_PtrSizeArray(psa);
-		pkt.write_ReadyForQuery();
+		pkt.write_ReadyForQuery(txn_state);
 		pkt.to_PtrSizeArray(psa);
 	}
 }
