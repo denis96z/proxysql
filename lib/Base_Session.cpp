@@ -330,7 +330,10 @@ void Base_Session<S, DS, B, T>::return_proxysql_internal(PtrSize_t* pkt) {
 			char* pta[1];
 			pta[0] = (char*)s.c_str();
 			resultset->add_row(pta);
-			SQLite3_to_Postgres(client_myds->PSarrayOUT, resultset, nullptr, 0, (const char*)pkt->ptr + 5);
+
+			unsigned int nTxn = NumActiveTransactions();
+			char txn_state = (nTxn ? 'T' : 'I');
+			SQLite3_to_Postgres(client_myds->PSarrayOUT, resultset, nullptr, 0, (const char*)pkt->ptr + 5, txn_state);
 			delete resultset;
 			l_free(pkt->size, pkt->ptr);
 			return;
@@ -599,12 +602,14 @@ unsigned int Base_Session<S,DS,B,T>::NumActiveTransactions(bool check_savepoint)
 				if (_mybe->server_myds->myconn->IsActiveTransaction()) {
 					ret++;
 				} else {
-					// we use check_savepoint to check if we shouldn't ignore COMMIT or ROLLBACK due
-					// to MySQL bug https://bugs.mysql.com/bug.php?id=107875 related to
-					// SAVEPOINT and autocommit=0
-					if (check_savepoint) {
-						if (_mybe->server_myds->myconn->AutocommitFalse_AndSavepoint() == true) {
-							ret++;
+					if constexpr (std::is_same_v<S, MySQL_Session>) {
+						// we use check_savepoint to check if we shouldn't ignore COMMIT or ROLLBACK due
+						// to MySQL bug https://bugs.mysql.com/bug.php?id=107875 related to
+						// SAVEPOINT and autocommit=0
+						if (check_savepoint) {
+							if (_mybe->server_myds->myconn->AutocommitFalse_AndSavepoint() == true) {
+								ret++;
+							}
 						}
 					}
 				}
@@ -663,17 +668,18 @@ int Base_Session<S,DS,B,T>::FindOneActiveTransaction(bool check_savepoint) {
 			if (_mybe->server_myds->myconn) {
 				if (_mybe->server_myds->myconn->IsKnownActiveTransaction()) {
 					return (int)_mybe->server_myds->myconn->parent->myhgc->hid;
-				}
-				else if (_mybe->server_myds->myconn->IsActiveTransaction()) {
+				} else if (_mybe->server_myds->myconn->IsActiveTransaction()) {
 					ret = (int)_mybe->server_myds->myconn->parent->myhgc->hid;
 				}
 				else {
-					// we use check_savepoint to check if we shouldn't ignore COMMIT or ROLLBACK due
-					// to MySQL bug https://bugs.mysql.com/bug.php?id=107875 related to
-					// SAVEPOINT and autocommit=0
-					if (check_savepoint) {
-						if (_mybe->server_myds->myconn->AutocommitFalse_AndSavepoint() == true) {
-							return (int)_mybe->server_myds->myconn->parent->myhgc->hid;
+					if constexpr (std::is_same_v<S, MySQL_Session>) {
+						// we use check_savepoint to check if we shouldn't ignore COMMIT or ROLLBACK due
+						// to MySQL bug https://bugs.mysql.com/bug.php?id=107875 related to
+						// SAVEPOINT and autocommit=0
+						if (check_savepoint) {
+							if (_mybe->server_myds->myconn->AutocommitFalse_AndSavepoint() == true) {
+								return (int)_mybe->server_myds->myconn->parent->myhgc->hid;
+							}
 						}
 					}
 				}
