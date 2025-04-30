@@ -307,7 +307,9 @@ struct free_deleter {
 template <typename T>
 using mf_unique_ptr = std::unique_ptr<T, free_deleter>;
 
-static inline void set_thread_name(const char name[16], const bool en = true) {
+template<std::size_t LEN>
+static inline void set_thread_name(const char(&name)[LEN], const bool en = true) {
+	static_assert(LEN < 17, "Thread name must not exceed 16 characters");
 	if (en == false) {
 		return;
 	}
