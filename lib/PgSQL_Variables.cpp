@@ -85,7 +85,7 @@ bool PgSQL_Variables::client_set_hash_and_value(PgSQL_Session* session, int idx,
 	return true;
 }
 
-void PgSQL_Variables::client_reset_value(PgSQL_Session* session, int idx) {
+void PgSQL_Variables::client_reset_value(PgSQL_Session* session, int idx, bool reorder_dynamic_variables_idx) {
 	if (!session || !session->client_myds || !session->client_myds->myconn) {
 		proxy_warning("Session validation failed\n");
 		return;
@@ -99,7 +99,7 @@ void PgSQL_Variables::client_reset_value(PgSQL_Session* session, int idx) {
 			free(client_conn->variables[idx].value);
 			client_conn->variables[idx].value = NULL;
 		}
-		if (idx > PGSQL_NAME_LAST_LOW_WM) {
+		if (reorder_dynamic_variables_idx && idx > PGSQL_NAME_LAST_LOW_WM) {
 			// we now regererate dynamic_variables_idx
 			client_conn->reorder_dynamic_variables_idx();
 		}
@@ -170,7 +170,7 @@ void PgSQL_Variables::server_set_value(PgSQL_Session* session, int idx, const ch
 	}
 }
 
-void PgSQL_Variables::server_reset_value(PgSQL_Session* session, int idx) {
+void PgSQL_Variables::server_reset_value(PgSQL_Session* session, int idx, bool reorder_dynamic_variables_idx) {
 	assert(session);
 	assert(session->mybe);
 	assert(session->mybe->server_myds);
@@ -184,7 +184,7 @@ void PgSQL_Variables::server_reset_value(PgSQL_Session* session, int idx) {
 			free(backend_conn->variables[idx].value);
 			backend_conn->variables[idx].value = NULL;
 		}
-		if (idx > PGSQL_NAME_LAST_LOW_WM) {
+		if (reorder_dynamic_variables_idx && idx > PGSQL_NAME_LAST_LOW_WM) {
 			// we now regererate dynamic_variables_idx
 			backend_conn->reorder_dynamic_variables_idx();
 		}
