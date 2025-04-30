@@ -102,6 +102,7 @@ static char* commands_counters_desc[PGSQL_QUERY___NONE] = {
 	[PGSQL_QUERY_BEGIN] = (char*)"BEGIN",
 	[PGSQL_QUERY_COMMIT] = (char*)"COMMIT",
 	[PGSQL_QUERY_ROLLBACK] = (char*)"ROLLBACK",
+	[PGSQL_QUERY_ABORT] = (char*)"ABORT",
 	[PGSQL_QUERY_DECLARE_CURSOR] = (char*)"DECLARE_CURSOR",
 	[PGSQL_QUERY_CLOSE_CURSOR] = (char*)"CLOSE_CURSOR",
 	[PGSQL_QUERY_DISCARD] = (char*)"DISCARD",
@@ -664,7 +665,7 @@ enum PGSQL_QUERY_command PgSQL_Query_Processor::query_parser_command_type(SQP_pa
 	char c1;
 
 	tokenizer_t tok;
-	tokenizer(&tok, text, " ", TOKENIZER_NO_EMPTIES);
+	tokenizer(&tok, text, " ;", TOKENIZER_NO_EMPTIES);
 	char* token = NULL;
 __get_token:
 	token = (char*)tokenize(&tok);
@@ -759,6 +760,10 @@ __remove_parenthesis:
 		}
 		if (!strcasecmp("ANALYZE", token)) {
 			ret = PGSQL_QUERY_ANALYZE;
+			break;
+		}
+		if (!strcasecmp("ABORT", token)) {
+			ret = PGSQL_QUERY_ROLLBACK;;
 			break;
 		}
 		break;
