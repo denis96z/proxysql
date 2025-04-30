@@ -15,6 +15,7 @@
 
 
 class PgSQL_Query_Result;
+class PgSQL_ExplicitTxnStateMgr;
 //#include "../deps/json/json.hpp"
 //using json = nlohmann::json;
 
@@ -389,6 +390,7 @@ public:
 	PgSQL_Data_Stream* client_myds;
 #endif // 0
 	PgSQL_Data_Stream* server_myds;
+	PgSQL_ExplicitTxnStateMgr* transaction_state_manager;
 #if 0
 	/*
 	 * @brief Store the hostgroups that hold connections that have been flagged as 'expired' by the
