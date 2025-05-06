@@ -19,10 +19,10 @@
  * This structure is used to store the state of PostgreSQL variables, including
  * their values and hash representations, at a specific point in time during a transaction.
  */
-typedef struct PgSQL_Variable_Snapshot {
-	char* var_value[PGSQL_NAME_LAST_HIGH_WM] = {};
+struct PgSQL_Variable_Snapshot {
+	char* var_value[PGSQL_NAME_LAST_HIGH_WM] = {}; // Not using smart pointers because we need fine-grained control over hashing when values change
 	uint32_t var_hash[PGSQL_NAME_LAST_HIGH_WM] = {};
-} PgSQL_Variable_Snapshot_t;
+};
 
 /**
  * @struct TxnCmd
@@ -95,7 +95,7 @@ public:
 
 private:
 	PgSQL_Session* session;
-	std::vector<PgSQL_Variable_Snapshot_t> transaction_state;
+	std::vector<PgSQL_Variable_Snapshot> transaction_state;
 	std::vector<std::string> savepoint;
 	PgSQL_TxnCmdParser tx_parser;
 
@@ -106,7 +106,7 @@ private:
     bool rollback_to_savepoint(std::string_view name);
     bool release_savepoint(std::string_view name);
 
-	static void reset_variable_snapshot(PgSQL_Variable_Snapshot_t& var_snapshot) noexcept;
+	static void reset_variable_snapshot(PgSQL_Variable_Snapshot& var_snapshot) noexcept;
 };
 
 #endif // PGSQL_EXPLICIT_TRANSACTION_STATE_MANAGER_H

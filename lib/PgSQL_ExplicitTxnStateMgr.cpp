@@ -1,4 +1,4 @@
-#include "PgSQL_ExplicitTxnStateMgr.h"
+﻿#include "PgSQL_ExplicitTxnStateMgr.h"
 #include "proxysql.h"
 #include "PgSQL_Session.h"
 #include "PgSQL_Data_Stream.h"
@@ -18,7 +18,7 @@ PgSQL_ExplicitTxnStateMgr::~PgSQL_ExplicitTxnStateMgr() {
     savepoint.clear();
 }
 
-void PgSQL_ExplicitTxnStateMgr::reset_variable_snapshot(PgSQL_Variable_Snapshot_t& var_snapshot) noexcept {
+void PgSQL_ExplicitTxnStateMgr::reset_variable_snapshot(PgSQL_Variable_Snapshot& var_snapshot) noexcept {
 	for (int idx = 0; idx < PGSQL_NAME_LAST_HIGH_WM; idx++) {
 		if (var_snapshot.var_value[idx]) {
 			free(var_snapshot.var_value[idx]);
@@ -50,7 +50,7 @@ void PgSQL_ExplicitTxnStateMgr::start_transaction() {
 
     assert(session->client_myds && session->client_myds->myconn);
 
-    PgSQL_Variable_Snapshot_t var_snapshot{};
+    PgSQL_Variable_Snapshot var_snapshot{};
 
     // check if already in transaction, if yes then do nothing
     for (int idx = 0; idx < PGSQL_NAME_LAST_HIGH_WM; idx++) {
@@ -96,7 +96,7 @@ void PgSQL_ExplicitTxnStateMgr::rollback() {
 
     assert(session->client_myds && session->client_myds->myconn);
 
-    const PgSQL_Variable_Snapshot_t& var_snapshot = transaction_state.front();
+    const PgSQL_Variable_Snapshot& var_snapshot = transaction_state.front();
 
     for (int idx = 0; idx < PGSQL_NAME_LAST_HIGH_WM; idx++) {
         uint32_t hash = var_snapshot.var_hash[idx];
@@ -159,7 +159,7 @@ bool PgSQL_ExplicitTxnStateMgr::rollback_to_savepoint(std::string_view name) {
 
     assert(tran_state_idx + 1 < (int)transaction_state.size());
 
-	PgSQL_Variable_Snapshot_t& var_snapshot = transaction_state[tran_state_idx+1];
+	PgSQL_Variable_Snapshot& var_snapshot = transaction_state[tran_state_idx+1];
 	for (int idx = 0; idx < PGSQL_NAME_LAST_HIGH_WM; idx++) {
 		uint32_t hash = var_snapshot.var_hash[idx];
 		if (hash != 0) {
@@ -177,6 +177,14 @@ bool PgSQL_ExplicitTxnStateMgr::rollback_to_savepoint(std::string_view name) {
 			pgsql_variables.server_reset_value(session, idx, false);
 		}
 	}
+    
+    session->client_myds->myconn->reorder_dynamic_variables_idx();
+    if (session->mybe) {
+        session->mybe->server_myds->myconn->reorder_dynamic_variables_idx();
+
+        verify_server_variables(session);
+    }
+
     for (size_t idx = tran_state_idx + 1; idx < transaction_state.size(); idx++) {
         reset_variable_snapshot(transaction_state[idx]);
     }
@@ -236,7 +244,7 @@ bool PgSQL_ExplicitTxnStateMgr::add_savepoint(std::string_view name) {
         });
     if (it != savepoint.end()) return false;
 
-    PgSQL_Variable_Snapshot_t var_snapshot{};
+    PgSQL_Variable_Snapshot var_snapshot{};
 
 	for (int idx = 0; idx < PGSQL_NAME_LAST_HIGH_WM; idx++) {
 		uint32_t hash = pgsql_variables.client_get_hash(session, idx);
@@ -344,6 +352,7 @@ TxnCmd PgSQL_TxnCmdParser::parse(std::string_view input, bool in_transaction_mod
         if (first == "begin") cmd.type = TxnCmd::BEGIN;
         else if (first == "savepoint") cmd = parse_savepoint(pos);
         else if (first == "release") cmd = parse_release(pos);
+        else if (first == "rollback") cmd = parse_rollback(pos);
     } else {
         if (first == "commit") cmd.type = TxnCmd::COMMIT;
         else if (first == "rollback" || (first == "abort")) cmd = parse_rollback(pos);
