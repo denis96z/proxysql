@@ -74,7 +74,9 @@ PGResultPtr executeQuery(PGconn* conn, const std::string& query) {
 
 std::string getVariable(PGconn* conn, const std::string& var) {
     auto res = executeQuery(conn, ("SHOW " + var));
-    return std::string(PQgetvalue(res.get(), 0, 0));
+    const std::string& val = std::string(PQgetvalue(res.get(), 0, 0));
+    diag(">> '%s' = '%s'", var.c_str(), val.c_str());
+    return val;
 }
 
 void reset_variable(PGconn* conn, const std::string& var, const std::string& original) {
@@ -118,15 +120,13 @@ bool test_transaction_rollback(const TestVariable& var) {
 bool test_savepoint_rollback(const TestVariable& var) {
     auto conn = createNewConnection(ConnType::BACKEND, "", false);
     const auto original = getVariable(conn.get(), var.name);
-    diag(">>>>> Original value:'%s'", original.c_str());
     executeQuery(conn.get(), "BEGIN");
     executeQuery(conn.get(), "SAVEPOINT sp1");
     executeQuery(conn.get(), "SET " + var.name + " = " + var.test_values[0]);
     executeQuery(conn.get(), "ROLLBACK TO sp1");
     executeQuery(conn.get(), "COMMIT");
-    auto value = getVariable(conn.get(), var.name);
-    const bool success = value == original;
-    diag(">>>>> Rollback value:'%s'", value.c_str());
+
+    const bool success = getVariable(conn.get(), var.name) == original;
     return success;
 }
 
@@ -158,17 +158,15 @@ bool test_savepoint_commit(const TestVariable& var, const std::map<std::string, 
     return success;
 }
 
-bool test_savepoint_rollback_partial(const TestVariable& var, const std::map<std::string, std::string>& original_values) {
+bool test_savepoint_release_commit(const TestVariable& var, const std::map<std::string, std::string>& original_values) {
     auto conn = createNewConnection(ConnType::BACKEND, "", false);
     const auto original = getVariable(conn.get(), var.name);
-
     executeQuery(conn.get(), "BEGIN");
     executeQuery(conn.get(), "SET " + var.name + " = " + var.test_values[0]);
     executeQuery(conn.get(), "SAVEPOINT sp1");
     executeQuery(conn.get(), "SET " + var.name + " = " + var.test_values[1]);
     executeQuery(conn.get(), "RELEASE SAVEPOINT sp1");
     executeQuery(conn.get(), "COMMIT");
-
     const bool success = getVariable(conn.get(), var.name) == var.test_values[1];
     reset_variable(conn.get(), var.name, original_values.at(var.name));
     return success;
@@ -243,7 +241,7 @@ int main(int argc, char** argv) {
         // Multi-value savepoint test
         if (var.test_values.size() > 1) {
            add_test("Multi-value savepoint for " + var.name, [&]() {
-                return test_savepoint_rollback_partial(var, original_values);
+                return test_savepoint_release_commit(var, original_values);
                 });
         }
     }
