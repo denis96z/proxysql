@@ -763,7 +763,7 @@ __remove_parenthesis:
 			break;
 		}
 		if (!strcasecmp("ABORT", token)) {
-			ret = PGSQL_QUERY_ROLLBACK;;
+			ret = PGSQL_QUERY_ROLLBACK;
 			break;
 		}
 		break;
