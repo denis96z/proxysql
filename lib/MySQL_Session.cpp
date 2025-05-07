@@ -2956,7 +2956,6 @@ __exit_handler_again___status_CONNECTING_SERVER_with_err:
 						sprintf(sqlstate,"%s",mysql_sqlstate(myconn->mysql));
 						client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,mysql_errno(myconn->mysql),sqlstate, errmsg.c_str(), true);
 					} else {
-						char buf[256];
 						errmsg = "Max connect failure while reaching hostgroup " + to_string(current_hostgroup);
 						client_myds->myprot.generate_pkt_ERR(true,NULL,NULL,1,9002,(char *)"HY000", errmsg.c_str(), true);
 						if (thread) {

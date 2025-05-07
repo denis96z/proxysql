@@ -812,7 +812,7 @@ void PgSQL_Connection::connect_start() {
 	const std::string& conninfo_str = conninfo.str();
 	pgsql_conn = PQconnectStart(conninfo_str.c_str());
 
-	//PQsetErrorVerbosity(pgsql_conn, PQERRORS_VERBOSE);
+	//PQsetErrorVerbosity(pgsql_conn, PQERRORS_SQLSTATE);
 	//PQsetErrorContextVisibility(pgsql_conn, PQSHOW_CONTEXT_ERRORS);
 
 	if (pgsql_conn == NULL || PQstatus(pgsql_conn) == CONNECTION_BAD) {
@@ -1042,15 +1042,12 @@ int PgSQL_Connection::async_connect(short event) {
 		async_state_machine = ASYNC_IDLE;
 		myds->wait_until = 0;
 		return 0;
-		break;
 	case ASYNC_CONNECT_FAILED:
 		return -1;
-		break;
 	case ASYNC_CONNECT_TIMEOUT:
 		return -2;
-		break;
 	default:
-		return 1;
+		break;
 	}
 	return 1;
 }
@@ -1416,8 +1413,8 @@ bool PgSQL_Connection::IsServerOffline() {
 }
 
 bool PgSQL_Connection::is_connection_in_reusable_state() const {
-	const PGTransactionStatusType txn_status = PQtransactionStatus(pgsql_conn);
-	const bool conn_usable = !(txn_status == PQTRANS_UNKNOWN || txn_status == PQTRANS_ACTIVE);
+	PGTransactionStatusType txn_status = PQtransactionStatus(pgsql_conn);
+	bool conn_usable = !(txn_status == PQTRANS_UNKNOWN || txn_status == PQTRANS_ACTIVE);
 	assert(!(conn_usable == false && is_error_present() == false));
 	return conn_usable;
 }
@@ -1678,7 +1675,7 @@ void PgSQL_Connection::unhandled_notice_cb(void* arg, const PGresult* result) {
 #endif
 }
 
-void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text) {
+void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text, int savepoint_count) {
 	if (query_digest_text == NULL) return;
 	// unknown what to do with multiplex
 	int mul = -1;
@@ -1721,8 +1718,7 @@ void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text) {
 			default:
 				break;
 			}
-		}
-		else {
+		} else {
 			if (mul != 2 && index(query_digest_text, '.')) { // mul = 2 has a special meaning : do not disable multiplex for variables in THIS QUERY ONLY
 				if (!IsKeepMultiplexEnabledVariables(query_digest_text)) {
 					set_status(true, STATUS_MYSQL_CONNECTION_USER_VARIABLE);
@@ -1767,18 +1763,26 @@ void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text) {
 		}
 	}*/
 	if (get_status(STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT) == false) {
-		
-		if (IsKnownActiveTransaction()) {
-			if (!strncasecmp(query_digest_text, "SAVEPOINT ", strlen("SAVEPOINT "))) {
-				set_status(true, STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
+		if (savepoint_count > 0) {
+			set_status(true, STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
+		} else if (savepoint_count == -1) {
+			if (IsKnownActiveTransaction()) {
+				if (!strncasecmp(query_digest_text, "SAVEPOINT ", strlen("SAVEPOINT "))) {
+					set_status(true, STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
+				}
 			}
-		}
+		} 
 	} else {
-		if ((IsKnownActiveTransaction() == false) || 
-			(strcasecmp(query_digest_text, "COMMIT") == 0) ||
-			(strcasecmp(query_digest_text, "ROLLBACK") == 0)) {
+		if (savepoint_count == 0) {
 			set_status(false, STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
-		}
+		} else if (savepoint_count == -1) {
+			if ((IsKnownActiveTransaction() == false) ||
+				(strncasecmp(query_digest_text, "COMMIT", strlen("COMMIT")) == 0) ||
+				(strncasecmp(query_digest_text, "ROLLBACK", strlen("ROLLBACK")) == 0) ||
+				(strncasecmp(query_digest_text, "ABORT", strlen("ABORT")) == 0)) {
+				set_status(false, STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
+			}
+		} 
 	}
 }
 

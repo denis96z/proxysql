@@ -363,7 +363,7 @@ public:
 	bool set_single_row_mode();
 	void update_bytes_recv(uint64_t bytes_recv);
 	void update_bytes_sent(uint64_t bytes_sent);
-	void ProcessQueryAndSetStatusFlags(char* query_digest_text);
+	void ProcessQueryAndSetStatusFlags(char* query_digest_text, int savepoint_count);
 
 	inline const PGconn* get_pg_connection() const { return pgsql_conn; }
 	inline int get_pg_server_version() { return PQserverVersion(pgsql_conn); }
@@ -388,6 +388,7 @@ public:
 	inline int get_pg_is_threadsafe() { return PQisthreadsafe(); }
 	inline const char* get_pg_error_message() { return PQerrorMessage(pgsql_conn); }
 	inline SSL* get_pg_ssl_object() { return (SSL*)PQsslStruct(pgsql_conn, "OpenSSL"); }
+	inline const char* get_pg_parameter_status(const char* param) { return PQparameterStatus(pgsql_conn, param); }
 	const char* get_pg_server_version_str(char* buff, int buff_size);
 	const char* get_pg_connection_status_str();
 	const char* get_pg_transaction_status_str();

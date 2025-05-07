@@ -74,7 +74,8 @@ void PgSQL_Set_Stmt_Parser::generateRE_parse1v2() {
 	// Function Call: Check if Group 3 is populated.
 	// Literal: Check if Group 4 is populated.
 	//const std::string pattern = "(?:(SESSION|LOCAL)\\s+)?((?:\\S+(?:\\s+\\S+)*?))(?:\\s+(?:TO|=)\\s+|\\s+)(?:(\\w+\\s*\\([^)]*\\))|((?:'(?:''|[^'])*'|-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?|t|true|f|false|on|off|default|\\S+)))\\s*;?";
-	const std::string pattern = "(?:(SESSION|LOCAL)\\s+)?((?:\\S+(?:\\s+\\S+)*?))(?:\\s*(?:TO|=)\\s*|\\s+)(?:(\\w+\\s*\\([^)]*\\))|((?:'(?:''|[^'])*'|-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?|true|t|1|yes|false|f|0|no|on|off|default|\\S+)))\\s*;?";
+	//const std::string pattern = "(?:(SESSION|LOCAL)\\s+)?((?:\\S+(?:\\s+\\S+)*?))(?:\\s*(?:TO|=)\\s*|\\s+)(?:(\\w+\\s*\\([^)]*\\))|((?:'(?:''|[^'])*'|-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?|true|t|1|yes|false|f|0|no|on|off|default|\\S+)))\\s*;?";
+	const std::string pattern = R"((?:(SESSION)\s+)?((?:\S+(?:\s+\S+)*?))(?:\s*(?:TO|=)\s*|\s+)(?:(\w+\s*\([^)]*\))|((?:'(?:''|[^'])*'|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[^;]+)))\s*;?)";
 
 #ifdef DEBUG
 VALGRIND_DISABLE_ERROR_REPORTING;
