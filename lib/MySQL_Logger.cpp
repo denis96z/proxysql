@@ -524,6 +524,11 @@ uint64_t MySQL_Event::write(std::fstream *f, MySQL_Session *sess) {
 		case PROXYSQL_SQLITE_AUTH_QUIT:
 			write_auth(f, sess);
 			break;
+		case PROXYSQL_METADATA:
+			if (mysql_thread___eventslog_format==1) { // format 1 , binary
+				total_bytes=write_query_format_1(f);
+			}
+			break;
 		default:
 			break;
 	}
@@ -1275,6 +1280,26 @@ void MySQL_Logger::events_open_log_unlocked() {
 	try {
 		events.logfile->open(filen , std::ios::out | std::ios::binary);
 		proxy_info("Starting new mysql event log file %s\n", filen);
+		if (mysql_thread___eventslog_format == 1) {
+			// create a new event, type PROXYSQL_METADATA, that writes the ProxySQL version as part of the payload
+			json j = {};
+			j["version"] = string(PROXYSQL_VERSION);
+			string msg = j.dump();
+			MySQL_Event metaEvent(
+				PROXYSQL_METADATA,    // event type for metadata
+				0,                    // thread_id (0 for metadata events)
+				(char*)msg.c_str(),   // using "metadata" as the username
+				(char*)"",            // empty schemaname
+				0,                    // start_time (current time)
+				0,                    // end_time (current time)
+				0,                    // query_digest not used for metadata
+				(char *)"",           // client field holds the version string
+				0,                    // length of version string
+				nullptr               // no session associated
+			);
+			metaEvent.set_query((char *)"",0);
+			metaEvent.write(events.logfile, nullptr);
+		}
 	}
 	catch (const std::ofstream::failure&) {
 		proxy_error("Error creating new mysql event log file %s\n", filen);
