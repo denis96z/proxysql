@@ -5,7 +5,7 @@ pushd $(dirname $0) > /dev/null
 
 SLICES=4
 
-GRPS=$(ls -d */ | grep -Pv '\-slice\d+' | sort | xargs basename -a)
+GRPS=$(ls -d */ | grep -Pv '\-g\d+' | sort | xargs basename -a)
 TESTS=$(ls -1 ../tests/*-t | sort | xargs basename -a)
 TESTS+=$(ls -1 ../tests_with_deps/deprecate_eof_support/*-t | sort | xargs basename -a)
 
@@ -16,7 +16,7 @@ COUNT=$(echo ${TESTS} | wc -w)
 echo "{" > groups.json
 for T in ${TESTS}; do
 	SLICE=$(((NUM/((COUNT/SLICES)+1))+1))
-	G=$(echo "${GRPS}" | xargs -I{} echo -n "\"{}-slice${SLICE}\",")
+	G=$(echo "${GRPS}" | xargs -I{} echo -n "\"{}-g${SLICE}\",")
 	echo "  \""$T"\" : [ ${G%,} ]," >> groups.json
 	((NUM++))
 done
