@@ -1688,6 +1688,9 @@ bool MySQL_Protocol::PPHR_2(unsigned char *pkt, unsigned int len, bool& ret, MyP
 		pkt++;
 		if (vars1.db) {
 			pkt+=strlen(vars1.db);
+			// TODO: Not ideal, but the flow is currently complex. Resource management should be simplified in
+			// a future rework, so we can 'centralize' the update to the session state with auth results.
+			userinfo->set_schemaname(vars1.db, strlen(vars1.db));
 		}
 	} else {
 		vars1.db = NULL;
