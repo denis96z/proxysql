@@ -358,6 +358,7 @@ static char * mysql_thread_variables_names[]= {
 	(char *)"eventslog_buffer_max_query_length",
 	(char *)"eventslog_default_log",
 	(char *)"eventslog_format",
+	(char *)"eventslog_stmt_parameters",
 	(char *)"auditlog_filename",
 	(char *)"auditlog_filesize",
 	//(char *)"default_charset", // removed in 2.0.13 . Obsoleted previously using MySQL_Variables instead
@@ -1083,6 +1084,7 @@ MySQL_Threads_Handler::MySQL_Threads_Handler() {
 	variables.eventslog_buffer_max_query_length = 32*1024;
 	variables.eventslog_default_log=0;
 	variables.eventslog_format=1;
+	variables.eventslog_stmt_parameters=0;
 	variables.auditlog_filename=strdup((char *)"");
 	variables.auditlog_filesize=100*1024*1024;
 	//variables.server_capabilities=CLIENT_FOUND_ROWS | CLIENT_PROTOCOL_41 | CLIENT_IGNORE_SIGPIPE | CLIENT_TRANSACTIONS | CLIENT_SECURE_CONNECTION | CLIENT_CONNECT_WITH_DB;
@@ -2285,6 +2287,7 @@ char ** MySQL_Threads_Handler::get_variables_list() {
 		VariablesPointers_int["eventslog_table_memory_size"]       = make_tuple(&variables.eventslog_table_memory_size,         0,  8*1024*1024, false);
 		VariablesPointers_int["eventslog_buffer_max_query_length"] = make_tuple(&variables.eventslog_buffer_max_query_length, 128, 32*1024*1024, false);
 		VariablesPointers_int["eventslog_default_log"] = make_tuple(&variables.eventslog_default_log,        0,                1, false);
+		VariablesPointers_int["eventslog_stmt_parameters"] = make_tuple(&variables.eventslog_stmt_parameters,    0,                1, false);
 		// various
 		VariablesPointers_int["long_query_time"]           = make_tuple(&variables.long_query_time,              0,  20*24*3600*1000, false);
 		VariablesPointers_int["max_allowed_packet"]        = make_tuple(&variables.max_allowed_packet,        8192,   1024*1024*1024, false);
@@ -4194,6 +4197,7 @@ void MySQL_Thread::refresh_variables() {
 	REFRESH_VARIABLE_INT(eventslog_buffer_max_query_length);
 	REFRESH_VARIABLE_INT(eventslog_default_log);
 	REFRESH_VARIABLE_INT(eventslog_format);
+	REFRESH_VARIABLE_INT(eventslog_stmt_parameters);
 	REFRESH_VARIABLE_CHAR(eventslog_filename);
 	REFRESH_VARIABLE_INT(auditlog_filesize);
 	REFRESH_VARIABLE_CHAR(auditlog_filename);

@@ -40,7 +40,8 @@ enum log_event_type {
 	PROXYSQL_SQLITE_AUTH_CLOSE,
 	PROXYSQL_SQLITE_AUTH_QUIT,
 	PROXYSQL_COM_STMT_EXECUTE,
-	PROXYSQL_COM_STMT_PREPARE
+	PROXYSQL_COM_STMT_PREPARE,
+	PROXYSQL_METADATA
 };
 
 enum cred_username_type { USERNAME_BACKEND, USERNAME_FRONTEND, USERNAME_NONE };
@@ -1315,6 +1316,7 @@ __thread int mysql_thread___eventslog_table_memory_size;
 __thread int mysql_thread___eventslog_buffer_max_query_length;
 __thread int mysql_thread___eventslog_default_log;
 __thread int mysql_thread___eventslog_format;
+__thread int mysql_thread___eventslog_stmt_parameters;
 
 /* variables used by audit log */
 __thread char * mysql_thread___auditlog_filename;
@@ -1619,6 +1621,7 @@ extern __thread int mysql_thread___eventslog_table_memory_size;
 extern __thread int mysql_thread___eventslog_buffer_max_query_length;
 extern __thread int mysql_thread___eventslog_default_log;
 extern __thread int mysql_thread___eventslog_format;
+extern __thread int mysql_thread___eventslog_stmt_parameters;
 
 /* variables used by audit log */
 extern __thread char * mysql_thread___auditlog_filename;
