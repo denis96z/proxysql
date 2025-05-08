@@ -2,7 +2,6 @@
 #define __PROXYSQL_UTILS_H
 
 #include <cstdarg>
-#include <functional>
 #include <type_traits>
 #include <memory>
 #include <string>
@@ -13,7 +12,6 @@
 #include <sys/resource.h>
 #include <assert.h>
 
-#include "sqlite3db.h"
 #include "../deps/json/json.hpp"
 
 #ifndef ProxySQL_Checksum_Value_LENGTH
