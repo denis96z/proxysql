@@ -4117,7 +4117,7 @@ void MySQL_HostGroups_Manager::set_Readyset_status(char *hostname, int port, enu
 						else if (status == MYSQL_SERVER_STATUS_OFFLINE_SOFT) { dst_status = "OFFLINE_SOFT"; }
 						else if (status == MYSQL_SERVER_STATUS_SHUNNED) { dst_status = "SHUNNED"; };
 						if (status == MYSQL_SERVER_STATUS_ONLINE) {
-							proxy_info("Changing Readyset status for server %s:%d from HG %u from %s to %s\n", hostname, port, myhgc->hid, src_status, dst_status);
+							proxy_warning("Changing Readyset status for server %s:%d from HG %u from %s to %s\n", hostname, port, myhgc->hid, src_status, dst_status);
 						} else {
 							proxy_warning("Changing Readyset status for server %s:%d from HG %u from %s to %s\n", hostname, port, myhgc->hid, src_status, dst_status);
 						}
