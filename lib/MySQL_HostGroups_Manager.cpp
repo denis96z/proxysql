@@ -4095,6 +4095,41 @@ void MySQL_HostGroups_Manager::set_server_current_latency_us(char *hostname, int
 	wrunlock();
 }
 
+void MySQL_HostGroups_Manager::set_Readyset_status(char *hostname, int port, enum MySerStatus status) {
+	wrlock();
+	MySrvC *mysrvc=NULL;
+	for (unsigned int i=0; i<MyHostGroups->len; i++) {
+	MyHGC *myhgc=(MyHGC *)MyHostGroups->index(i);
+		unsigned int j;
+		unsigned int l=myhgc->mysrvs->cnt();
+		if (l) {
+			for (j=0; j<l; j++) {
+				mysrvc=myhgc->mysrvs->idx(j);
+				if (mysrvc->port==port && strcmp(mysrvc->address,hostname)==0) {
+					enum MySerStatus prev_status = mysrvc->get_status();
+					if (prev_status != status) {
+						char *src_status = "?"; // this shouldn't display
+						char *dst_status = "?"; // this shouldn't display
+						if (prev_status == MYSQL_SERVER_STATUS_ONLINE) { src_status = "ONLINE"; }
+						else if (prev_status == MYSQL_SERVER_STATUS_OFFLINE_SOFT) { src_status = "OFFLINE_SOFT"; }
+						else if (prev_status == MYSQL_SERVER_STATUS_SHUNNED) { src_status = "SHUNNED"; };
+						if (status == MYSQL_SERVER_STATUS_ONLINE) { dst_status = "ONLINE"; }
+						else if (status == MYSQL_SERVER_STATUS_OFFLINE_SOFT) { dst_status = "OFFLINE_SOFT"; }
+						else if (status == MYSQL_SERVER_STATUS_SHUNNED) { dst_status = "SHUNNED"; };
+						if (status == MYSQL_SERVER_STATUS_ONLINE) {
+							proxy_warning("Changing Readyset status for server %s:%d from HG %u from %s to %s\n", hostname, port, myhgc->hid, src_status, dst_status);
+						} else {
+							proxy_warning("Changing Readyset status for server %s:%d from HG %u from %s to %s\n", hostname, port, myhgc->hid, src_status, dst_status);
+						}
+						mysrvc->set_status(status);
+					}
+				}
+			}
+		}
+	}
+	wrunlock();
+}
+
 void MySQL_HostGroups_Manager::p_update_metrics() {
 	p_update_counter(status.p_counter_array[p_hg_counter::servers_table_version], status.servers_table_version);
 	// Update *server_connections* related metrics
