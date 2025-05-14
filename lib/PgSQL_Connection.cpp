@@ -318,9 +318,7 @@ handler_again:
 			if (PQisnonblocking(pgsql_conn) == false) {
 				// Set non-blocking mode
 				if (PQsetnonblocking(pgsql_conn, 1) != 0) {
-					// WARNING: DO NOT RELEASE this PGresult
-					const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-					set_error_from_result(result);
+					set_error_from_PQerrorMessage();
 					proxy_error("Failed to set non-blocking mode: %s\n", get_error_code_with_message().c_str());
 					NEXT_IMMEDIATE(ASYNC_CONNECT_FAILED);
 				}
@@ -812,14 +810,13 @@ void PgSQL_Connection::connect_start() {
 	const std::string& conninfo_str = conninfo.str();
 	pgsql_conn = PQconnectStart(conninfo_str.c_str());
 
-	//PQsetErrorVerbosity(pgsql_conn, PQERRORS_SQLSTATE);
+	// introduce a new, formatted error verbosity type.
+	PQsetErrorVerbosity(pgsql_conn, PSERRORS_FORMATTED_DEFAULT);
 	//PQsetErrorContextVisibility(pgsql_conn, PQSHOW_CONTEXT_ERRORS);
 
 	if (pgsql_conn == NULL || PQstatus(pgsql_conn) == CONNECTION_BAD) {
 		if (pgsql_conn) {
-			// WARNING: DO NOT RELEASE this PGresult
-			const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-			set_error_from_result(result);
+			set_error_from_PQerrorMessage();
 		} else {
 			set_error(PGSQL_GET_ERROR_CODE_STR(ERRCODE_OUT_OF_MEMORY), "Out of memory", false);
 		}
@@ -827,9 +824,7 @@ void PgSQL_Connection::connect_start() {
 		return;
 	}
 	if (PQsetnonblocking(pgsql_conn, 1) != 0) {
-		// WARNING: DO NOT RELEASE this PGresult
-		const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-		set_error_from_result(result);
+		set_error_from_PQerrorMessage();
 		proxy_error("Failed to set non-blocking mode: %s\n", get_error_code_with_message().c_str());
 		return;
 	}
@@ -893,9 +888,7 @@ void PgSQL_Connection::connect_cont(short event) {
 		break;
 	//case PGRES_POLLING_FAILED:
 	default:
-		// WARNING: DO NOT RELEASE this PGresult
-		const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-		set_error_from_result(result);
+		set_error_from_PQerrorMessage();
 		proxy_error("Connect failed. %s\n", get_error_code_with_message().c_str());
 	}
 	int current_fd = PQsocket(pgsql_conn);
@@ -916,9 +909,7 @@ void PgSQL_Connection::query_start() {
 	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
 
 	if (PQsendQuery(pgsql_conn, query.ptr) == 0) {
-		// WARNING: DO NOT RELEASE this PGresult
-		const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-		set_error_from_result(result);
+		set_error_from_PQerrorMessage();
 		proxy_error("Failed to send query. %s\n", get_error_code_with_message().c_str());
 		return;
 	}
@@ -967,14 +958,12 @@ void PgSQL_Connection::fetch_result_cont(short event) {
 	}
 
 	if (PQconsumeInput(pgsql_conn) == 0) {
-		// WARNING: DO NOT RELEASE this PGresult
-		const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-		/* We will only set the error if the result is not NULL or we didn't capture error in last call. If the result is NULL,
+		/* We will only set the error if we didn't capture error in last call. If is_error_present is true,
 		 * it indicates that an error was already captured during a previous PQconsumeInput call,
 		 * and we do not want to overwrite that information.
 		 */
-		if (result || is_error_present() == false) {
-			set_error_from_result(result);
+		if (is_error_present() == false) {
+			set_error_from_PQerrorMessage();
 			proxy_error("Failed to consume input. %s\n", get_error_code_with_message().c_str());
 		}
 		return;
@@ -1009,9 +998,7 @@ void PgSQL_Connection::flush() {
 		async_exit_status = PG_EVENT_READ;
 	}
 	else {
-		// WARNING: DO NOT RELEASE this PGresult
-		const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-		set_error_from_result(result);
+		set_error_from_PQerrorMessage();
 		proxy_error("Failed to flush data to backend. %s\n", get_error_code_with_message().c_str());
 		async_exit_status = PG_EVENT_NONE;
 	}
@@ -1428,9 +1415,7 @@ PGresult* PgSQL_Connection::get_result() {
 bool PgSQL_Connection::set_single_row_mode() {
 	assert(pgsql_conn);
 	if (PQsetSingleRowMode(pgsql_conn) == 0) {
-		// WARNING: DO NOT RELEASE this PGresult
-		const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-		set_error_from_result(result);
+		set_error_from_PQerrorMessage();
 		proxy_error("Failed to set single row mode. %s\n", get_error_code_with_message().c_str());
 		return false;
 	}
@@ -1451,9 +1436,7 @@ void PgSQL_Connection::reset_session_start() {
 	async_exit_status = PG_EVENT_NONE;
 	reset_session_in_txn = IsKnownActiveTransaction();
 	if (PQsendQuery(pgsql_conn, (reset_session_in_txn == false ? "DISCARD ALL" : "ROLLBACK")) == 0) {
-		// WARNING: DO NOT RELEASE this PGresult
-		const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-		set_error_from_result(result);
+		set_error_from_PQerrorMessage();
 		proxy_error("Failed to send query. %s\n", get_error_code_with_message().c_str());
 		return;
 	}
@@ -1471,14 +1454,12 @@ void PgSQL_Connection::reset_session_cont(short event) {
 	}
 
 	if (PQconsumeInput(pgsql_conn) == 0) {
-		// WARNING: DO NOT RELEASE this PGresult
-		const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-		/* We will only set the error if the result is not NULL or we didn't capture error in last call. If the result is NULL,
+		/* We will only set the error if we didn't capture error in last call. If is_error_present is true,
 		 * it indicates that an error was already captured during a previous PQconsumeInput call,
 		 * and we do not want to overwrite that information.
 		 */
-		if (result || is_error_present() == false) {
-			set_error_from_result(result);
+		if (is_error_present() == false) {
+			set_error_from_PQerrorMessage();
 			proxy_error("Failed to consume input. %s\n", get_error_code_with_message().c_str());
 		}
 		return;
@@ -1647,9 +1628,8 @@ bool PgSQL_Connection::handle_copy_out(const PGresult* result, uint64_t* process
 		update_bytes_recv(bytes_recv);
 		is_copy_out = false;
 	} else if (copy_data_len < 0) {
-		const PGresult* result = PQgetResultFromPGconn(pgsql_conn);
-		if (result || is_error_present() == false) {
-			set_error_from_result(result);
+		if (is_error_present() == false) {
+			set_error_from_PQerrorMessage();
 			proxy_error("PQgetCopyData failed. %s\n", get_error_code_with_message().c_str());
 		}
 		is_copy_out = false;
@@ -2099,4 +2079,150 @@ bool PgSQL_Connection::IsKeepMultiplexEnabledVariables(char* query_digest_text) 
 	free(keep_multiplexing_variables_tmp);
 	return true;
 	*/
+}
+
+bool PgSQL_Connection::is_valid_formatted_pq_error_header(const std::string& s, size_t pos) {
+	if (pos >= s.size() || !std::isupper(s[pos])) return false;
+	size_t prefix_end = pos;
+	while (prefix_end < s.size() && std::isupper(s[prefix_end])) prefix_end++;
+	if (prefix_end >= s.size() || s[prefix_end] != ':') return false;
+	size_t size_start = prefix_end + 1;
+	if (size_start >= s.size()) return false;
+
+	// Check valid size format
+	size_t size_end = size_start;
+	if (s[size_end] == '-') size_end++;
+	if (size_end >= s.size() || !std::isdigit(s[size_end])) return false;
+	while (size_end < s.size() && std::isdigit(s[size_end])) size_end++;
+	return (size_end < s.size() && s[size_end] == ':');
+}
+
+std::map<std::string, std::vector<std::string>> PgSQL_Connection::parse_pq_error_message(const std::string& error_str) {
+	std::map<std::string, std::vector<std::string>> components;
+	size_t pos = 0;
+
+	while (pos < error_str.size()) {
+		if (!is_valid_formatted_pq_error_header(error_str, pos)) {
+			pos++;
+			continue;
+		}
+
+		std::string prefix;
+		int size = 0;
+		std::string value;
+
+		// Extract prefix
+		size_t prefix_end = pos;
+		while (prefix_end < error_str.size() && std::isupper(error_str[prefix_end]))
+			prefix_end++;
+		prefix = error_str.substr(pos, prefix_end - pos);
+		pos = prefix_end + 1; // Move past the colon after prefix
+
+		// Parse size
+		bool negative = false;
+		if (pos < error_str.size() && error_str[pos] == '-') {
+			negative = true;
+			pos++;
+		}
+		size_t size_start = pos;
+		while (pos < error_str.size() && std::isdigit(error_str[pos])) pos++;
+		std::string size_str = error_str.substr(size_start, pos - size_start);
+		bool valid_size = true;
+
+		if (negative) {
+			if (size_str != "1") {
+				valid_size = false;
+			} else {
+				size = -1;
+			}
+		} else {
+			if (size_str.empty()) {
+				valid_size = false;
+			} else {
+				size = 0;
+				for (char c : size_str) {
+					if (!std::isdigit(c)) {
+						valid_size = false;
+						break;
+					}
+					int digit = c - '0';
+					if (size > (INT_MAX - digit) / 10) {
+						valid_size = false;
+						break;
+					}
+					size = size * 10 + digit;
+				}
+			}
+		}
+
+		// Validate size: must be -1 or non-negative
+		if (!valid_size || (size < 0 && size != -1)) {
+			pos = size_start; // Rewind to before the size part
+			continue;
+		}
+
+		pos++; // Move past the colon after size
+
+		// Extract and clean value
+		size_t value_start = pos;
+		size_t value_end;
+
+		if (size != -1) {
+			value_end = value_start + size;
+			if (value_end > error_str.size()) {
+				pos = value_start; // Skip invalid component
+				continue;
+			}
+		} else {
+			value_end = value_start;
+			while (value_end < error_str.size() && !is_valid_formatted_pq_error_header(error_str, value_end))
+				value_end++;
+		}
+
+		value = trim(error_str.substr(value_start, value_end - value_start));
+		components[prefix].push_back(value);
+		pos = value_end;
+	}
+
+	return components;
+}
+
+void PgSQL_Connection::set_error_from_PQerrorMessage() {
+	const char* raw_msg = PQerrorMessage(pgsql_conn);
+	if (raw_msg == nullptr) {
+		PgSQL_Error_Helper::fill_error_info(error_info, PGSQL_ERROR_CODES::ERRCODE_INTERNAL_ERROR, "Unknown error",
+			PGSQL_ERROR_SEVERITY::ERRSEVERITY_FATAL);
+		return;
+	}
+
+	std::string org_msg(raw_msg);
+
+	proxy_debug(PROXY_DEBUG_MYSQL_PROTOCOL, 6,
+		"Session=%p, Conn=%p, myds=%p. Error message: '%s' received from backend (Host: %s, Port: %d, User: %s, FD: %d)\n",
+		myds->sess, this, myds, org_msg.c_str(), parent->address, parent->port, userinfo->username, get_pg_socket_fd());
+
+	const auto error_field_map = parse_pq_error_message(org_msg);
+
+	auto lookup = [&error_field_map](const char* key, const char* fallback) -> std::string_view {
+		auto it = error_field_map.find(key);
+		if (it != error_field_map.end() && !it->second.empty())
+			return it->second.back();
+		return fallback;
+	};
+
+	std::string_view severity = lookup("S", PgSQL_Error_Helper::get_severity(PGSQL_ERROR_SEVERITY::ERRSEVERITY_FATAL));
+	std::string_view sqlstate = lookup("C", PgSQL_Error_Helper::get_error_code(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION));
+	std::string_view primary_msg = lookup("M", "");
+	// if primary_msg is empty, means this is a library generated error, use original error message from PQerrorMessage
+	std::string_view lib_errmsg = lookup("LE", (primary_msg.empty() ? org_msg.c_str() : ""));
+
+	std::string full_msg;
+	if (!lib_errmsg.empty()) {
+		full_msg.reserve(primary_msg.size() + 1 + lib_errmsg.size());
+		full_msg.append(primary_msg).append(" ").append(lib_errmsg);
+	} else {
+		full_msg = primary_msg;
+	}
+
+	PgSQL_Error_Helper::fill_error_info(error_info, sqlstate.data(), full_msg.c_str(), severity.data());
 }

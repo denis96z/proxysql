@@ -279,6 +279,7 @@ public:
 	bool requires_RESETTING_CONNECTION(const PgSQL_Connection* client_conn);
 	
 	bool has_same_connection_options(const PgSQL_Connection* c);
+	void set_error_from_PQerrorMessage();
 
 	int get_server_version() {
 		return PQserverVersion(pgsql_conn);
@@ -348,9 +349,7 @@ public:
 		if (is_error_result_valid(result)) { 
 			PgSQL_Error_Helper::fill_error_info(error_info, result, ext_fields);
 		} else {
-			const char* errmsg = PQerrorMessage(pgsql_conn);
-			set_error(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION, errmsg ? errmsg : "Unknown error", true);
-			//PgSQL_Error_Helper::fill_error_info_from_error_message(error_info, errmsg);
+			set_error_from_PQerrorMessage();
 		}
 	}
 
@@ -498,17 +497,14 @@ public:
 	int async_exit_status; // exit status of Non blocking API
 	bool unknown_transaction_status;
 
-
-
-
 private:
 	// Handles the COPY OUT response from the server.
 	// Returns true if it consumes all buffer data, or false if the threshold for result size is reached
 	bool handle_copy_out(const PGresult* result, uint64_t* processed_bytes);
 	static void notice_handler_cb(void* arg, const PGresult* result);
 	static void unhandled_notice_cb(void* arg, const PGresult* result);
-	//void update_warning_count_from_connection();
-	//void update_warning_count_from_statement();
+	static bool is_valid_formatted_pq_error_header(const std::string& s, size_t pos);
+	static std::map<std::string, std::vector<std::string>> parse_pq_error_message(const std::string& error_str);
 };
 
 #endif /* __CLASS_PGSQL_CONNECTION_H */
