@@ -2091,7 +2091,6 @@ bool PgSQL_Connection::is_valid_formatted_pq_error_header(const std::string& s, 
 
 	// Check valid size format
 	size_t size_end = size_start;
-	if (s[size_end] == '-') size_end++;
 	if (size_end >= s.size() || !std::isdigit(s[size_end])) return false;
 	while (size_end < s.size() && std::isdigit(s[size_end])) size_end++;
 	return (size_end < s.size() && s[size_end] == ':');
@@ -2102,40 +2101,24 @@ std::map<std::string, std::vector<std::string>> PgSQL_Connection::parse_pq_error
 	size_t pos = 0;
 
 	while (pos < error_str.size()) {
-		if (!is_valid_formatted_pq_error_header(error_str, pos)) {
-			pos++;
-			continue;
-		}
+		if (is_valid_formatted_pq_error_header(error_str, pos)) {
+			std::string prefix;
+			int size = 0;
+			std::string value;
 
-		std::string prefix;
-		int size = 0;
-		std::string value;
+			// Extract prefix
+			size_t prefix_end = pos;
+			while (prefix_end < error_str.size() && std::isupper(error_str[prefix_end]))
+				prefix_end++;
+			prefix = error_str.substr(pos, prefix_end - pos);
+			pos = prefix_end + 1;
 
-		// Extract prefix
-		size_t prefix_end = pos;
-		while (prefix_end < error_str.size() && std::isupper(error_str[prefix_end]))
-			prefix_end++;
-		prefix = error_str.substr(pos, prefix_end - pos);
-		pos = prefix_end + 1; // Move past the colon after prefix
+			// Parse size
+			size_t size_start = pos;
+			while (pos < error_str.size() && std::isdigit(error_str[pos])) pos++;
+			std::string size_str = error_str.substr(size_start, pos - size_start);
+			bool valid_size = true;
 
-		// Parse size
-		bool negative = false;
-		if (pos < error_str.size() && error_str[pos] == '-') {
-			negative = true;
-			pos++;
-		}
-		size_t size_start = pos;
-		while (pos < error_str.size() && std::isdigit(error_str[pos])) pos++;
-		std::string size_str = error_str.substr(size_start, pos - size_start);
-		bool valid_size = true;
-
-		if (negative) {
-			if (size_str != "1") {
-				valid_size = false;
-			} else {
-				size = -1;
-			}
-		} else {
 			if (size_str.empty()) {
 				valid_size = false;
 			} else {
@@ -2153,35 +2136,38 @@ std::map<std::string, std::vector<std::string>> PgSQL_Connection::parse_pq_error
 					size = size * 10 + digit;
 				}
 			}
-		}
+			
 
-		// Validate size: must be -1 or non-negative
-		if (!valid_size || (size < 0 && size != -1)) {
-			pos = size_start; // Rewind to before the size part
-			continue;
-		}
-
-		pos++; // Move past the colon after size
-
-		// Extract and clean value
-		size_t value_start = pos;
-		size_t value_end;
-
-		if (size != -1) {
-			value_end = value_start + size;
-			if (value_end > error_str.size()) {
-				pos = value_start; // Skip invalid component
+			if (!valid_size || size < 0) {
+				pos = size_start;
 				continue;
 			}
-		} else {
-			value_end = value_start;
-			while (value_end < error_str.size() && !is_valid_formatted_pq_error_header(error_str, value_end))
-				value_end++;
-		}
 
-		value = trim(error_str.substr(value_start, value_end - value_start));
-		components[prefix].push_back(value);
-		pos = value_end;
+			pos++;
+
+			// Extract value
+			size_t value_start = pos;
+			size_t value_end;
+			value_end = value_start + size;
+			if (value_end > error_str.size()) {
+				pos = value_start;
+				continue;
+			}
+
+			value = trim(error_str.substr(value_start, value_end - value_start));
+			components[prefix].push_back(value);
+			pos = value_end;
+		}
+		else {
+			size_t le_start = pos;
+			while (pos < error_str.size() && !is_valid_formatted_pq_error_header(error_str, pos))
+				pos++;
+			std::string le_value = error_str.substr(le_start, pos - le_start);
+			le_value = trim(le_value);
+			if (!le_value.empty()) {
+				components["LE"].push_back(le_value);
+			}
+		}
 	}
 
 	return components;
@@ -2203,7 +2189,7 @@ void PgSQL_Connection::set_error_from_PQerrorMessage() {
 
 	const auto error_field_map = parse_pq_error_message(org_msg);
 
-	auto lookup = [&error_field_map](const char* key, const char* fallback) -> std::string_view {
+	auto lookup = [&error_field_map](const char* key, std::string_view fallback) -> std::string_view {
 		auto it = error_field_map.find(key);
 		if (it != error_field_map.end() && !it->second.empty())
 			return it->second.back();
@@ -2213,16 +2199,10 @@ void PgSQL_Connection::set_error_from_PQerrorMessage() {
 	std::string_view severity = lookup("S", PgSQL_Error_Helper::get_severity(PGSQL_ERROR_SEVERITY::ERRSEVERITY_FATAL));
 	std::string_view sqlstate = lookup("C", PgSQL_Error_Helper::get_error_code(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION));
 	std::string_view primary_msg = lookup("M", "");
-	// if primary_msg is empty, means this is a library generated error, use original error message from PQerrorMessage
-	std::string_view lib_errmsg = lookup("LE", (primary_msg.empty() ? org_msg.c_str() : ""));
+	std::string_view lib_errmsg = lookup("LE", "");
 
-	std::string full_msg;
-	if (!lib_errmsg.empty()) {
-		full_msg.reserve(primary_msg.size() + 1 + lib_errmsg.size());
-		full_msg.append(primary_msg).append(" ").append(lib_errmsg);
-	} else {
-		full_msg = primary_msg;
-	}
-
-	PgSQL_Error_Helper::fill_error_info(error_info, sqlstate.data(), full_msg.c_str(), severity.data());
+	// we are currently distinguishing between server errors and library-generated errors. 
+	// A library-generated error is only set when a server error is not available.
+	const std::string_view& full_msg = !primary_msg.empty() ? primary_msg : lib_errmsg;
+	PgSQL_Error_Helper::fill_error_info(error_info, sqlstate.data(), full_msg.data(), severity.data());
 }
