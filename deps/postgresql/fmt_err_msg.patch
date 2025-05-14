@@ -18,16 +18,15 @@ index 5a28b6f..c11f3d9 100644
  	}
  
 diff --git src/interfaces/libpq/fe-protocol3.c src/interfaces/libpq/fe-protocol3.c
-index e1fb48b..16fd8b4 100644
+index e1fb48b..7ad19ba 100644
 --- src/interfaces/libpq/fe-protocol3.c
 +++ src/interfaces/libpq/fe-protocol3.c
-@@ -1016,6 +1016,58 @@ pqBuildErrorMessage3(PQExpBuffer msg, const PGresult *res,
+@@ -1016,6 +1016,54 @@ pqBuildErrorMessage3(PQExpBuffer msg, const PGresult *res,
  		return;
  	}
  
 +	if (verbosity == PSERRORS_FORMATTED_DEFAULT || verbosity == PSERRORS_FORMATTED_VERBOSE)
 +	{
-+		static const char libErr[] = "LE:-1:";
 +		size_t i;
 +
 +		// Always included fields
@@ -62,10 +61,8 @@ index e1fb48b..16fd8b4 100644
 +				appendPQExpBuffer(msg, "%c:%d:%s", default_fields[i], (int)strlen(val), val);
 +		}
 +	
-+		if (verbosity != PSERRORS_FORMATTED_VERBOSE) {
-+			appendBinaryPQExpBuffer(msg, libErr, sizeof(libErr) - 1);
++		if (verbosity != PSERRORS_FORMATTED_VERBOSE)
 +			return;
-+		}
 +	
 +		for (i = 0; i < sizeof(verbose_fields) / sizeof(verbose_fields[0]); ++i)
 +		{
@@ -73,7 +70,6 @@ index e1fb48b..16fd8b4 100644
 +			if (val)
 +				appendPQExpBuffer(msg, "%c:%d:%s", verbose_fields[i], (int)strlen(val), val);
 +		}
-+		appendBinaryPQExpBuffer(msg, libErr, sizeof(libErr) - 1);
 +		return;
 +	}
 +
