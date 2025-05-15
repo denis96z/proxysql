@@ -810,7 +810,7 @@ void PgSQL_Connection::connect_start() {
 	const std::string& conninfo_str = conninfo.str();
 	pgsql_conn = PQconnectStart(conninfo_str.c_str());
 
-	// introduce a new, formatted error verbosity type.
+	// introduced a new, formatted error verbosity type.
 	PQsetErrorVerbosity(pgsql_conn, PSERRORS_FORMATTED_DEFAULT);
 	//PQsetErrorContextVisibility(pgsql_conn, PQSHOW_CONTEXT_ERRORS);
 
@@ -2136,15 +2136,11 @@ std::map<std::string, std::vector<std::string>> PgSQL_Connection::parse_pq_error
 					size = size * 10 + digit;
 				}
 			}
-			
-
 			if (!valid_size || size < 0) {
 				pos = size_start;
 				continue;
 			}
-
 			pos++;
-
 			// Extract value
 			size_t value_start = pos;
 			size_t value_end;

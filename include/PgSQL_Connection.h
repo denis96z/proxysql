@@ -279,6 +279,24 @@ public:
 	bool requires_RESETTING_CONNECTION(const PgSQL_Connection* client_conn);
 	
 	bool has_same_connection_options(const PgSQL_Connection* c);
+
+	/**
+	 * @brief Sets the error information for this connection from the current libpq error message.
+	 *
+	 * This method retrieves the latest error message from the underlying PostgreSQL connection (via PQerrorMessage),
+	 * parses it into its component fields (such as severity, SQLSTATE, and message), and fills the internal error_info
+	 * structure accordingly. If the error message is not available, it sets a generic "Unknown error" with fatal severity.
+	 *
+	 * The function distinguishes between server errors (with fields like "S", "C", "M") and library-generated errors
+	 * (stored under the "LE" key). If a server error is present, it is preferred; otherwise, the library error message
+	 * is used. The error fields are extracted using parse_pq_error_message().
+	 *
+	 * Example error string: "S:5:ERRORC:5:12345M:12:Some message"
+	 *   - S: Severity
+	 *   - C: SQLSTATE code
+	 *   - M: Primary message
+	 *   - LE: Library error (if present)
+	 */
 	void set_error_from_PQerrorMessage();
 
 	int get_server_version() {
@@ -503,7 +521,36 @@ private:
 	bool handle_copy_out(const PGresult* result, uint64_t* processed_bytes);
 	static void notice_handler_cb(void* arg, const PGresult* result);
 	static void unhandled_notice_cb(void* arg, const PGresult* result);
+
+	/**
+	 * @brief Checks if a substring at a given position in a string matches the format of a formatted PostgreSQL error header.
+	 *
+	 * The expected format is: <UPPERCASE_PREFIX>:<SIZE>:
+	 * - <UPPERCASE_PREFIX>: One or more uppercase letters (A-Z).
+	 * - <SIZE>: One or more digits representing the length of the following value.
+	 * - The header must be followed by a colon ':'.
+	 *
+	 * Example of a valid header: "S:5:Error"
+	 *
+	 * @param s The string to check.
+	 * @param pos The position in the string to start checking.
+	 * @return true if a valid formatted error header is found at the given position, false otherwise.
+	 */
 	static bool is_valid_formatted_pq_error_header(const std::string& s, size_t pos);
+
+	/**
+	 * @brief Parses a PostgreSQL error message string into its component fields.
+	 *
+	 * This function scans the input error string, extracts all such formatted fields, and stores them
+	 * in a map from prefix to a vector of values (to support repeated fields). Any unformatted text
+	 * is stored under the "LE" (Library Error) key.
+	 *
+	 * Example input: "S:5:ERRORC:5:12345M:12:Some message"
+	 * Output: { "S": ["ERROR"], "C": ["12345"], "M": ["Some message"] }
+	 *
+	 * @param error_str The error message string to parse.
+	 * @return std::map<std::string, std::vector<std::string>> Map of error field prefixes to their values.
+	 */
 	static std::map<std::string, std::vector<std::string>> parse_pq_error_message(const std::string& error_str);
 };
 
