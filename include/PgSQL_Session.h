@@ -163,10 +163,8 @@ public:
 	bool bool_is_select_NOT_for_update_computed;
 	bool have_affected_rows; // if affected rows is set, last_insert_id is set too
 	uint64_t affected_rows;
-	uint64_t last_insert_id;
 	uint64_t rows_sent;
 	uint64_t waiting_since;
-	std::string show_warnings_prev_query_digest;
 
 	PgSQL_Query_Info();
 	~PgSQL_Query_Info();

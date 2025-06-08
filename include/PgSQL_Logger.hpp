@@ -30,7 +30,6 @@ class PgSQL_Event {
 	bool have_rows_sent;
 
 	uint64_t affected_rows;
-	uint64_t last_insert_id;
 	uint64_t rows_sent;
 	uint32_t client_stmt_id;
 
@@ -44,7 +43,7 @@ class PgSQL_Event {
 	void set_query(const char *ptr, int len);
 	void set_server(int _hid, const char *ptr, int len);
 	void set_extra_info(char *);
-	void set_affected_rows(uint64_t ar, uint64_t lid);
+	void set_affected_rows(uint64_t ar);
 	void set_rows_sent(uint64_t rs);
 };
 

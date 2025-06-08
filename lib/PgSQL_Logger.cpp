@@ -58,7 +58,6 @@ PgSQL_Event::PgSQL_Event (log_event_type _et, uint32_t _thread_id, char * _usern
 	extra_info = NULL;
 	have_affected_rows=false;
 	affected_rows=0;
-	last_insert_id = 0;
 	have_rows_sent=false;
 	rows_sent=0;
 	client_stmt_id=0;
@@ -70,10 +69,9 @@ void PgSQL_Event::set_client_stmt_id(uint32_t client_stmt_id) {
 
 // if affected rows is set, last_insert_id is set too.
 // They are part of the same OK packet
-void PgSQL_Event::set_affected_rows(uint64_t ar, uint64_t lid) {
+void PgSQL_Event::set_affected_rows(uint64_t ar) {
 	have_affected_rows=true;
 	affected_rows=ar;
-	last_insert_id=lid;
 }
 
 void PgSQL_Event::set_rows_sent(uint64_t rs) {
@@ -270,7 +268,6 @@ uint64_t PgSQL_Event::write_query_format_1(std::fstream *f) {
 	total_bytes+=mysql_encode_length(end_time,NULL);
 	total_bytes+=mysql_encode_length(client_stmt_id,NULL);
 	total_bytes+=mysql_encode_length(affected_rows,NULL);
-	total_bytes+=mysql_encode_length(last_insert_id,NULL); // as in MySQL Protocol, last_insert_id is immediately after affected_rows
 	total_bytes+=mysql_encode_length(rows_sent,NULL);
 
 	total_bytes+=mysql_encode_length(query_digest,NULL);
@@ -337,10 +334,6 @@ uint64_t PgSQL_Event::write_query_format_1(std::fstream *f) {
 	write_encoded_length(buf,affected_rows,len,buf[0]);
 	f->write((char *)buf,len);
 
-	len=mysql_encode_length(last_insert_id,buf);
-	write_encoded_length(buf,last_insert_id,len,buf[0]);
-	f->write((char *)buf,len);
-
 	len=mysql_encode_length(rows_sent,buf);
 	write_encoded_length(buf,rows_sent,len,buf[0]);
 	f->write((char *)buf,len);
@@ -405,9 +398,6 @@ uint64_t PgSQL_Event::write_query_format_2_json(std::fstream *f) {
 		// rows_affected is logged also if 0, while
 		// last_insert_id is log logged if 0
 		j["rows_affected"] = affected_rows;
-		if (last_insert_id != 0) {
-			j["last_insert_id"] = last_insert_id;
-		}
 	}
 	if (have_rows_sent == true) {
 		j["rows_sent"] = rows_sent;
@@ -751,7 +741,7 @@ void PgSQL_Logger::log_request(PgSQL_Session *sess, PgSQL_Data_Stream *myds) {
 	}
 
 	if (sess->CurrentQuery.have_affected_rows) {
-		me.set_affected_rows(sess->CurrentQuery.affected_rows, sess->CurrentQuery.last_insert_id);
+		me.set_affected_rows(sess->CurrentQuery.affected_rows);
 	}
 	me.set_rows_sent(sess->CurrentQuery.rows_sent);
 

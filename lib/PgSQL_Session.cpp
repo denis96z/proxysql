@@ -310,7 +310,6 @@ PgSQL_Query_Info::PgSQL_Query_Info() {
 	have_affected_rows=false; // if affected rows is set, last_insert_id is set too
 	waiting_since = 0;
 	affected_rows=0;
-	last_insert_id = 0;
 	rows_sent=0;
 	start_time=0;
 	end_time=0;
@@ -344,7 +343,6 @@ void PgSQL_Query_Info::begin(unsigned char *_p, int len, bool header) {
 	have_affected_rows=false; // if affected rows is set, last_insert_id is set too
 	waiting_since = 0;
 	affected_rows=0;
-	last_insert_id = 0;
 	rows_sent=0;
 	stmt_client_id=0;
 }
@@ -380,7 +378,6 @@ void PgSQL_Query_Info::init(unsigned char *_p, int len, bool header) {
 	have_affected_rows=false; // if affected rows is set, last_insert_id is set too
 	waiting_since = 0;
 	affected_rows=0;
-	last_insert_id = 0;
 	rows_sent=0;
 }
 
