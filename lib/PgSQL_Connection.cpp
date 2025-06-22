@@ -1652,6 +1652,26 @@ unsigned int PgSQL_Connection::get_memory_usage() const {
 	return /*sizeof(PGconn) +*/ memory_bytes;
 }
 
+char PgSQL_Connection::get_transaction_status_char() {
+	char txn_status;
+	switch (get_pg_transaction_status()) {
+	case PQTRANS_IDLE:
+		txn_status = 'I';
+		break;
+	case PQTRANS_ACTIVE:
+	case PQTRANS_INTRANS:
+		txn_status = 'T';
+		break;
+	case PQTRANS_INERROR:
+		txn_status = 'E';
+		break;
+	case PQTRANS_UNKNOWN:
+	default:
+		txn_status = 'U';
+	}
+	return txn_status;
+}
+
 void PgSQL_Connection::update_bytes_recv(uint64_t bytes_recv) {
 	__sync_fetch_and_add(&parent->bytes_recv, bytes_recv);
 	myds->sess->thread->status_variables.stvar[st_var_queries_backends_bytes_recv] += bytes_recv;
