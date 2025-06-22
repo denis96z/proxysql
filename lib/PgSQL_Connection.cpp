@@ -1477,6 +1477,10 @@ bool PgSQL_Connection::IsServerOffline() {
 	return ret;
 }
 
+void PgSQL_Connection::set_is_client() {
+	local_stmts->set_is_client(myds->sess);
+}
+
 bool PgSQL_Connection::is_connection_in_reusable_state() const {
 	PGTransactionStatusType txn_status = PQtransactionStatus(pgsql_conn);
 	bool conn_usable = !(txn_status == PQTRANS_UNKNOWN || txn_status == PQTRANS_ACTIVE);

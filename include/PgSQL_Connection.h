@@ -278,7 +278,7 @@ public:
 	bool IsActiveTransaction();
 	bool IsKnownActiveTransaction();
 	bool IsServerOffline();
-	
+	void set_is_client(); // used for local_stmts
 	bool is_connection_in_reusable_state() const;
 
 	bool requires_RESETTING_CONNECTION(const PgSQL_Connection* client_conn);
