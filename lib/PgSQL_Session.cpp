@@ -5494,18 +5494,20 @@ void PgSQL_Session::RequestEnd(PgSQL_Data_Stream* myds, const unsigned int myerr
 		qdt = CurrentQuery.stmt_info->digest_text;
 	}
 
-	// is savepoint currently present in transaction.
-	int savepoint_count = -1; // haven't checked yet
+	if (qdt) {
+		// is savepoint currently present in transaction.
+		int savepoint_count = -1; // haven't checked yet
 
-	// we do not maintain the transaction variable state if the session is locked on a hostgroup 
-	// or is a Fast Forward session.
-	if (locked_on_hostgroup == -1 && session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
-		transaction_state_manager->handle_transaction(qdt);
-		savepoint_count = transaction_state_manager->get_savepoint_count();
-	}
+		// we do not maintain the transaction variable state if the session is locked on a hostgroup 
+		// or is a Fast Forward session.
+		if (locked_on_hostgroup == -1 && session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
+			transaction_state_manager->handle_transaction(qdt);
+			savepoint_count = transaction_state_manager->get_savepoint_count();
+		}
 
-	if (qdt && myds && myds->myconn) {
-		myds->myconn->ProcessQueryAndSetStatusFlags(qdt, savepoint_count);
+		if (myds && myds->myconn) {
+			myds->myconn->ProcessQueryAndSetStatusFlags(qdt, savepoint_count);
+		}
 	}
 
 	if (session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
