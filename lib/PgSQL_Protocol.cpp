@@ -487,6 +487,11 @@ static inline bool get_uint16be(unsigned char* pkt, uint16_t* dst_p)
 	return true;
 }
 
+static inline bool get_int16be(unsigned char* pkt, int16_t* dst_p)
+{
+	return get_uint16be(pkt, (uint16_t*)dst_p);
+}
+
 bool PgSQL_Protocol::get_header(unsigned char* pkt, unsigned int pkt_len, pgsql_hdr* hdr) {
 	unsigned int type;
 	uint32_t len;
@@ -1567,6 +1572,50 @@ bool PgSQL_Protocol::generate_ok_packet(bool send, bool ready, const char* msg, 
 	return true;
 }
 
+bool PgSQL_Protocol::generate_ready_for_query_packet(bool send, char trx_state, PtrSize_t* _ptr) {
+	// to avoid memory leak
+	assert(send == true || _ptr);
+
+	PG_pkt pgpkt{};
+	pgpkt.write_ReadyForQuery(trx_state);
+	auto buff = pgpkt.detach();
+	if (send == true) {
+		(*myds)->PSarrayOUT->add((void*)buff.first, buff.second);
+	} else {
+		_ptr->ptr = buff.first;
+		_ptr->size = buff.second;
+	}
+	return true;
+}
+
+bool PgSQL_Protocol::generate_parse_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr) {
+	// to avoid memory leak
+	assert(send == true || _ptr);
+
+	PG_pkt pgpkt{};
+
+	if (ready == true) {
+		pgpkt.set_multi_pkt_mode(true);
+	}
+
+	// Parse completion message
+	pgpkt.write_ParseCompletion();
+	
+	if (ready == true) {
+		pgpkt.write_ReadyForQuery(trx_state);
+		pgpkt.set_multi_pkt_mode(false);
+	}
+
+	auto buff = pgpkt.detach();
+	if (send == true) {
+		(*myds)->PSarrayOUT->add((void*)buff.first, buff.second);
+	} else {
+		_ptr->ptr = buff.first;
+		_ptr->size = buff.second;
+	}
+	return true;
+}
+
 //bool PgSQL_Protocol::generate_row_description(bool send, PgSQL_Query_Result* rs, const PG_Fields& fields, unsigned int size) {
 //	if ((*myds)->sess->mirror == true) {
 //		return true;
@@ -2421,4 +2470,122 @@ void PgSQL_Query_Result::clear() {
 	}
 	buffer_init();
 	reset();
+}
+
+
+PgSQL_Parse_Message::PgSQL_Parse_Message() {
+
+}
+
+PgSQL_Parse_Message::~PgSQL_Parse_Message() {
+	if (_pkt.ptr) {
+		free(_pkt.ptr);
+		_pkt.ptr = nullptr;
+		_pkt.size = 0;
+	}
+}
+
+bool PgSQL_Parse_Message::parse(PtrSize_t& pkt) {
+
+	if (pkt.ptr == nullptr || pkt.size == 0) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "No packet to parse\n");
+		return false;
+	}
+
+	if (pkt.size < 5) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Packet too short for parsing: %u bytes\n", pkt.size);
+		return false;
+	}
+
+	unsigned char* packet = (unsigned char*)pkt.ptr;
+	uint32_t pkt_len = pkt.size;
+	uint32_t payload_len = 0;
+	uint32_t offset = 0;
+
+	if (packet[offset++] != 'P') { // 'P' is the packet type for Parse
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Invalid packet type: expected 'P'\n");
+		return false;
+	}
+
+	// Read the length of the packet (4 bytes, big-endian)
+	if (!get_uint32be(packet + offset, &payload_len)) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Failed to read packet size\n");
+		return false;
+	}
+	offset += sizeof(uint32_t);
+
+	// Check if the reported packet length matches the provided length
+	if (payload_len != pkt_len - 1) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Packet size too small: %u bytes\n", pkt.size);
+		return false;
+	}
+
+	// Validate remaining length for statement name (at least 1 byte for null-terminated string)
+	if (offset >= pkt_len) {
+		return false;  // Not enough data for statement name
+	}
+
+	// Read the statement name (null-terminated string)
+	stmt_name = reinterpret_cast<char*>(packet + offset);
+	size_t stmt_name_len = strnlen(stmt_name, pkt_len - offset);
+
+	// Ensure there is a null-terminator within the packet length
+	if (offset + stmt_name_len >= pkt_len) {
+		return false;  // No null-terminator found within the packet bounds
+	}
+
+	offset += stmt_name_len + 1; // Move past the null-terminated statement name
+
+	// Validate remaining length for query string (at least 1 byte for null-terminated string)
+	if (offset >= pkt_len) {
+		return false;  // Not enough data for query string
+	}
+
+	// Read the query string (null-terminated string)
+	query_string = reinterpret_cast<char*>(packet + offset);
+	size_t query_string_len = strnlen(query_string, pkt_len - offset);
+
+	// Ensure there is a null-terminator within the packet length
+	if (offset + query_string_len >= pkt_len) {
+		return false;  // No null-terminator found within the packet bounds
+	}
+
+	offset += query_string_len + 1;  // Move past the null-terminated query string
+
+	// Validate remaining length for number of parameter types (2 bytes)
+	if (offset + sizeof(int16_t) > pkt_len) {
+		return false;  // Not enough data for numParameterTypes
+	}
+
+	// Read the length of the parameter types (2 bytes, big-endian)
+	if (!get_uint16be(packet + offset, &num_param_types)) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Failed to read packet size\n");
+		return false;
+	}
+	offset += sizeof(int16_t);
+
+	// If there are parameter types, ensure there's enough data for all of them
+	if (num_param_types > 0) {
+		if (offset + num_param_types * sizeof(uint32_t) > pkt_len) {
+			return false;  // Not enough data for all parameter types
+		}
+
+		// Read the parameter types array (each is 4 bytes, big-endian)
+		param_types = reinterpret_cast<const uint32_t*>(packet + offset);
+
+		// Move past the parameter types
+		offset += num_param_types * sizeof(uint32_t);
+	}
+
+	// take "ownership"
+	_pkt = pkt;
+
+	// If we reach here, the packet is valid and fully parsed
+	return true;
+}
+
+PtrSize_t PgSQL_Parse_Message::detach() {
+	PtrSize_t result = _pkt;
+	memset(this, 0, sizeof(PgSQL_Parse_Message));
+	return result;
 }

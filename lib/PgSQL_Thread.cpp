@@ -21,7 +21,7 @@ using json = nlohmann::json;
 #include "PgSQL_Data_Stream.h"
 #include "PgSQL_Query_Processor.h"
 #include "StatCounters.h"
-#include "MySQL_PreparedStatement.h"
+#include "PgSQL_PreparedStatement.h"
 #include "PgSQL_Logger.hpp"
 #include "PgSQL_Variables_Validator.h"
 #include <fcntl.h>
@@ -4736,7 +4736,7 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 						}
 					}
 					else { // prepared statement
-						MySQL_STMT_Global_info* si = sess->CurrentQuery.stmt_info;
+						PgSQL_STMT_Global_info* si = sess->CurrentQuery.stmt_info;
 						if (si->query_length) {
 							pta[13] = (char*)malloc(si->query_length + 1);
 							strncpy(pta[13], si->query, si->query_length);

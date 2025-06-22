@@ -245,7 +245,10 @@ public:
 	void write_PasswordMessage(const char* psw) {
 		write_generic('p', "s", psw);
 	}
-
+	void write_ParseCompletion() {
+		put_char('1');
+		put_uint32(4);
+	}
 	void write_RowDescription(const char* tupdesc, ...);
 	void write_DataRow(const char* tupdesc, ...);
 
@@ -280,6 +283,22 @@ private:
 	bool multiple_pkt_mode = false;
 	bool ownership = true;
 	friend void SQLite3_to_Postgres(PtrSizeArray* psa, SQLite3_result* result, char* error, int affected_rows, const char* query_type, char txn_state);
+};
+
+class PgSQL_Parse_Message {
+public:
+	PgSQL_Parse_Message();
+	~PgSQL_Parse_Message();
+	const char* stmt_name = NULL;		// The name of the prepared statement
+	const char* query_string = NULL;	// The query string to be prepared
+	uint16_t num_param_types = 0;		// Number of parameter types specified
+	const uint32_t* param_types = NULL;	// Array of parameter types (can be nullptr if none)
+
+	bool parse(PtrSize_t& pkt);
+	PtrSize_t detach();
+
+private:
+	PtrSize_t _pkt = {};
 };
 
 class PgSQL_Protocol;
@@ -736,6 +755,9 @@ public:
 	 */
 	bool generate_ok_packet(bool send, bool ready, const char* msg, int rows, const char* query, char trx_state = 'I', PtrSize_t* _ptr = NULL, 
 		const std::vector<std::pair<std::string,std::string>>& param_status = std::vector<std::pair<std::string, std::string>>());
+
+	bool generate_parse_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr = NULL);
+	bool generate_ready_for_query_packet(bool send, char trx_state, PtrSize_t* _ptr = NULL);
 
 	// temporary overriding generate_pkt_OK to avoid crash. FIXME remove this
 	bool generate_pkt_OK(bool send, void** ptr, unsigned int* len, uint8_t sequence_id, unsigned int affected_rows, 

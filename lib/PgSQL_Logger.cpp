@@ -8,7 +8,7 @@ using json = nlohmann::json;
 
 #include "PgSQL_Data_Stream.h"
 #include "PgSQL_Query_Processor.h"
-#include "MySQL_PreparedStatement.h"
+#include "PgSQL_PreparedStatement.h"
 #include "PgSQL_Logger.hpp"
 
 #include <dirent.h>
@@ -60,11 +60,11 @@ PgSQL_Event::PgSQL_Event (log_event_type _et, uint32_t _thread_id, char * _usern
 	affected_rows=0;
 	have_rows_sent=false;
 	rows_sent=0;
-	client_stmt_id=0;
+	client_stmt_name=NULL;
 }
 
-void PgSQL_Event::set_client_stmt_id(uint32_t client_stmt_id) {
-	this->client_stmt_id = client_stmt_id;
+void PgSQL_Event::set_client_stmt_name(char* client_stmt_name) {
+	this->client_stmt_name = client_stmt_name;
 }
 
 // if affected rows is set, last_insert_id is set too.
@@ -266,7 +266,8 @@ uint64_t PgSQL_Event::write_query_format_1(std::fstream *f) {
 
 	total_bytes+=mysql_encode_length(start_time,NULL);
 	total_bytes+=mysql_encode_length(end_time,NULL);
-	total_bytes+=mysql_encode_length(client_stmt_id,NULL);
+	client_stmt_name_len=strlen(client_stmt_name);
+	total_bytes+=mysql_encode_length(client_stmt_name_len,NULL)+client_stmt_name_len;
 	total_bytes+=mysql_encode_length(affected_rows,NULL);
 	total_bytes+=mysql_encode_length(rows_sent,NULL);
 
@@ -325,9 +326,10 @@ uint64_t PgSQL_Event::write_query_format_1(std::fstream *f) {
 	f->write((char *)buf,len);
 
 	if (et == PROXYSQL_COM_STMT_PREPARE || et == PROXYSQL_COM_STMT_EXECUTE) {
-		len=mysql_encode_length(client_stmt_id,buf);
-		write_encoded_length(buf,client_stmt_id,len,buf[0]);
-		f->write((char *)buf,len);
+		len = mysql_encode_length(client_stmt_name_len, buf);
+		write_encoded_length(buf, client_stmt_name_len, len, buf[0]);
+		f->write((char*)buf, len);
+		f->write(client_stmt_name, client_stmt_name_len);
 	}
 
 	len=mysql_encode_length(affected_rows,buf);
@@ -431,7 +433,7 @@ uint64_t PgSQL_Event::write_query_format_2_json(std::fstream *f) {
 	j["digest"] = digest_hex;
 
 	if (et == PROXYSQL_COM_STMT_PREPARE || et == PROXYSQL_COM_STMT_EXECUTE) {
-		j["client_stmt_id"] = client_stmt_id;
+		j["client_stmt_name"] = client_stmt_name;
 	}
 
 	// for performance reason, we are moving the write lock
@@ -720,7 +722,7 @@ void PgSQL_Logger::log_request(PgSQL_Session *sess, PgSQL_Data_Stream *myds) {
 		case PROCESSING_STMT_EXECUTE:
 			c = (char *)sess->CurrentQuery.stmt_info->query;
 			ql = sess->CurrentQuery.stmt_info->query_length;
-			me.set_client_stmt_id(sess->CurrentQuery.stmt_client_id);
+			me.set_client_stmt_name(sess->CurrentQuery.stmt_client_name);
 			break;
 		case PROCESSING_STMT_PREPARE:
 		default:
@@ -731,7 +733,7 @@ void PgSQL_Logger::log_request(PgSQL_Session *sess, PgSQL_Data_Stream *myds) {
 			// global cache and due to that we immediately reply to the client and session doesn't reach
 			// 'PROCESSING_STMT_PREPARE' state. 'stmt_client_id' is expected to be '0' for anything that isn't
 			// a prepared statement, still, logging should rely 'log_event_type' instead of this value.
-			me.set_client_stmt_id(sess->CurrentQuery.stmt_client_id);
+			me.set_client_stmt_name(sess->CurrentQuery.stmt_client_name);
 			break;
 	}
 	if (c) {

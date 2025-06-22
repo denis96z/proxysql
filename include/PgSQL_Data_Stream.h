@@ -92,7 +92,7 @@ public:
 	} CompPktOUT;
 
 	PgSQL_Protocol myprot;
-	PgSQL_MyDS_real_query mysql_real_query;
+	PgSQL_MyDS_real_query pgsql_real_query;
 	bytes_stats_t bytes_info; // bytes statistics
 
 	PtrSize_t multi_pkt;
@@ -189,7 +189,6 @@ public:
 	bool available_data_out();
 	void remove_pollout();
 	void set_pollout();
-	void mysql_free();
 
 	void set_net_failure();
 	void setDSS_STATE_QUERY_SENT_NET();
@@ -265,7 +264,7 @@ public:
 	void return_MySQL_Connection_To_Pool();
 
 	void destroy_MySQL_Connection_From_Pool(bool sq);
-	void free_mysql_real_query();
+	void free_pgsql_real_query();
 	void reinit_queues();
 	void destroy_queues();
 

@@ -6,7 +6,7 @@ using json = nlohmann::json;
 #include "proxysql.h"
 #include "cpp.h"
 
-#include "MySQL_PreparedStatement.h"
+#include "PgSQL_PreparedStatement.h"
 #include "PgSQL_Data_Stream.h"
 
 #include <memory>

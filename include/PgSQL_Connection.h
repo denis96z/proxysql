@@ -12,6 +12,7 @@
 
 class PgSQL_SrvC;
 class PgSQL_Query_Result;
+class PgSQL_STMTs_local_v14;
 //#define STATUS_MYSQL_CONNECTION_TRANSACTION          0x00000001 // DEPRECATED
 #define STATUS_MYSQL_CONNECTION_COMPRESSION          0x00000002
 #define STATUS_MYSQL_CONNECTION_USER_VARIABLE        0x00000004
@@ -254,12 +255,16 @@ public:
 	void query_cont(short event);
 	void fetch_result_start();
 	void fetch_result_cont(short event);
+	void stmt_prepare_start();
+	void stmt_prepare_cont(short event);
+	//void stmt_execute_start();
+	//void stmt_execute_cont(short event);
 	void reset_session_start();
 	void reset_session_cont(short event);
 	
 	int  async_connect(short event);
 
-	int  async_query(short event, char* stmt, unsigned long length);
+	int  async_query(short event, const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr, void* execute_data = nullptr);
 	int  async_ping(short event);
 	int  async_reset_session(short event);
 	int	 async_send_simple_command(short event, char* stmt, unsigned long length); // no result set expected
@@ -410,6 +415,7 @@ public:
 	const char* get_pg_connection_status_str();
 	const char* get_pg_transaction_status_str();
 	unsigned int get_memory_usage() const;
+	char get_transaction_status_char();
 
 	inline
 	int get_backend_pid() { return (pgsql_conn) ? get_pg_backend_pid() : -1; }
@@ -437,14 +443,15 @@ public:
 
 	unsigned int reorder_dynamic_variables_idx();
 	unsigned int number_of_matching_session_variables(const PgSQL_Connection* client_conn, unsigned int& not_matching);
-	void set_query(char* stmt, unsigned long length);
+	void set_query(const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr);
 	void reset();
 
 	bool IsKeepMultiplexEnabledVariables(char* query_digest_text);
 
 	struct {
 		unsigned long length;
-		char* ptr;
+		const char* ptr;
+		const char* backend_stmt_name;
 	} query;
 
 	struct {
@@ -500,7 +507,7 @@ public:
 	bool processing_multi_statement;
 	bool multiplex_delayed;
 
-
+	PgSQL_STMTs_local_v14* local_stmts;
 	PgSQL_SrvC *parent;
 	PgSQL_Connection_userinfo* userinfo;
 	PgSQL_Data_Stream* myds;

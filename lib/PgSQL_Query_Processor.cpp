@@ -283,18 +283,18 @@ PgSQL_Query_Processor_Output* PgSQL_Query_Processor::process_query(PgSQL_Session
 	}
 #define stackbuffer_size 128
 	char stackbuffer[stackbuffer_size];
-	unsigned int len = 0;
+	unsigned int len = size;
 	char* query = NULL;
 	// NOTE: if ptr == NULL , we are calling process_mysql_query() on an STMT_EXECUTE
 	if (ptr) {
-		len = size - sizeof(mysql_hdr) - 1;
+		//len = size - sizeof(mysql_hdr) - 1;
 		if (len < stackbuffer_size) {
 			query = stackbuffer;
 		} else {
-			query = (char*)l_alloc(len + 1);
+			query = (char*)l_alloc(len);
 		}
-		memcpy(query, (char*)ptr + sizeof(mysql_hdr) + 1, len);
-		query[len] = 0;
+		memcpy(query, ptr, len);
+		query[len-1] = 0;
 	}
 	else {
 		//query = qi->stmt_info->query;
@@ -308,7 +308,7 @@ PgSQL_Query_Processor_Output* PgSQL_Query_Processor::process_query(PgSQL_Session
 		// query is in the stack
 	} else {
 		if (ptr) {
-			l_free(len + 1, query);
+			l_free(len, query);
 		}
 	}
 

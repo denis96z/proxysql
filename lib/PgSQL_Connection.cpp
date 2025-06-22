@@ -9,7 +9,7 @@ using json = nlohmann::json;
 #include "PgSQL_HostGroups_Manager.h"
 #include "proxysql.h"
 #include "cpp.h"
-#include "MySQL_PreparedStatement.h"
+#include "PgSQL_PreparedStatement.h"
 #include "PgSQL_Data_Stream.h"
 #include "PgSQL_Query_Processor.h"
 #include "MySQL_Variables.h"
@@ -178,6 +178,7 @@ PgSQL_Connection::PgSQL_Connection() {
 	options.init_connect = NULL;
 	options.init_connect_sent = false;
 	userinfo = new PgSQL_Connection_userinfo();
+	local_stmts = new PgSQL_STMTs_local_v14(false); // false by default, it is a backend
 
 	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
 		variables[i].value = NULL;
@@ -199,6 +200,10 @@ PgSQL_Connection::~PgSQL_Connection() {
 	if (pgsql_result) {
 		PQclear(pgsql_result);
 		pgsql_result = NULL;
+	}
+	if (local_stmts) {
+		delete local_stmts;
+		local_stmts = NULL;
 	}
 	if (pgsql_conn) {
 		if (is_connected())  
@@ -670,6 +675,55 @@ handler_again:
 	case ASYNC_RESET_SESSION_SUCCESSFUL:
 	case ASYNC_RESET_SESSION_TIMEOUT:
 		break;
+	case ASYNC_STMT_PREPARE_START:
+		stmt_prepare_start();
+		if (async_exit_status) {
+			next_event(ASYNC_STMT_PREPARE_CONT);
+		}
+		else {
+			NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_END);
+		}
+		break;
+	case ASYNC_STMT_PREPARE_CONT:
+		{
+			if (event) {
+				stmt_prepare_cont(event);
+			}
+			if (async_exit_status) {
+				next_event(ASYNC_STMT_PREPARE_END);
+				break;
+			}
+			if (is_error_present()) {
+				NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_END);
+			}
+			PGresult* result = get_result();
+			if (result) {
+				if (PQresultStatus(result) != PGRES_COMMAND_OK) {
+					set_error_from_result(result, PGSQL_ERROR_FIELD_ALL);
+					assert(is_error_present());
+				}
+				PQclear(result);
+				NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_CONT);
+			}
+			NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_END);
+		}
+		break;
+	case ASYNC_STMT_PREPARE_END:
+		if (is_error_present()) {
+			proxy_error("Failed to prepare statement: %s\n", get_error_code_with_message().c_str());
+			NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_FAILED);
+		}
+		else {
+			NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_SUCCESSFUL);
+		}
+		break;
+	case ASYNC_STMT_PREPARE_FAILED:
+
+		break;
+	case ASYNC_STMT_PREPARE_SUCCESSFUL:
+
+		break;
+	
 	default:
 		// not implemented yet
 		assert(0); 
@@ -1149,7 +1203,7 @@ bool PgSQL_Connection::IsAutoCommit() {
 // 0 when the query is completed
 // 1 when the query is not completed
 // the calling function should check pgsql error in pgsql struct
-int PgSQL_Connection::async_query(short event, char* stmt, unsigned long length) {
+int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long length, const char* backend_stmt_name, void* execute_data) {
 	PROXY_TRACE();
 	PROXY_TRACE2();
 	assert(pgsql_conn);
@@ -1178,11 +1232,24 @@ int PgSQL_Connection::async_query(short event, char* stmt, unsigned long length)
 			}
 		}
 
-		set_query(stmt, length);
-		async_state_machine = ASYNC_QUERY_START;
+		if (!backend_stmt_name) {
+			async_state_machine = ASYNC_QUERY_START;
+		} else {
+			if (execute_data) {
+				async_state_machine = ASYNC_STMT_EXECUTE_START;
+			} else {
+				async_state_machine = ASYNC_STMT_PREPARE_START;
+			}
+		}
+		set_query(stmt, length, backend_stmt_name);
 	default:
 		handler(event);
 		break;
+	}
+
+	if (async_state_machine == ASYNC_STMT_EXECUTE_END) {
+		PROXY_TRACE2();
+		async_state_machine = ASYNC_QUERY_END;
 	}
 
 	if (async_state_machine == ASYNC_QUERY_END) {
@@ -1195,9 +1262,20 @@ int PgSQL_Connection::async_query(short event, char* stmt, unsigned long length)
 			return 0;
 		}
 	}
+
+	if (async_state_machine == ASYNC_STMT_PREPARE_SUCCESSFUL || 
+		async_state_machine == ASYNC_STMT_PREPARE_FAILED) {
+		compute_unknown_transaction_status();
+		if (async_state_machine == ASYNC_STMT_PREPARE_FAILED) {
+			return -1;
+		} else {
+			return 0;
+		}
+	}
+
 	if (async_state_machine == ASYNC_USE_RESULT_START) {
 		// if we reached this point it measn we are processing a multi-statement
-		// and we need to exit to give control to MySQL_Session
+		// and we need to exit to give control to PgSQL_Session
 		processing_multi_statement = true;
 		return 2;
 	}
@@ -1427,6 +1505,51 @@ void PgSQL_Connection::next_multi_statement_result(PGresult* result) {
 	pgsql_result = result;
 	// copy buffer to PSarrayOut
 	query_result->buffer_to_PSarrayOut();
+}
+
+void PgSQL_Connection::stmt_prepare_start() {
+	PROXY_TRACE();
+	reset_error();
+	processing_multi_statement = false;
+	async_exit_status = PG_EVENT_NONE;
+
+	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
+
+	if (PQsendPrepare(pgsql_conn, query.backend_stmt_name, query.ptr, 0, NULL) == 0) {
+		set_error_from_PQerrorMessage();
+		proxy_error("Failed to send prepare. %s\n", get_error_code_with_message().c_str());
+		return;
+	}
+	flush();
+}
+
+void PgSQL_Connection::stmt_prepare_cont(short event) {
+	PROXY_TRACE();
+	proxy_debug(PROXY_DEBUG_MYSQL_PROTOCOL, 6, "event=%d\n", event);
+	async_exit_status = PG_EVENT_NONE;
+	if (event & POLLOUT) {
+		flush();
+		return;
+	}
+
+	if (PQconsumeInput(pgsql_conn) == 0) {
+		/* We will only set the error if we didn't capture error in last call. If is_error_present is true,
+		 * it indicates that an error was already captured during a previous PQconsumeInput call,
+		 * and we do not want to overwrite that information.
+		 */
+		if (is_error_present() == false) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to consume input. %s\n", get_error_code_with_message().c_str());
+		}
+		return;
+	}
+
+	if (PQisBusy(pgsql_conn)) {
+		async_exit_status = PG_EVENT_READ;
+		return;
+	}
+
+	pgsql_result = PQgetResult(pgsql_conn);
 }
 
 void PgSQL_Connection::reset_session_start() {
@@ -1880,6 +2003,8 @@ void PgSQL_Connection::reset() {
 	set_status(old_compress, STATUS_MYSQL_CONNECTION_COMPRESSION);
 	reusable = true;
 	creation_time = monotonic_time();
+	delete local_stmts;
+	local_stmts = new PgSQL_STMTs_local_v14(false);
 
 	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
 		var_hash[i] = 0;
@@ -1970,12 +2095,13 @@ bool PgSQL_Connection::AutocommitFalse_AndSavepoint() {
 	return ret;
 }
 
-void PgSQL_Connection::set_query(char* stmt, unsigned long length) {
+void PgSQL_Connection::set_query(const char* stmt, unsigned long length, const char* backend_stmt_name) {
 	query.length = length;
 	query.ptr = stmt;
 	if (length > largest_query_length) {
 		largest_query_length = length;
 	}
+	query.backend_stmt_name = backend_stmt_name;
 }
 
 bool PgSQL_Connection::IsKeepMultiplexEnabledVariables(char* query_digest_text) {

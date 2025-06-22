@@ -5,7 +5,7 @@
 
 #include <functional>
 #include <vector>
-
+#include <variant>
 #include "proxysql.h"
 #include "Base_Session.h"
 #include "cpp.h"
@@ -16,6 +16,7 @@
 
 class PgSQL_Query_Result;
 class PgSQL_ExplicitTxnStateMgr;
+class PgSQL_Parse_Message;
 //#include "../deps/json/json.hpp"
 //using json = nlohmann::json;
 
@@ -142,6 +143,7 @@ public:
 	bool match(char* m);
 };
 
+class PgSQL_STMT_Global_info;
 
 class PgSQL_Query_Info {
 public:
@@ -151,11 +153,11 @@ public:
 	unsigned long long start_time;
 	unsigned long long end_time;
 
-	MYSQL_STMT* mysql_stmt;
-	stmt_execute_metadata_t* stmt_meta;
+	char* stmt_client_name;
 	uint64_t stmt_global_id;
-	uint64_t stmt_client_id;
-	MySQL_STMT_Global_info* stmt_info;
+	uint64_t stmt_backend_id;
+
+	PgSQL_STMT_Global_info* stmt_info;
 
 	int QueryLength;
 	enum PGSQL_QUERY_command PgQueryCmd;
@@ -181,6 +183,10 @@ public:
 
 class PgSQL_Session : public Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread> {
 private:
+	using PktType = std::variant<std::unique_ptr<PgSQL_Parse_Message>>;
+
+	std::queue<PktType> pending_packets;
+
 	//int handler_ret;
 	void handler___status_CONNECTING_CLIENT___STATE_SERVER_HANDSHAKE(PtrSize_t*, bool*);
 
@@ -228,6 +234,11 @@ private:
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY_qpo(PtrSize_t*, bool* lock_hostgroup, PgSQL_ps_type prepare_stmt_type = PgSQL_ps_type_not_set);
 
 	void handler___client_DSS_QUERY_SENT___server_DSS_NOT_INITIALIZED__get_connection();
+	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_PARSE(PtrSize_t& pkt);
+	int handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC(PtrSize_t& pkt);
+	bool handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params);
+
+	int handle_post_sync_parse_message(PgSQL_Parse_Message* parsse_msg);
 
 	//void return_proxysql_internal(PtrSize_t*);
 	bool handler_special_queries(PtrSize_t*, bool* lock_hostgroup);
@@ -302,10 +313,6 @@ private:
 	void housekeeping_before_pkts();
 #endif // 0
 	int get_pkts_from_client(bool&, PtrSize_t&);
-
-	//void handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_STMT_PREPARE(PtrSize_t& pkt);
-	//void handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_STMT_EXECUTE(PtrSize_t& pkt);
-
 	// these functions have code that used to be inline, and split into functions for readibility
 	int handler_ProcessingQueryError_CheckBackendConnectionStatus(PgSQL_Data_Stream* myds);
 	void SetQueryTimeout();
@@ -316,7 +323,6 @@ private:
 	void handler_minus1_HandleBackendConnection(PgSQL_Data_Stream* myds);
 	int RunQuery(PgSQL_Data_Stream* myds, PgSQL_Connection* myconn);
 	void handler___status_WAITING_CLIENT_DATA();
-	void handler_rc0_Process_GTID(PgSQL_Connection* myconn);
 	void handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_INIT_DB_replace_CLICKHOUSE(PtrSize_t& pkt);
 	void handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY___not_mysql(PtrSize_t& pkt);
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY_detect_SQLi();

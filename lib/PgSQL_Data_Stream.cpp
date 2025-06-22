@@ -6,7 +6,7 @@
 #define UNIX_PATH_MAX    108
 #endif 
 
-#include "MySQL_PreparedStatement.h"
+#include "PgSQL_PreparedStatement.h"
 #include "PgSQL_Data_Stream.h"
 
 #include "openssl/x509v3.h"
@@ -224,10 +224,10 @@ PgSQL_Data_Stream::PgSQL_Data_Stream() {
 	proxy_addr.port = 0;
 
 	sess = NULL;
-	mysql_real_query.pkt.ptr = NULL;
-	mysql_real_query.pkt.size = 0;
-	mysql_real_query.QueryPtr = NULL;
-	mysql_real_query.QuerySize = 0;
+	pgsql_real_query.pkt.ptr = NULL;
+	pgsql_real_query.pkt.size = 0;
+	pgsql_real_query.QueryPtr = NULL;
+	pgsql_real_query.QuerySize = 0;
 
 	query_retries_on_failure = 0;
 	connect_retries_on_failure = 0;
@@ -296,7 +296,7 @@ PgSQL_Data_Stream::~PgSQL_Data_Stream() {
 		proxy_addr.addr = NULL;
 	}
 
-	free_mysql_real_query();
+	free_pgsql_real_query();
 
 	if (com_field_wild) {
 		free(com_field_wild);
@@ -1169,9 +1169,9 @@ void PgSQL_Data_Stream::return_MySQL_Connection_To_Pool() {
 	}
 }
 
-void PgSQL_Data_Stream::free_mysql_real_query() {
-	if (mysql_real_query.QueryPtr) {
-		mysql_real_query.end();
+void PgSQL_Data_Stream::free_pgsql_real_query() {
+	if (pgsql_real_query.QueryPtr) {
+		pgsql_real_query.end();
 	}
 }
 
