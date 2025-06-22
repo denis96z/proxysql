@@ -637,7 +637,9 @@ handler_again:
 		break;
 	case ASYNC_RESET_SESSION_CONT:
 	{
-		reset_session_cont(event);
+		if (event) {
+			reset_session_cont(event);
+		}
 		if (async_exit_status) {
 			if (myds->wait_until != 0 && myds->sess->thread->curtime >= myds->wait_until) {
 				NEXT_IMMEDIATE(ASYNC_RESET_SESSION_TIMEOUT);
@@ -973,7 +975,6 @@ void PgSQL_Connection::query_start() {
 void PgSQL_Connection::query_cont(short event) {
 	PROXY_TRACE();
 	proxy_debug(PROXY_DEBUG_MYSQL_PROTOCOL, 6, "event=%d\n", event);
-	reset_error();
 	async_exit_status = PG_EVENT_NONE;
 	if (event & POLLOUT) {
 		flush();
@@ -1573,7 +1574,6 @@ void PgSQL_Connection::reset_session_start() {
 void PgSQL_Connection::reset_session_cont(short event) {
 	PROXY_TRACE();
 	proxy_debug(PROXY_DEBUG_MYSQL_PROTOCOL, 6, "event=%d\n", event);
-	reset_error();
 	async_exit_status = PG_EVENT_NONE;
 	if (event & POLLOUT) {
 		flush();
