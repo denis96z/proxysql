@@ -521,12 +521,17 @@ void ProxySQL_Admin::stats___mysql_global() {
 		"INSERT INTO stats_mysql_global VALUES " + generate_multi_rows_query(32, 2)
 	};
 
-	sqlite3_stmt* row_stmt = nullptr;
-	int rc = statsdb->prepare_v2(q_row_insert.c_str(), &row_stmt);
+	int rc = 0;
+
+	stmt_unique_ptr u_row_stmt { nullptr };
+	std::tie(rc, u_row_stmt) = statsdb->prepare_v2(q_row_insert.c_str());
 	ASSERT_SQLITE_OK(rc, statsdb);
-	sqlite3_stmt* bulk_stmt = nullptr;
-	rc = statsdb->prepare_v2(q_bulk_insert.c_str(), &bulk_stmt);
+	sqlite3_stmt* const row_stmt { u_row_stmt.get() };
+
+	stmt_unique_ptr u_bulk_stmt { nullptr };
+	std::tie(rc, u_bulk_stmt) = statsdb->prepare_v2(q_bulk_insert.c_str());
 	ASSERT_SQLITE_OK(rc, statsdb);
+	sqlite3_stmt* const bulk_stmt { u_bulk_stmt.get() };
 
 	sqlite3_bulk_step(statsdb, row_stmt, bulk_stmt, resultset, stats_mysql_global___bind_row);
 
