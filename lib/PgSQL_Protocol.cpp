@@ -196,7 +196,6 @@ void PG_pkt::write_RowDescription(const char *tupdesc, ...) {
 	finish_packet();
 }
 
-
 void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error, int affected_rows, const char *query_type, char txn_state) {
 	assert(psa != NULL);
 	const char *fs = strchr(query_type, ' ');
@@ -1588,6 +1587,63 @@ bool PgSQL_Protocol::generate_ready_for_query_packet(bool send, char trx_state, 
 	return true;
 }
 
+bool PgSQL_Protocol::generate_describe_completion_packet(bool send, bool ready, const PgSQL_Describe_Prepared_Info* desc, char trx_state, PtrSize_t* _ptr) {
+	// to avoid memory leak
+	assert(send == true || _ptr);
+	PG_pkt pgpkt{};
+	uint32_t size = 0;
+	// Describe completion message
+	size = desc->parameter_types_count * sizeof(uint32_t) + sizeof(uint16_t) + 4; // size of the packet, including the type byte
+
+	pgpkt.put_char('t');
+	pgpkt.put_uint32(size); // size of the packet, including the type byte
+	// If there are no parameters, we still need to write a zero
+	pgpkt.put_uint16(desc->parameter_types_count); // number of parameters
+	for (size_t i = 0; i < desc->parameter_types_count; i++) {
+		pgpkt.put_uint32(desc->parameter_types[i]); // parameter type OID
+	}
+
+	size = desc->columns_count * (sizeof(uint32_t) + // table OID
+		sizeof(uint16_t) + // column index
+		sizeof(uint32_t) + // type OID
+		sizeof(uint16_t) + // column length
+		sizeof(uint32_t) + // type modifier
+		sizeof(uint16_t)) + // format code
+		sizeof(uint16_t) + 4; // Field count + size of the packet
+
+	for (size_t i = 0; i < desc->columns_count; i++) {
+		size += strlen(desc->columns[i].name) + 1; // field name + null terminator
+	}
+	pgpkt.put_char('T');
+	// If there are no result fields, we still need to write a zero
+	pgpkt.put_uint32(size); // size of the packet, including the type byte
+	pgpkt.put_uint16(desc->columns_count); // number of result fields
+
+	for (size_t i = 0; i < desc->columns_count; i++) {
+		pgpkt.put_string(desc->columns[i].name); // field name
+		pgpkt.put_uint32(desc->columns[i].table_oid); // table OID
+		pgpkt.put_uint16(desc->columns[i].column_index); // column index
+		pgpkt.put_uint32(desc->columns[i].type_oid); // type OID
+		pgpkt.put_uint16(desc->columns[i].length); // column length
+		pgpkt.put_uint32(desc->columns[i].type_modifier); // type modifier
+		pgpkt.put_uint16(desc->columns[i].format); // format code
+	}
+	
+	if (ready == true) {
+		pgpkt.put_char('Z');
+		pgpkt.put_uint32(5); // size of the ReadyForQuery packet
+		pgpkt.put_char(trx_state); // transaction state
+	}
+	auto buff = pgpkt.detach();
+	if (send == true) {
+		(*myds)->PSarrayOUT->add((void*)buff.first, buff.second);
+	} else {
+		_ptr->ptr = buff.first;
+		_ptr->size = buff.second;
+	}
+	return true;
+}
+
 bool PgSQL_Protocol::generate_parse_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr) {
 	// to avoid memory leak
 	assert(send == true || _ptr);
@@ -1615,68 +1671,6 @@ bool PgSQL_Protocol::generate_parse_completion_packet(bool send, bool ready, cha
 	}
 	return true;
 }
-
-//bool PgSQL_Protocol::generate_row_description(bool send, PgSQL_Query_Result* rs, const PG_Fields& fields, unsigned int size) {
-//	if ((*myds)->sess->mirror == true) {
-//		return true;
-//	}
-//
-//	unsigned char* _ptr = NULL;
-//
-//	if (rs) {
-//		if (size <= (PGSQL_RESULTSET_BUFLEN - rs->buffer_used)) {
-//			// there is space in the buffer, add the data to it
-//			_ptr = rs->buffer + rs->buffer_used;
-//			rs->buffer_used += size;
-//		} else {
-//			// there is no space in the buffer, we flush the buffer and recreate it
-//			rs->buffer_to_PSarrayOut();
-//			// now we can check again if there is space in the buffer
-//			if (size <= (PGSQL_RESULTSET_BUFLEN - rs->buffer_used)) {
-//				// there is space in the NEW buffer, add the data to it
-//				_ptr = rs->buffer + rs->buffer_used;
-//				rs->buffer_used += size;
-//			} else {
-//				// a new buffer is not enough to store the new row
-//				_ptr = (unsigned char*)l_alloc(size);
-//			}
-//		}
-//	} else {
-//		_ptr = (unsigned char*)l_alloc(size);
-//	}
-//
-//	PG_pkt pgpkt(_ptr, 0);
-//
-//	pgpkt.put_char('T');
-//	pgpkt.put_uint32(size );
-//	pgpkt.put_uint16(fields.size());
-//
-//	for (unsigned int i = 0; i < fields.size(); i++) {
-//		pgpkt.put_string(fields[i].name);
-//		pgpkt.put_uint32(fields[i].tbl_oid);
-//		pgpkt.put_uint16(fields[i].col_idx);
-//		pgpkt.put_uint32(fields[i].type_oid);
-//		pgpkt.put_uint16(fields[i].col_len);
-//		pgpkt.put_uint32(fields[i].type_mod);
-//		pgpkt.put_uint16(fields[i].fmt);
-//	}
-//
-//	if (send == true) { (*myds)->PSarrayOUT->add((void*)_ptr, size); }
-//	
-////#ifdef DEBUG
-////	if (dump_pkt) { __dump_pkt(__func__, _ptr, size); }
-////#endif
-//	if (rs) {
-//		if (_ptr >= rs->buffer && _ptr < rs->buffer + PGSQL_RESULTSET_BUFLEN) {
-//			// we are writing within the buffer, do not add to PSarrayOUT
-//		} else {
-//			// we are writing outside the buffer, add to PSarrayOUT
-//			rs->PSarrayOUT.add(_ptr, size);
-//		}
-//	}
-//	return true;
-//}
-
 
 unsigned int PgSQL_Protocol::copy_row_description_to_PgSQL_Query_Result(bool send, PgSQL_Query_Result* pg_query_result, const PGresult* result) {
 	assert(pg_query_result);
@@ -2232,6 +2226,87 @@ unsigned int PgSQL_Protocol::copy_out_response_end_to_PgSQL_Query_Result(bool se
 	return size;
 }
 
+PgSQL_Describe_Prepared_Info::PgSQL_Describe_Prepared_Info() {
+	parameter_types = NULL;
+	parameter_types_count = 0;
+	columns = NULL;
+	columns_count = 0;
+}
+
+PgSQL_Describe_Prepared_Info::~PgSQL_Describe_Prepared_Info() {
+	clear();
+}
+
+
+void PgSQL_Describe_Prepared_Info::populate(const PGresult* result) {
+	if (!result) return;
+	clear();
+	extract_parameters(result);
+	extract_columns(result);
+}
+
+void PgSQL_Describe_Prepared_Info::clear() {
+	// Free parameter types array
+	free(parameter_types);
+	parameter_types = NULL;
+	parameter_types_count = 0;
+
+	// Free column names and column array
+	for (size_t i = 0; i < columns_count; i++) {
+		free(columns[i].name);
+	}
+	free(columns);
+	columns = NULL;
+	columns_count = 0;
+}
+
+void PgSQL_Describe_Prepared_Info::extract_parameters(const PGresult* result) {
+	int param_count = PQnparams(result);
+	if (param_count <= 0) {
+		parameter_types = NULL;
+		parameter_types_count = 0;
+		return;
+	}
+
+	parameter_types = (uint32_t*)malloc(param_count * sizeof(uint32_t));
+	if (!parameter_types) {
+		parameter_types_count = 0;
+		return;
+	}
+
+	parameter_types_count = param_count;
+	for (int i = 0; i < param_count; i++) {
+		parameter_types[i] = PQparamtype(result, i);
+	}
+}
+
+void PgSQL_Describe_Prepared_Info::extract_columns(const PGresult* result) {
+	int column_count = PQnfields(result);
+	if (column_count <= 0) {
+		columns = NULL;
+		columns_count = 0;
+		return;
+	}
+
+	columns = (ColumnMetadata*)malloc(column_count * sizeof(ColumnMetadata));
+	if (!columns) {
+		columns_count = 0;
+		return;
+	}
+
+	columns_count = column_count;
+	for (int i = 0; i < column_count; i++) {
+		const char* name = PQfname(result, i);
+		columns[i].name = name ? strdup(name) : NULL;
+		columns[i].table_oid = PQftable(result, i);
+		columns[i].column_index = (uint16_t)PQftablecol(result, i);
+		columns[i].type_oid = PQftype(result, i);
+		columns[i].length = PQfsize(result, i);
+		columns[i].type_modifier = PQfmod(result, i);
+		columns[i].format = (uint16_t)PQfformat(result, i);
+	}
+}
+
 PgSQL_Query_Result::PgSQL_Query_Result() {
 	buffer = NULL;
 	transfer_started = false;
@@ -2587,5 +2662,101 @@ bool PgSQL_Parse_Message::parse(PtrSize_t& pkt) {
 PtrSize_t PgSQL_Parse_Message::detach() {
 	PtrSize_t result = _pkt;
 	memset(this, 0, sizeof(PgSQL_Parse_Message));
+	return result;
+}
+
+
+PgSQL_Describe_Message::PgSQL_Describe_Message() {
+}
+
+PgSQL_Describe_Message::~PgSQL_Describe_Message() {
+	if (_pkt.ptr) {
+		free(_pkt.ptr);
+		_pkt.ptr = nullptr;
+		_pkt.size = 0;
+	}
+}
+
+bool PgSQL_Describe_Message::parse(PtrSize_t& pkt) {
+
+	if (pkt.ptr == nullptr || pkt.size == 0) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "No packet to parse\n");
+		return false;
+	}
+
+	if (pkt.size < 5) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Packet too short for parsing: %u bytes\n", pkt.size);
+		return false;
+	}
+
+	unsigned char* packet = (unsigned char*)pkt.ptr;
+	uint32_t pkt_len = pkt.size;
+	uint32_t payload_len = 0;
+	uint32_t offset = 0;
+
+	if (packet[offset++] != 'D') { // 'D' is the packet type for Describe
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Invalid packet type: expected 'D'\n");
+		return false;
+	}
+
+	// Read the length of the packet (4 bytes, big-endian)
+	if (!get_uint32be(packet + offset, &payload_len)) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Failed to read packet size\n");
+		return false;
+	}
+	offset += sizeof(uint32_t);
+
+	// Check if the reported packet length matches the provided length
+	if (payload_len != pkt_len - 1) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Packet size too small: %u bytes\n", pkt.size);
+		return false;
+	}
+
+	// Validate remaining length for statement name (at least 1 byte for null-terminated string)
+	if (offset >= pkt_len) {
+		return false;  // Not enough data for statement name
+	}
+
+	// Read the statement type (1 byte)
+	stmt_type = *(reinterpret_cast<uint8_t*>(packet + offset));
+	offset += sizeof(uint8_t);
+
+	// Validate that the statement type is either 'S' (statement) or 'P' (portal)
+	if (stmt_type != 'S' && stmt_type != 'P') {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Invalid statement type: expected 'S' or 'P', got '%c'\n", stmt_type);
+		return false;
+	}
+
+	// Validate remaining length for statement name (at least 1 byte for null-terminated string)
+	if (offset >= pkt_len) {
+		return false;  // Not enough data for statement name
+	}
+
+	// Read the statement name (null-terminated string)
+	stmt_name = reinterpret_cast<char*>(packet + offset);
+	size_t stmt_name_len = strnlen(stmt_name, pkt_len - offset);
+
+	// Ensure there is a null-terminator within the packet length
+	if (offset + stmt_name_len >= pkt_len) {
+		return false;  // No null-terminator found within the packet bounds
+	}
+
+	offset += stmt_name_len + 1; // Move past the null-terminated statement name
+
+	// Validate remaining length for query string (at least 1 byte for null-terminated string)
+	if (offset != pkt_len) {
+		return false;
+	}
+
+	// take "ownership"
+	_pkt = pkt;
+
+	// If we reach here, the packet is valid and fully parsed
+	return true;
+}
+
+PtrSize_t PgSQL_Describe_Message::detach() {
+	PtrSize_t result = _pkt;
+	memset(this, 0, sizeof(PgSQL_Describe_Message));
 	return result;
 }

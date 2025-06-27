@@ -4790,6 +4790,9 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 				case PROCESSING_STMT_EXECUTE:
 					pta[11] = strdup("Execute");
 					break;
+				case PROCESSING_STMT_DESCRIBE:
+					pta[11] = strdup("Describe");
+					break;
 				case PROCESSING_STMT_PREPARE:
 					pta[11] = strdup("Prepare");
 					break;

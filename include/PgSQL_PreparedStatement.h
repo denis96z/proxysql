@@ -56,105 +56,14 @@ class PgSQL_STMT_Global_info {
 	uint64_t statement_id;
 	char* first_comment;
 	uint64_t total_mem_usage;
-	struct describe {
-		uint16_t num_fields;
-		uint16_t num_params;
-		uint8_t flags;
-	} describe;
+	PgSQL_Describe_Prepared_Info* stmt_metadata;
 
 	bool is_select_NOT_for_update;
 	PgSQL_STMT_Global_info(uint64_t id, char *u, char *s, char *q, unsigned int ql, char *fc, uint64_t _h);
-	void update_metadata(MYSQL_STMT *stmt);
+	void update_stmt_metadata(PgSQL_Describe_Prepared_Info** new_stmt_metadata);
 	~PgSQL_STMT_Global_info();
 	void calculate_mem_usage();
 };
-
-#if 0
-// stmt_execute_metadata_t represent metadata required to run STMT_EXECUTE
-class pgsql_stmt_execute_metadata_t {
-	public:
-	uint32_t size;
-	uint32_t stmt_id;
-	uint8_t flags;
-	uint16_t num_params;
-	MYSQL_BIND *binds;
-	my_bool *is_nulls;
-	unsigned long *lengths;
-	void *pkt;
-	pgsql_stmt_execute_metadata_t() {
-		size = 0;
-		stmt_id = 0;
-		binds=NULL;
-		is_nulls=NULL;
-		lengths=NULL;
-		pkt=NULL;
-	}
-	~pgsql_stmt_execute_metadata_t() {
-		if (binds)
-			free(binds);
-		binds = NULL;
-		if (is_nulls)
-			free(is_nulls);
-		is_nulls = NULL;
-		if (lengths)
-			free(lengths);
-		lengths = NULL;
-		size = 0;
-		stmt_id = 0;
-		if (pkt) {
-			free(pkt);
-			pkt = NULL;
-		}
-	}
-};
-
-// server side, metadata related to STMT_EXECUTE are stored in MYSQL_STMT itself
-// client side, they are stored in stmt_execute_metadata_t
-// MySQL_STMTs_meta maps stmt_execute_metadata_t with stmt_id
-class PgSQL_STMTs_meta {
-	private:
-	unsigned int num_entries;
-	std::map<uint32_t, pgsql_stmt_execute_metadata_t*> m;
-	public:
-		PgSQL_STMTs_meta() {
-		num_entries=0;
-	}
-	~PgSQL_STMTs_meta() {
-		for (std::map<uint32_t, pgsql_stmt_execute_metadata_t*>::iterator it=m.begin(); it!=m.end(); ++it) {
-			pgsql_stmt_execute_metadata_t*sem=it->second;
-			delete sem;
-		}
-	}
-	// we declare it here to be inline
-	void insert(uint32_t global_statement_id, pgsql_stmt_execute_metadata_t*stmt_meta) {
-		std::pair<std::map<uint32_t, pgsql_stmt_execute_metadata_t*>::iterator,bool> ret;
-		ret=m.insert(std::make_pair(global_statement_id, stmt_meta));
-		if (ret.second==true) {
-			num_entries++;
-		}
-	}
-	// we declare it here to be inline
-	pgsql_stmt_execute_metadata_t* find(uint32_t global_statement_id) {
-		auto s=m.find(global_statement_id);
-		if (s!=m.end()) {	// found
-			return s->second;
-		}
-		return NULL;	// not found
-	}
-
-	void erase(uint32_t global_statement_id) {
-		auto s=m.find(global_statement_id);
-		if (s!=m.end()) { // found
-			pgsql_stmt_execute_metadata_t*sem=s->second;
-			delete sem;
-			num_entries--;
-			m.erase(s);
-		}
-	}
-};
-#endif
-
-// class MySQL_STMTs_local associates a global statement ID with a local statement ID for a specific connection
 
 class PgSQL_STMTs_local_v14 {
 private:
@@ -193,6 +102,7 @@ public:
 	uint64_t compute_hash(char *user, char *schema, char *query, unsigned int query_length);
 	uint32_t generate_new_backend_stmt_id();
 	uint64_t find_global_id_from_stmt_name(const std::string& client_stmt_name);
+	uint32_t find_backend_stmt_id_from_global_id(uint64_t global_id);
 	bool client_close(const std::string& stmt_name);
 };
 
@@ -203,8 +113,8 @@ private:
 	uint64_t num_stmt_with_ref_client_count_zero;
 	uint64_t num_stmt_with_ref_server_count_zero;
 	pthread_rwlock_t rwlock_;
-	std::map<uint64_t, PgSQL_STMT_Global_info *> map_stmt_id_to_info;	// map using statement id
-	std::map<uint64_t, PgSQL_STMT_Global_info *> map_stmt_hash_to_info;	// map using hashes
+	std::map<uint64_t, PgSQL_STMT_Global_info*> map_stmt_id_to_info;	// map using statement id
+	std::map<uint64_t, PgSQL_STMT_Global_info*> map_stmt_hash_to_info;	// map using hashes
 	std::stack<uint64_t> free_stmt_ids;
 	struct {
 		uint64_t c_unique;
@@ -218,11 +128,11 @@ private:
 public:
 	PgSQL_STMT_Manager_v14();
 	~PgSQL_STMT_Manager_v14();
-	PgSQL_STMT_Global_info * find_prepared_statement_by_hash(uint64_t hash);
-	PgSQL_STMT_Global_info * find_prepared_statement_by_stmt_id(uint64_t id, bool lock=true);
-	void rdlock() { pthread_rwlock_rdlock(&rwlock_); }
-	void wrlock() { pthread_rwlock_wrlock(&rwlock_); }
-	void unlock() { pthread_rwlock_unlock(&rwlock_); }
+	PgSQL_STMT_Global_info* find_prepared_statement_by_hash(uint64_t hash, bool lock=true);
+	PgSQL_STMT_Global_info* find_prepared_statement_by_stmt_id(uint64_t id, bool lock=true);
+	inline void rdlock() { pthread_rwlock_rdlock(&rwlock_); }
+	inline void wrlock() { pthread_rwlock_wrlock(&rwlock_); }
+	inline void unlock() { pthread_rwlock_unlock(&rwlock_); }
 	void ref_count_client(uint64_t _stmt, int _v, bool lock=true);
 	void ref_count_server(uint64_t _stmt, int _v, bool lock=true);
 	PgSQL_STMT_Global_info * add_prepared_statement(char *u, char *s, char *q, unsigned int ql, char *fc, bool lock=true);

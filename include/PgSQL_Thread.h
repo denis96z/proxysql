@@ -76,6 +76,7 @@ enum PgSQL_Thread_status_variable {
 	st_var_backend_stmt_execute,
 	st_var_backend_stmt_close,
 	st_var_frontend_stmt_prepare,
+	st_var_frontend_stmt_describe,
 	st_var_frontend_stmt_execute,
 	st_var_frontend_stmt_close,
 	st_var_queries,

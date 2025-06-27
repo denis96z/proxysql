@@ -7,7 +7,7 @@
 #endif
 
 #include "PgSQL_PreparedStatement.h"
-#include "MySQL_Protocol.h"
+#include "PgSQL_Protocol.h"
 
 //extern MySQL_STMT_Manager *GloMyStmt;
 //static uint32_t add_prepared_statement_calls = 0;
@@ -74,6 +74,7 @@ PgSQL_STMT_Global_info::PgSQL_STMT_Global_info(uint64_t id,
 	ref_count_client = 0;
 	ref_count_server = 0;
 	digest_text = NULL;
+	stmt_metadata = nullptr;
 	username = strdup(u);
 	schemaname = strdup(s);
 	query = (char *)malloc(ql + 1);
@@ -184,205 +185,74 @@ __exit_PgSQL_STMT_Global_info___search_select:
 
 void PgSQL_STMT_Global_info::calculate_mem_usage() {
 	total_mem_usage = sizeof(PgSQL_STMT_Global_info) +
-		query_length + 1;// +
-		//(ref_count_client * 24) +
-		//(ref_count_server * 24);
+		query_length + 1;
 
 	if (username) total_mem_usage += strlen(username) + 1;
 	if (schemaname) total_mem_usage += strlen(schemaname) + 1;
 	if (first_comment) total_mem_usage += strlen(first_comment) + 1;
 	if (digest_text) total_mem_usage += strlen(digest_text) + 1;
+
+	if (stmt_metadata) {
+		total_mem_usage += sizeof(PgSQL_Describe_Prepared_Info);
+		total_mem_usage += stmt_metadata->parameter_types_count * sizeof(uint32_t) ;
+		total_mem_usage += stmt_metadata->columns_count * sizeof(ColumnMetadata);
+		for (uint16_t i = 0; i < stmt_metadata->columns_count; i++) {
+			if (stmt_metadata->columns[i].name)
+				total_mem_usage += strlen(stmt_metadata->columns[i].name) + 1;
+		}
+	}
 }
 
-void PgSQL_STMT_Global_info::update_metadata(MYSQL_STMT *stmt) {
+void PgSQL_STMT_Global_info::update_stmt_metadata(PgSQL_Describe_Prepared_Info** new_stmt_metadata) {
 
 	bool need_refresh = false;
 	pthread_rwlock_wrlock(&rwlock_);
-	/* if (
-		(num_params != stmt->param_count)
-		||
-		(num_columns != stmt->field_count)
-	) {
-		need_refresh = true;
-	}
-	for (i = 0; i < num_columns; i++) {
-		if (need_refresh == false) { // don't bother to check if need_refresh == true
-			bool ok = true;
-			MYSQL_FIELD *fs = &(stmt->fields[i]);
-			MYSQL_FIELD *fd = fields[i];
-			if (ok) {
-				ok = false;
-				if (fd->name == NULL && fs->name == NULL) {
-					ok = true;
-				} else {
-					if (fd->name && fs->name && strcmp(fd->name,fs->name)==0) {
-						ok = true;
-					}
-				}
-			}
-			if (ok) {
-				ok = false;
-				if (fd->org_name == NULL && fs->org_name == NULL) {
-					ok = true;
-				} else {
-					if (fd->org_name && fs->org_name && strcmp(fd->org_name,fs->org_name)==0) {
-						ok = true;
-					}
-				}
-			}
-			if (ok) {
-				ok = false;
-				if (fd->table == NULL && fs->table == NULL) {
-					ok = true;
-				} else {
-					if (fd->table && fs->table && strcmp(fd->table,fs->table)==0) {
-						ok = true;
-					}
-				}
-			}
-			if (ok) {
-				ok = false;
-				if (fd->org_table == NULL && fs->org_table == NULL) {
-					ok = true;
-				} else {
-					if (fd->org_table && fs->org_table && strcmp(fd->org_table,fs->org_table)==0) {
-						ok = true;
-					}
-				}
-			}
-			if (ok) {
-				ok = false;
-				if (fd->db == NULL && fs->db == NULL) {
-					ok = true;
-				} else {
-					if (fd->db && fs->db && strcmp(fd->db,fs->db)==0) {
-						ok = true;
-					}
-				}
-			}
-			if (ok) {
-				ok = false;
-				if (fd->catalog == NULL && fs->catalog == NULL) {
-					ok = true;
-				} else {
-					if (fd->catalog && fs->catalog && strcmp(fd->catalog,fs->catalog)==0) {
-						ok = true;
-					}
-				}
-			}
-			if (ok) {
-				ok = false;
-				if (fd->def == NULL && fs->def == NULL) {
-					ok = true;
-				} else {
-					if (fd->def && fs->def && strcmp(fd->def,fs->def)==0) {
-						ok = true;
-					}
-				}
-			}
-			if (ok == false) {
-				need_refresh = true;
-			}
-		}
-	}
-	if (need_refresh) {
-		if (digest_text && strncasecmp(digest_text, "EXPLAIN", strlen("EXPLAIN"))==0) {
-			// do not print any message in case of EXPLAIN
-		} else {
-			proxy_warning("Updating metadata for stmt %lu , user %s, query %s\n", statement_id, username, query);
-		}
-// from here is copied from destructor
-		if (num_columns) {
-			uint16_t i;
-			for (i = 0; i < num_columns; i++) {
-				MYSQL_FIELD *f = fields[i];
-				if (f->name) {
-					free(f->name);
-					f->name = NULL;
-				}
-				if (f->org_name) {
-					free(f->org_name);
-					f->org_name = NULL;
-				}
-				if (f->table) {
-					free(f->table);
-					f->table = NULL;
-				}
-				if (f->org_table) {
-					free(f->org_table);
-					f->org_table = NULL;
-				}
-				if (f->db) {
-					free(f->db);
-					f->db = NULL;
-				}
-				if (f->catalog) {
-					free(f->catalog);
-					f->catalog = NULL;
-				}
-				if (f->def) {
-					free(f->def);
-					f->def = NULL;
-				}
-				free(fields[i]);
-			}
-			free(fields);
-			fields = NULL;
-		}
-		if (num_params) {
-			uint16_t i;
-			for (i = 0; i < num_params; i++) {
-				free(params[i]);
-			}
-			free(params);
-			params = NULL;
-		}
-// till here is copied from destructor
 
-// from here is copied from constructor
-		num_params = stmt->param_count;
-		num_columns = stmt->field_count;
-		fields = NULL;
-		if (num_columns) {
-			fields = (MYSQL_FIELD **)malloc(num_columns * sizeof(MYSQL_FIELD *));
-			uint16_t i;
-			for (i = 0; i < num_columns; i++) {
-				fields[i] = (MYSQL_FIELD *)malloc(sizeof(MYSQL_FIELD));
-				MYSQL_FIELD *fs = &(stmt->fields[i]);
-				MYSQL_FIELD *fd = fields[i];
-				// first copy all fields
-				memcpy(fd, fs, sizeof(MYSQL_FIELD));
-				// then duplicate strings
-				fd->name = (fs->name ? strdup(fs->name) : NULL);
-				fd->org_name = (fs->org_name ? strdup(fs->org_name) : NULL);
-				fd->table = (fs->table ? strdup(fs->table) : NULL);
-				fd->org_table = (fs->org_table ? strdup(fs->org_table) : NULL);
-				fd->db = (fs->db ? strdup(fs->db) : NULL);
-				fd->catalog = (fs->catalog ? strdup(fs->catalog) : NULL);
-				fd->def = (fs->def ? strdup(fs->def) : NULL);
+	if (stmt_metadata == nullptr) {
+		stmt_metadata = *new_stmt_metadata;
+		*new_stmt_metadata = NULL;
+		pthread_rwlock_unlock(&rwlock_);
+		return;
+	}
+
+	if (stmt_metadata->parameter_types_count != (*new_stmt_metadata)->parameter_types_count) {
+		need_refresh = true;
+	} else {
+		for (size_t i = 0; i < (*new_stmt_metadata)->parameter_types_count; i++) {
+			if (stmt_metadata->parameter_types[i] != (*new_stmt_metadata)->parameter_types[i]) {
+				need_refresh = true;
+				break;
 			}
 		}
-	
-		params = NULL;
-		if (num_params == 2) {
-			PROXY_TRACE();
-		}
-		if (num_params) {
-			params = (MYSQL_BIND **)malloc(num_params * sizeof(MYSQL_BIND *));
-			uint16_t i;
-			for (i = 0; i < num_params; i++) {
-				params[i] = (MYSQL_BIND *)malloc(sizeof(MYSQL_BIND));
-				// MYSQL_BIND *ps=&(stmt->params[i]);
-				// MYSQL_BIND *pd=params[i];
-				// copy all params
-				// memcpy(pd,ps,sizeof(MYSQL_BIND));
-				memset(params[i], 0, sizeof(MYSQL_BIND));
+	}
+
+	if (need_refresh == false) {
+		if (stmt_metadata->columns_count != (*new_stmt_metadata)->columns_count) {
+			need_refresh = true;
+		} else {
+			for (size_t i = 0; i < (*new_stmt_metadata)->columns_count; ++i) {
+				const auto& current_col = stmt_metadata->columns[i];
+				const auto& update_col = (*new_stmt_metadata)->columns[i];
+				if (current_col.name != update_col.name ||
+					current_col.table_oid != update_col.table_oid ||
+					current_col.column_index != update_col.column_index ||
+					current_col.type_oid != update_col.type_oid ||
+					current_col.length != update_col.length ||
+					current_col.type_modifier != update_col.type_modifier ||
+					current_col.format != update_col.format) {
+					need_refresh = true;
+					break;
+				}
 			}
 		}
-		
-// till here is copied from constructor
+	}
+
+	if (need_refresh) {
+		delete stmt_metadata;
+		stmt_metadata = *new_stmt_metadata;
+		*new_stmt_metadata = NULL;
 		calculate_mem_usage();
-	}*/
+	}
 	pthread_rwlock_unlock(&rwlock_);
 }
 
@@ -393,72 +263,26 @@ PgSQL_STMT_Global_info::~PgSQL_STMT_Global_info() {
 	if (first_comment) {
 		free(first_comment);
 	}
-	/*if (num_columns) {
-		uint16_t i;
-		for (i = 0; i < num_columns; i++) {
-			MYSQL_FIELD *f = fields[i];
-			if (f->name) {
-				free(f->name);
-				f->name = NULL;
-			}
-			if (f->org_name) {
-				free(f->org_name);
-				f->org_name = NULL;
-			}
-			if (f->table) {
-				free(f->table);
-				f->table = NULL;
-			}
-			if (f->org_table) {
-				free(f->org_table);
-				f->org_table = NULL;
-			}
-			if (f->db) {
-				free(f->db);
-				f->db = NULL;
-			}
-			if (f->catalog) {
-				free(f->catalog);
-				f->catalog = NULL;
-			}
-			if (f->def) {
-				free(f->def);
-				f->def = NULL;
-			}
-			free(fields[i]);
-		}
-		free(fields);
-		fields = NULL;
-	}
-
-	if (num_params) {
-		uint16_t i;
-		for (i = 0; i < num_params; i++) {
-			free(params[i]);
-		}
-		free(params);
-		params = NULL;
-	}
-	*/
 	if (digest_text) {
 		free(digest_text);
 		digest_text = NULL;
 	}
+	if (stmt_metadata) {
+		delete stmt_metadata;
+		stmt_metadata = nullptr;
+	}
+	pthread_rwlock_destroy(&rwlock_);
 }
 
 void PgSQL_STMTs_local_v14::backend_insert(uint64_t global_stmt_id, uint32_t backend_stmt_id) {
-	//std::pair<std::map<uint64_t, MYSQL_STMT *>::iterator, bool> ret;
-	//ret = global_stmt_to_backend_stmt.insert(std::make_pair(global_statement_id, stmt));
 	global_stmt_to_backend_ids.insert(std::make_pair(global_stmt_id, backend_stmt_id));
 	backend_stmt_to_global_ids.insert(std::make_pair(backend_stmt_id,global_stmt_id));
-	// note: backend_insert() is always called after add_prepared_statement()
-	// for this reason, we will the ref count increase in add_prepared_statement()
-	// GloPgStmt->ref_count_client(global_statement_id, 1);
 }
 
 void PgSQL_STMTs_local_v14::client_insert(uint64_t global_stmt_id, const std::string& client_stmt_name) {
 	stmt_name_to_global_ids.insert(std::make_pair(client_stmt_name, global_stmt_id));
 	global_id_to_stmt_names.insert(std::make_pair(global_stmt_id, client_stmt_name));
+	GloPgStmt->ref_count_client(global_stmt_id, 1, false); // do not lock!
 }
 
 uint64_t PgSQL_STMTs_local_v14::compute_hash(char *user,
@@ -472,12 +296,7 @@ uint64_t PgSQL_STMTs_local_v14::compute_hash(char *user,
 PgSQL_STMT_Manager_v14::PgSQL_STMT_Manager_v14() {
 	last_purge_time = time(NULL);
 	pthread_rwlock_init(&rwlock_, NULL);
-	map_stmt_id_to_info= std::map<uint64_t, PgSQL_STMT_Global_info *>();       // map using statement id
-	map_stmt_hash_to_info = std::map<uint64_t, PgSQL_STMT_Global_info *>();     // map using hashes
-	free_stmt_ids = std::stack<uint64_t> ();
-
-	next_statement_id =
-	    1;  // we initialize this as 1 because we 0 is not allowed
+	next_statement_id = 1;  // we initialize this as 1 because we 0 is not allowed
 	num_stmt_with_ref_client_count_zero = 0;
 	num_stmt_with_ref_server_count_zero = 0;
 	statuses.c_unique = 0;
@@ -619,11 +438,18 @@ PgSQL_STMTs_local_v14::~PgSQL_STMTs_local_v14() {
 }
 
 
-PgSQL_STMT_Global_info *PgSQL_STMT_Manager_v14::find_prepared_statement_by_hash(uint64_t hash) {
+PgSQL_STMT_Global_info *PgSQL_STMT_Manager_v14::find_prepared_statement_by_hash(uint64_t hash, bool lock) {
 	PgSQL_STMT_Global_info *ret = NULL;  // assume we do not find it
+	if (lock) {
+		rdlock();
+	}
 	auto s = map_stmt_hash_to_info.find(hash);
 	if (s != map_stmt_hash_to_info.end()) {
 		ret = s->second;
+	}
+
+	if (lock) {
+		unlock();
 	}
 	return ret;
 }
@@ -632,7 +458,7 @@ PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::find_prepared_statement_by_stmt_
     uint64_t id, bool lock) {
 	PgSQL_STMT_Global_info*ret = NULL;  // assume we do not find it
 	if (lock) {
-		pthread_rwlock_wrlock(&rwlock_);
+		rdlock();
 	}
 
 	auto s = map_stmt_id_to_info.find(id);
@@ -641,7 +467,7 @@ PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::find_prepared_statement_by_stmt_
 	}
 
 	if (lock) {
-		pthread_rwlock_unlock(&rwlock_);
+		unlock();
 	}
 	return ret;
 }
@@ -664,6 +490,14 @@ uint64_t PgSQL_STMTs_local_v14::find_global_id_from_stmt_name(const std::string&
 		ret = s->second;
 	}
 	return ret;
+}
+
+uint32_t PgSQL_STMTs_local_v14::find_backend_stmt_id_from_global_id(uint64_t global_id) {
+	auto s = global_stmt_to_backend_ids.find(global_id);
+	if (s != global_stmt_to_backend_ids.end()) {
+		return s->second;
+	}
+	return 0;  // not found
 }
 
 bool PgSQL_STMTs_local_v14::client_close(const std::string& stmt_name) {
@@ -692,14 +526,14 @@ PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::add_prepared_statement(
 	uint64_t hash = stmt_compute_hash(
 		u, s, q, ql);  // this identifies the prepared statement
 	if (lock) {
-		pthread_rwlock_wrlock(&rwlock_);
+		wrlock();
 	}
 	// try to find the statement
 	auto f = map_stmt_hash_to_info.find(hash);
 	if (f != map_stmt_hash_to_info.end()) {
 		// found it!
 		ret = f->second;
-		ret->update_metadata(nullptr);
+		//ret->update_metadata(nullptr, false);
 	} else {
 		uint64_t next_id = 0;
 		if (!free_stmt_ids.empty()) {
@@ -767,14 +601,14 @@ void PgSQL_STMT_Manager_v14::get_metrics(uint64_t *c_unique, uint64_t *c_total,
 	uint64_t s_u = 0;
 	uint64_t s_t = 0;
 #endif
-	pthread_rwlock_wrlock(&rwlock_);
+	wrlock();
 	statuses.cached = map_stmt_id_to_info.size();
 	statuses.c_unique = statuses.cached - num_stmt_with_ref_client_count_zero;
 	statuses.s_unique = statuses.cached - num_stmt_with_ref_server_count_zero;
 #ifdef DEBUG
 	for (std::map<uint64_t, PgSQL_STMT_Global_info *>::iterator it = map_stmt_id_to_info.begin();
 	     it != map_stmt_id_to_info.end(); ++it) {
-		PgSQL_STMT_Global_info *a = it->second;
+		const PgSQL_STMT_Global_info *a = it->second;
 		c++;
 		if (a->ref_count_client) {
 			c_u++;
@@ -894,14 +728,18 @@ SQLite3_result * PgSQL_STMT_Manager_v14::get_prepared_statements_global_infos() 
 	for (std::map<uint64_t, PgSQL_STMT_Global_info *>::iterator it = map_stmt_id_to_info.begin();
 			it != map_stmt_id_to_info.end(); ++it) {
 		PgSQL_STMT_Global_info *a = it->second;
-		PS_global_stats * pgs = new PS_global_stats(a->statement_id,
+		pthread_rwlock_rdlock(&a->rwlock_);
+		const PgSQL_Describe_Prepared_Info* stmt_metadata = a->stmt_metadata;
+		PS_global_stats* pgs = new PS_global_stats(a->statement_id,
 			a->schemaname, a->username,
 			a->hash, a->query,
-			a->ref_count_client, a->ref_count_server, 0, 0);
-			char **pta = pgs->get_row();
-			result->add_row(pta);
-			pgs->free_row(pta);
-			delete pgs;
+			a->ref_count_client, a->ref_count_server, 
+			stmt_metadata ? stmt_metadata->columns_count : 0, stmt_metadata ? stmt_metadata->parameter_types_count : 0);
+		pthread_rwlock_unlock(&a->rwlock_);
+		char **pta = pgs->get_row();
+		result->add_row(pta);
+		pgs->free_row(pta);
+		delete pgs;
 	}
 	unlock();
 	return result;

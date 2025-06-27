@@ -17,8 +17,7 @@
 class PgSQL_Query_Result;
 class PgSQL_ExplicitTxnStateMgr;
 class PgSQL_Parse_Message;
-//#include "../deps/json/json.hpp"
-//using json = nlohmann::json;
+class PgSQL_Describe_Message;
 
 #ifndef PROXYJSON
 #define PROXYJSON
@@ -40,10 +39,11 @@ enum proxysql_session_type {
 };
 */
 
-enum PgSQL_ps_type : uint8_t {
-	PgSQL_ps_type_not_set = 0x0,
-	PgSQL_ps_type_prepare_stmt = 0x1,
-	PgSQL_ps_type_execute_stmt = 0x2
+enum PgSQL_Extended_Query_Type : uint8_t {
+	PGSQL_EXTENDED_QUERY_TYPE_NOT_SET	= 0x0,
+	PGSQL_EXTENDED_QUERY_TYPE_PARSE		= 0x1,
+	PGSQL_EXTENDED_QUERY_TYPE_DESCRIBE	= 0x2,
+	PGSQL_EXTENDED_QUERY_TYPE_EXECUTE	= 0x4,
 };
 
 /* Enumerated types for output format and date order */
@@ -147,30 +147,31 @@ class PgSQL_STMT_Global_info;
 
 class PgSQL_Query_Info {
 public:
-	SQP_par_t QueryParserArgs;
-	PgSQL_Session* sess;
-	unsigned char* QueryPointer;
 	unsigned long long start_time;
 	unsigned long long end_time;
-
-	char* stmt_client_name;
 	uint64_t stmt_global_id;
-	uint64_t stmt_backend_id;
-
-	PgSQL_STMT_Global_info* stmt_info;
-
-	int QueryLength;
-	enum PGSQL_QUERY_command PgQueryCmd;
-	bool bool_is_select_NOT_for_update;
-	bool bool_is_select_NOT_for_update_computed;
-	bool have_affected_rows; // if affected rows is set, last_insert_id is set too
 	uint64_t affected_rows;
 	uint64_t rows_sent;
 	uint64_t waiting_since;
 
+	PgSQL_Session* sess;
+	unsigned char* QueryPointer;
+	char* stmt_client_name;
+	PgSQL_STMT_Global_info* stmt_info;
+
+	SQP_par_t QueryParserArgs;
+
+	uint32_t stmt_backend_id;
+	int QueryLength;
+	enum PGSQL_QUERY_command PgQueryCmd;
+
+	bool bool_is_select_NOT_for_update;
+	bool bool_is_select_NOT_for_update_computed;
+	bool have_affected_rows;
+
 	PgSQL_Query_Info();
 	~PgSQL_Query_Info();
-	void init(unsigned char* _p, int len, bool header = false);
+	
 	void query_parser_init();
 	enum PGSQL_QUERY_command query_parser_command_type();
 	void query_parser_free();
@@ -179,11 +180,14 @@ public:
 	void end();
 	char* get_digest_text();
 	bool is_select_NOT_for_update();
+
+private:
+	void init(unsigned char* _p, int len, bool header = false);
 };
 
 class PgSQL_Session : public Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread> {
 private:
-	using PktType = std::variant<std::unique_ptr<PgSQL_Parse_Message>>;
+	using PktType = std::variant<std::unique_ptr<PgSQL_Parse_Message>,std::unique_ptr<PgSQL_Describe_Message>>;
 
 	std::queue<PktType> pending_packets;
 
@@ -231,14 +235,16 @@ private:
 	void handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_PROCESS_KILL(PtrSize_t*);
 #endif
 
-	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY_qpo(PtrSize_t*, bool* lock_hostgroup, PgSQL_ps_type prepare_stmt_type = PgSQL_ps_type_not_set);
+	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY_qpo(PtrSize_t*, bool* lock_hostgroup, PgSQL_Extended_Query_Type stmt_type = PGSQL_EXTENDED_QUERY_TYPE_NOT_SET);
 
 	void handler___client_DSS_QUERY_SENT___server_DSS_NOT_INITIALIZED__get_connection();
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_PARSE(PtrSize_t& pkt);
+	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_DESCRIBE(PtrSize_t& pkt);
 	int handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC(PtrSize_t& pkt);
 	bool handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params);
-
-	int handle_post_sync_parse_message(PgSQL_Parse_Message* parsse_msg);
+	bool handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params);
+	int handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg);
+	int handle_post_sync_describe_message(PgSQL_Describe_Message* describe_msg);
 
 	//void return_proxysql_internal(PtrSize_t*);
 	bool handler_special_queries(PtrSize_t*, bool* lock_hostgroup);

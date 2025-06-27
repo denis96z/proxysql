@@ -154,6 +154,7 @@ PgSQL_Connection::PgSQL_Connection() {
 	pgsql_result = NULL;
 	query_result = NULL;
 	query_result_reuse = NULL;
+	stmt_metadata_result = NULL;
 	myds = NULL;
 	parent = NULL;
 	fd = -1;
@@ -220,6 +221,12 @@ PgSQL_Connection::~PgSQL_Connection() {
 		delete query_result_reuse;
 		query_result_reuse = NULL;
 	}
+
+	if (stmt_metadata_result) {
+		delete stmt_metadata_result;
+		stmt_metadata_result = NULL;
+	}
+
 	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
 		if (variables[i].value) {
 			free(variables[i].value);
@@ -692,6 +699,9 @@ handler_again:
 				stmt_prepare_cont(event);
 			}
 			if (async_exit_status) {
+				//if (myds->wait_until != 0 && myds->sess->thread->curtime >= myds->wait_until) {
+				//	NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_TIMEOUT);
+				//}
 				next_event(ASYNC_STMT_PREPARE_END);
 				break;
 			}
@@ -711,6 +721,7 @@ handler_again:
 		}
 		break;
 	case ASYNC_STMT_PREPARE_END:
+		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
 		if (is_error_present()) {
 			proxy_error("Failed to prepare statement: %s\n", get_error_code_with_message().c_str());
 			NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_FAILED);
@@ -720,12 +731,61 @@ handler_again:
 		}
 		break;
 	case ASYNC_STMT_PREPARE_FAILED:
-
-		break;
 	case ASYNC_STMT_PREPARE_SUCCESSFUL:
-
 		break;
-	
+
+	case ASYNC_DESCRIBE_PREPARED_START:
+		stmt_describe_prepared_start();
+		if (async_exit_status) {
+			next_event(ASYNC_DESCRIBE_PREPARED_CONT);
+		} else {
+			NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_END);
+		}
+		break;
+	case ASYNC_DESCRIBE_PREPARED_CONT:
+	{
+		if (event) {
+			stmt_describe_prepared_cont(event);
+		}
+		if (async_exit_status) {
+			//if (myds->wait_until != 0 && myds->sess->thread->curtime >= myds->wait_until) {
+			//	NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_TIMEOUT);
+			//}
+			next_event(ASYNC_DESCRIBE_PREPARED_CONT);
+			break;
+		}
+		if (is_error_present()) {
+			NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_END);
+		}
+		PGresult* result = get_result();
+		if (result) {
+			if (PQresultStatus(result) != PGRES_COMMAND_OK) {
+				set_error_from_result(result, PGSQL_ERROR_FIELD_ALL);
+				assert(is_error_present());
+			}
+			if (stmt_metadata_result == NULL) {
+				stmt_metadata_result = new PgSQL_Describe_Prepared_Info();
+			}
+			stmt_metadata_result->populate(result);
+			PQclear(result);
+			NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_CONT);
+		}
+		NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_END);
+	}
+	break;
+	case ASYNC_DESCRIBE_PREPARED_END:
+		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
+		if (is_error_present()) {
+			proxy_error("Failed to describe prepared statement: %s\n", get_error_code_with_message().c_str());
+			NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_FAILED);
+		} else {
+			NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_SUCCESSFUL);
+		}
+		break;
+	case ASYNC_DESCRIBE_PREPARED_SUCCESSFUL:
+	case ASYNC_DESCRIBE_PREPARED_FAILED:
+	//case ASYNC_DESCRIBE_PREPARED_TIMEOUT:
+		break;
 	default:
 		// not implemented yet
 		assert(0); 
@@ -1232,12 +1292,11 @@ int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long l
 				myds->sess->transaction_started_at = myds->sess->thread->curtime;
 			}
 		}
-
 		if (!backend_stmt_name) {
 			async_state_machine = ASYNC_QUERY_START;
 		} else {
 			if (execute_data) {
-				async_state_machine = ASYNC_STMT_EXECUTE_START;
+				async_state_machine = ASYNC_DESCRIBE_PREPARED_START;
 			} else {
 				async_state_machine = ASYNC_STMT_PREPARE_START;
 			}
@@ -1258,16 +1317,18 @@ int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long l
 		compute_unknown_transaction_status();
 		if (is_error_present()) {
 			return -1;
-		}
-		else {
+		} else {
 			return 0;
 		}
 	}
 
 	if (async_state_machine == ASYNC_STMT_PREPARE_SUCCESSFUL || 
-		async_state_machine == ASYNC_STMT_PREPARE_FAILED) {
+		async_state_machine == ASYNC_STMT_PREPARE_FAILED || 
+		async_state_machine == ASYNC_DESCRIBE_PREPARED_SUCCESSFUL ||
+		async_state_machine == ASYNC_DESCRIBE_PREPARED_FAILED) {
 		compute_unknown_transaction_status();
-		if (async_state_machine == ASYNC_STMT_PREPARE_FAILED) {
+		if (async_state_machine == ASYNC_STMT_PREPARE_FAILED ||
+			async_state_machine == ASYNC_DESCRIBE_PREPARED_FAILED) {
 			return -1;
 		} else {
 			return 0;
@@ -1554,6 +1615,47 @@ void PgSQL_Connection::stmt_prepare_cont(short event) {
 		return;
 	}
 
+	pgsql_result = PQgetResult(pgsql_conn);
+}
+
+void PgSQL_Connection::stmt_describe_prepared_start() {
+	PROXY_TRACE();
+	reset_error();
+	processing_multi_statement = false;
+	async_exit_status = PG_EVENT_NONE;
+	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
+
+	// We need to send a describe prepared statement to get the parameter types
+	if (PQsendDescribePrepared(pgsql_conn, query.backend_stmt_name) == 0) {
+		set_error_from_PQerrorMessage();
+		proxy_error("Failed to send describe prepared. %s\n", get_error_code_with_message().c_str());
+		return;
+	}
+	flush();
+}
+void PgSQL_Connection::stmt_describe_prepared_cont(short event) {
+	PROXY_TRACE();
+	proxy_debug(PROXY_DEBUG_MYSQL_PROTOCOL, 6, "event=%d\n", event);
+	async_exit_status = PG_EVENT_NONE;
+	if (event & POLLOUT) {
+		flush();
+		return;
+	}
+	if (PQconsumeInput(pgsql_conn) == 0) {
+		/* We will only set the error if we didn't capture error in last call. If is_error_present is true,
+		 * it indicates that an error was already captured during a previous PQconsumeInput call,
+		 * and we do not want to overwrite that information.
+		 */
+		if (is_error_present() == false) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to consume input. %s\n", get_error_code_with_message().c_str());
+		}
+		return;
+	}
+	if (PQisBusy(pgsql_conn)) {
+		async_exit_status = PG_EVENT_READ;
+		return;
+	}
 	pgsql_result = PQgetResult(pgsql_conn);
 }
 

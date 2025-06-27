@@ -13,6 +13,7 @@
 class PgSQL_SrvC;
 class PgSQL_Query_Result;
 class PgSQL_STMTs_local_v14;
+class PgSQL_Describe_Prepared_Info;
 //#define STATUS_MYSQL_CONNECTION_TRANSACTION          0x00000001 // DEPRECATED
 #define STATUS_MYSQL_CONNECTION_COMPRESSION          0x00000002
 #define STATUS_MYSQL_CONNECTION_USER_VARIABLE        0x00000004
@@ -257,6 +258,8 @@ public:
 	void fetch_result_cont(short event);
 	void stmt_prepare_start();
 	void stmt_prepare_cont(short event);
+	void stmt_describe_prepared_start();
+	void stmt_describe_prepared_cont(short event);
 	//void stmt_execute_start();
 	//void stmt_execute_cont(short event);
 	void reset_session_start();
@@ -493,6 +496,7 @@ public:
 	PSresult  ps_result;
 	PgSQL_Query_Result* query_result;
 	PgSQL_Query_Result* query_result_reuse;
+	PgSQL_Describe_Prepared_Info* stmt_metadata_result;
 	unsigned long long creation_time;
 	unsigned long long last_time_used;
 	unsigned long long timeout;
