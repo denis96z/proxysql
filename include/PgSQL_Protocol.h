@@ -238,6 +238,11 @@ public:
 		//put_uint32(4);
 		write_generic('1', "");
 	}
+	void write_CloseCompletion() {
+		//put_char('3');
+		//put_uint32(4);
+		write_generic('3', "");
+	}
 	void write_RowDescription(const char* tupdesc, ...);
 	void write_DataRow(const char* tupdesc, ...);
 
@@ -309,6 +314,29 @@ public:
 	bool parse(PtrSize_t& pkt);
 	PtrSize_t detach();
 
+private:
+	PtrSize_t _pkt = {};
+};
+
+//create close statement message 
+class PgSQL_Close_Message {
+public:
+	PgSQL_Close_Message();
+	~PgSQL_Close_Message();
+	uint8_t stmt_type = 0;		// 'S' for statement, 'P' for portal
+	const char* stmt_name = NULL;	// The name of the prepared statement or portal
+	/**
+	 * @brief Parses the PgSQL_Close_Message from the provided packet.
+	 *
+	 * This method extracts the statement type and name from the packet and
+	 * initializes the internal state of the PgSQL_Close_Message object.
+	 *
+	 * @param pkt The packet containing the PgSQL_Close_Message data.
+	 *
+	 * @return True if parsing was successful, false otherwise.
+	 */
+	bool parse(PtrSize_t& pkt);
+	PtrSize_t detach();
 private:
 	PtrSize_t _pkt = {};
 };
@@ -800,6 +828,7 @@ public:
 	bool generate_parse_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr = NULL);
 	bool generate_ready_for_query_packet(bool send, char trx_state, PtrSize_t* _ptr = NULL);
 	bool generate_describe_completion_packet(bool send, bool ready, const PgSQL_Describe_Prepared_Info* desc, char trx_state, PtrSize_t* _ptr = NULL);
+	bool generate_close_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr = NULL);
 
 	// temporary overriding generate_pkt_OK to avoid crash. FIXME remove this
 	bool generate_pkt_OK(bool send, void** ptr, unsigned int* len, uint8_t sequence_id, unsigned int affected_rows, 

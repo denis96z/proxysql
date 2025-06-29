@@ -1644,6 +1644,31 @@ bool PgSQL_Protocol::generate_describe_completion_packet(bool send, bool ready, 
 	return true;
 }
 
+//generate close statment completion packet
+bool PgSQL_Protocol::generate_close_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr) {
+	// to avoid memory leak
+	assert(send == true || _ptr);
+	PG_pkt pgpkt{};
+	if (ready == true) {
+		pgpkt.set_multi_pkt_mode(true);
+	}
+	// Close completion message
+	pgpkt.write_CloseCompletion();
+	if (ready == true) {
+		pgpkt.write_ReadyForQuery(trx_state);
+		pgpkt.set_multi_pkt_mode(false);
+	}
+	auto buff = pgpkt.detach();
+	if (send == true) {
+		(*myds)->PSarrayOUT->add((void*)buff.first, buff.second);
+	}
+	else {
+		_ptr->ptr = buff.first;
+		_ptr->size = buff.second;
+	}
+	return true;
+}
+
 bool PgSQL_Protocol::generate_parse_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr) {
 	// to avoid memory leak
 	assert(send == true || _ptr);
@@ -2758,5 +2783,81 @@ bool PgSQL_Describe_Message::parse(PtrSize_t& pkt) {
 PtrSize_t PgSQL_Describe_Message::detach() {
 	PtrSize_t result = _pkt;
 	memset(this, 0, sizeof(PgSQL_Describe_Message));
+	return result;
+}
+
+// write definition of pgsql_close_message
+PgSQL_Close_Message::PgSQL_Close_Message() {
+}
+
+PgSQL_Close_Message::~PgSQL_Close_Message() {
+	if (_pkt.ptr) {
+		free(_pkt.ptr);
+		_pkt.ptr = nullptr;
+		_pkt.size = 0;
+	}
+}
+
+bool PgSQL_Close_Message::parse(PtrSize_t& pkt) {
+	if (pkt.ptr == nullptr || pkt.size == 0) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "No packet to parse\n");
+		return false;
+	}
+	if (pkt.size < 5) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Packet too short for parsing: %u bytes\n", pkt.size);
+		return false;
+	}
+	unsigned char* packet = (unsigned char*)pkt.ptr;
+	uint32_t pkt_len = pkt.size;
+	uint32_t payload_len = 0;
+	uint32_t offset = 0;
+	if (packet[offset++] != 'C') { // 'C' is the packet type for Close
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Invalid packet type: expected 'C'\n");
+		return false;
+	}
+	// Read the length of the packet (4 bytes, big-endian)
+	if (!get_uint32be(packet + offset, &payload_len)) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Failed to read packet size\n");
+		return false;
+	}
+	offset += sizeof(uint32_t);
+	// Check if the reported packet length matches the provided length
+	if (payload_len != pkt_len - 1) {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Packet size too small: %u bytes\n", pkt.size);
+		return false;
+	}
+	// Read the statement type (1 byte)
+	stmt_type = *(reinterpret_cast<uint8_t*>(packet + offset));
+	offset += sizeof(uint8_t);
+	// Validate that the statement type is either 'S' (statement) or 'P' (portal)
+	if (stmt_type != 'S' && stmt_type != 'P') {
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Invalid statement type: expected 'S' or 'P', got '%c'\n", stmt_type);
+		return false;
+	}
+	// Validate remaining length for statement name (at least 1 byte for null-terminated string)
+	if (offset >= pkt_len) {
+		return false;  // Not enough data for statement name
+	}
+	// Read the statement name (null-terminated string)
+	stmt_name = reinterpret_cast<char*>(packet + offset);
+	size_t stmt_name_len = strnlen(stmt_name, pkt_len - offset);
+	// Ensure there is a null-terminator within the packet length
+	if (offset + stmt_name_len >= pkt_len) {
+		return false;  // No null-terminator found within the packet bounds
+	}
+	offset += stmt_name_len + 1; // Move past the null-terminated statement name
+
+	if (offset != pkt_len) {
+		return false;
+	}
+	// take "ownership"
+	_pkt = pkt;
+	// If we reach here, the packet is valid and fully parsed
+	return true;
+}
+
+PtrSize_t PgSQL_Close_Message::detach() {
+	PtrSize_t result = _pkt;
+	memset(this, 0, sizeof(PgSQL_Close_Message));
 	return result;
 }

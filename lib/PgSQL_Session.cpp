@@ -2520,6 +2520,12 @@ __get_pkts_from_client:
 								return handler_ret;
 							}
 							break;
+						case 'C':
+							if (handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_CLOSE(pkt) == false) {
+								handler_ret = -1;
+								return handler_ret;
+							}
+							break;
 						case 'B':
 						case 'E':
 							//ignore
@@ -6325,6 +6331,22 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 	return 1;
 }
 
+int PgSQL_Session::handle_post_sync_close_message(PgSQL_Close_Message* close_msg) {
+	thread->status_variables.stvar[st_var_frontend_stmt_close]++;
+	thread->status_variables.stvar[st_var_queries]++;
+	
+	const std::string& stmt_client_name = close_msg->stmt_name ? close_msg->stmt_name : "";
+	client_myds->myconn->local_stmts->client_close(stmt_client_name);
+	client_myds->setDSS_STATE_QUERY_SENT_NET();
+	unsigned int nTxn = NumActiveTransactions();
+	char txn_state = (nTxn ? 'T' : 'I');
+	bool send_ready = pending_packets.empty();
+	client_myds->myprot.generate_close_completion_packet(true, send_ready, txn_state);
+	client_myds->DSS = STATE_SLEEP;
+	status = WAITING_CLIENT_DATA;
+	return 0;
+}
+
 int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC(PtrSize_t& pkt) {
 	if (session_type != PROXYSQL_SESSION_PGSQL) { // only PgSQL module supports prepared statement!!
 		client_myds->setDSS_STATE_QUERY_SENT_NET();
@@ -6352,6 +6374,13 @@ int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_S
 		rc = handle_post_sync_parse_message(parse_msg->get());
 	} else if (const std::unique_ptr<PgSQL_Describe_Message>* describe_msg = std::get_if<std::unique_ptr<PgSQL_Describe_Message>>(&packet)) {
 		rc = handle_post_sync_describe_message(describe_msg->get());
+	} else if (const std::unique_ptr<PgSQL_Close_Message>* close_msg = std::get_if<std::unique_ptr<PgSQL_Close_Message>>(&packet)) {
+		rc = handle_post_sync_close_message(close_msg->get());
+	} else {
+		proxy_error("unknown packet type\n");
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		client_myds->myprot.generate_error_packet(true, false, "Unknown packet type", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION,
+			true);
 	}
 
 	return rc; // make sure to not return before unlocking GloMyStmt
@@ -6404,6 +6433,30 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_D
 		return false;
 	}
 	pending_packets.push(std::move(describe_msg)); // we will process it later, after sync packet
+	return true;
+}
+
+bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_CLOSE(PtrSize_t& pkt) {
+	if (session_type != PROXYSQL_SESSION_PGSQL) { // only PgSQL module supports prepared statement!!
+		l_free(pkt.size, pkt.ptr);
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		client_myds->myprot.generate_error_packet(true, false, "Prepared statements not supported", PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED,
+			false, true);
+		client_myds->DSS = STATE_SLEEP;
+		status = WAITING_CLIENT_DATA;
+		return true;
+	}
+	std::unique_ptr<PgSQL_Close_Message> close_msg(new PgSQL_Close_Message());
+	bool rc = close_msg->parse(pkt);
+	if (rc == false) {
+		l_free(pkt.size, pkt.ptr);
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		client_myds->myprot.generate_error_packet(true, false, "invalid string in message", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION,
+			true, true);
+		writeout();
+		return false;
+	}
+	pending_packets.push(std::move(close_msg)); // we will process it later, after sync packet
 	return true;
 }
 
