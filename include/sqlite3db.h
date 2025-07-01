@@ -42,6 +42,7 @@ extern int (*proxy_sqlite3_close_v2)(sqlite3*);
 extern int (*proxy_sqlite3_get_autocommit)(sqlite3*);
 extern void (*proxy_sqlite3_free)(void*);
 extern int (*proxy_sqlite3_status)(int op, int *pCurrent, int *pHighwater, int resetFlag);
+extern int (*proxy_sqlite3_status64)(int op, long long *pCurrent, long long *pHighwater, int resetFlag);
 extern int (*proxy_sqlite3_changes)(sqlite3*);
 extern int (*proxy_sqlite3_step)(sqlite3_stmt*);
 extern int (*proxy_sqlite3_config)(int, ...);
@@ -89,6 +90,8 @@ int (*proxy_sqlite3_close_v2)(sqlite3*);
 int (*proxy_sqlite3_get_autocommit)(sqlite3*);
 void (*proxy_sqlite3_free)(void*);
 int (*proxy_sqlite3_status)(int op, int *pCurrent, int *pHighwater, int resetFlag);
+int (*proxy_sqlite3_status64)(int op, long long *pCurrent, long long *pHighwater, int resetFlag);
+
 int (*proxy_sqlite3_changes)(sqlite3*);
 int (*proxy_sqlite3_step)(sqlite3_stmt*);
 int (*proxy_sqlite3_config)(int, ...);
