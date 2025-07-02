@@ -1104,7 +1104,7 @@ int PgSQL_Data_Stream::array2buffer_full() {
 	return rc;
 }
 
-int PgSQL_Data_Stream::assign_fd_from_mysql_conn() {
+int PgSQL_Data_Stream::assign_fd_from_pgsql_conn() {
 	assert(myconn);
 	//proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5, "Sess=%p, myds=%p, oldFD=%d, newFD=%d\n", this->sess, this, fd, myconn->myconn.net.fd);
 	proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5, "Sess=%p, myds=%p, oldFD=%d, newFD=%d\n", this->sess, this, fd, myconn->fd);

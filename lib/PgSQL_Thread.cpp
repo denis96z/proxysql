@@ -2941,7 +2941,7 @@ void PgSQL_Thread::run___get_multiple_idle_connections(int& num_idles) {
 
 		myds = sess->mybe->server_myds;
 		myds->attach_connection(mc);
-		myds->assign_fd_from_mysql_conn();
+		myds->assign_fd_from_pgsql_conn();
 		myds->myds_type = MYDS_BACKEND;
 
 		sess->to_process = 1;

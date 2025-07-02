@@ -203,7 +203,7 @@ public:
 	void unplug_backend();
 
 	void check_data_flow();
-	int assign_fd_from_mysql_conn();
+	int assign_fd_from_pgsql_conn();
 
 	static unsigned char* copy_array_to_buffer(PtrSizeArray* resultset, size_t resultset_length, bool del);
 	static void copy_buffer_to_resultset(PtrSizeArray* resultset, unsigned char* ptr, uint64_t size, 
