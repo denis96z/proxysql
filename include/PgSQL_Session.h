@@ -19,6 +19,8 @@ class PgSQL_ExplicitTxnStateMgr;
 class PgSQL_Parse_Message;
 class PgSQL_Describe_Message;
 class PgSQL_Close_Message;
+class PgSQL_Bind_Message;
+class PgSQL_Execute_Message;
 
 #ifndef PROXYJSON
 #define PROXYJSON
@@ -46,6 +48,34 @@ enum PgSQL_Extended_Query_Type : uint8_t {
 	PGSQL_EXTENDED_QUERY_TYPE_DESCRIBE	= 0x2,
 	PGSQL_EXTENDED_QUERY_TYPE_EXECUTE	= 0x4,
 };
+
+#if 0 //FIXME: remove after extended query support is fully implemented
+class PgSQL_Formatted_Bind_Message {
+public:
+	/*uint16_t num_param_formats = 0;
+	uint16_t num_param_values = 0;
+	uint16_t num_result_formats = 0;
+
+	const unsigned int* param_formats = NULL;
+	const char* param_values = NULL;
+	const int* param_values_len = NULL;
+	const int* result_formats = NULL;
+
+	const char* stmt_name = NULL;
+	const char* portal_name = NULL;
+	*/
+
+	std::vector<const char*> param_values;
+	std::vector<int> param_lengths;
+	std::vector<int> param_formats;
+	std::vector<int> result_formats;
+	std::string stmt_name;
+	std::string portal_name;
+
+	PgSQL_Formatted_Bind_Message(PgSQL_Bind_Message* bind_msg);
+	~PgSQL_Formatted_Bind_Message();
+};
+#endif
 
 /* Enumerated types for output format and date order */
 typedef enum {
@@ -159,7 +189,7 @@ public:
 	unsigned char* QueryPointer;
 	char* stmt_client_name;
 	PgSQL_STMT_Global_info* stmt_info;
-
+	PgSQL_Bind_Message* bind_msg;
 	SQP_par_t QueryParserArgs;
 
 	uint32_t stmt_backend_id;
@@ -189,9 +219,10 @@ private:
 class PgSQL_Session : public Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread> {
 private:
 	using PktType = std::variant<std::unique_ptr<PgSQL_Parse_Message>,std::unique_ptr<PgSQL_Describe_Message>,
-		std::unique_ptr<PgSQL_Close_Message>>;
+		std::unique_ptr<PgSQL_Close_Message>, std::unique_ptr<PgSQL_Bind_Message>, std::unique_ptr<PgSQL_Execute_Message>>;
 
 	std::queue<PktType> pending_packets;
+	std::unique_ptr<PgSQL_Bind_Message> bind_to_execute;
 
 	//int handler_ret;
 	void handler___status_CONNECTING_CLIENT___STATE_SERVER_HANDSHAKE(PtrSize_t*, bool*);
@@ -243,12 +274,16 @@ private:
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_PARSE(PtrSize_t& pkt);
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_DESCRIBE(PtrSize_t& pkt);
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_CLOSE(PtrSize_t& pkt);
+	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_BIND(PtrSize_t& pkt);
+	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_EXECUTE(PtrSize_t& pkt);
 	int handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC(PtrSize_t& pkt);
 	bool handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params);
-	bool handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params);
+	void handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params);
 	int handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg);
 	int handle_post_sync_describe_message(PgSQL_Describe_Message* describe_msg);
 	int handle_post_sync_close_message(PgSQL_Close_Message* close_msg);
+	int handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg);
+	int handle_post_sync_execute_message(PgSQL_Execute_Message* execute_msg);
 
 	//void return_proxysql_internal(PtrSize_t*);
 	bool handler_special_queries(PtrSize_t*, bool* lock_hostgroup);

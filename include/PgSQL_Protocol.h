@@ -238,6 +238,11 @@ public:
 		//put_uint32(4);
 		write_generic('1', "");
 	}
+	void write_BindCompletion() {
+		//put_char('2');
+		//put_uint32(4);
+		write_generic('2', "");
+	}
 	void write_CloseCompletion() {
 		//put_char('3');
 		//put_uint32(4);
@@ -337,6 +342,89 @@ public:
 	 */
 	bool parse(PtrSize_t& pkt);
 	PtrSize_t detach();
+private:
+	PtrSize_t _pkt = {};
+};
+
+class PgSQL_Bind_Message {
+public:
+	typedef struct {
+		int32_t len;         // Length of value (-1 for NULL)
+		const unsigned char* value;  // Pointer to value data
+	} ParamValue_t;
+
+	// Iterator context for parameter values
+	typedef struct {
+		const unsigned char* current;   // Current position in values
+		uint16_t remaining;            // Parameters remaining
+	} ParamValueIterCtx;
+
+	// Iterator context for format arrays
+	typedef struct {
+		const unsigned char* current;   // Current position in array
+		uint16_t remaining;         // Formats remaining
+	} FormatIterCtx;
+
+	PgSQL_Bind_Message();
+	~PgSQL_Bind_Message();
+	const char* portal_name = NULL;		// The name of the portal to bind
+	const char* stmt_name = NULL;		// The name of the prepared statement to bind
+	uint16_t num_param_formats = 0;		// Number of parameters to bind
+	uint16_t num_param_values = 0;
+	uint16_t num_result_formats = 0; // Number of result format codes
+	/**
+	 * @brief Parses the PgSQL_Bind_Message from the provided packet.
+	 *
+	 * This method extracts the portal name, statement name, parameter formats,
+	 * parameter values, and result formats from the packet and initializes the
+	 * internal state of the PgSQL_Bind_Message object.
+	 *
+	 * @param pkt The packet containing the PgSQL_Bind_Message data.
+	 *
+	 * @return True if parsing was successful, false otherwise.
+	 */
+	bool parse(PtrSize_t& pkt);
+	PtrSize_t detach();
+	PgSQL_Bind_Message* release();
+
+	// Initialize param format iterator
+	void init_param_format_iter(FormatIterCtx* ctx) const;
+	// Initialize parameter value iterator
+	void init_param_value_iter(ParamValueIterCtx* ctx) const;
+	// Get next parameter value
+	bool next_param_value(ParamValueIterCtx* ctx, ParamValue_t* out) const;
+	// Initialize result format iterator
+	void init_result_format_iter(FormatIterCtx* ctx) const;
+	// Get next format value
+	bool next_format(FormatIterCtx* ctx, uint16_t* out) const;
+
+private:
+	const uint16_t* param_formats = NULL;	// Array of parameter types (can be nullptr if none)
+	const uint8_t* param_values = NULL;		// Array of parameter values (can be nullptr if none)
+	const uint16_t* result_formats = NULL;		// Array of result format codes
+
+	PtrSize_t _pkt = {};
+};
+
+class PgSQL_Execute_Message {
+public:
+	PgSQL_Execute_Message();
+	~PgSQL_Execute_Message();
+	const char* portal_name = NULL;		// The name of the portal to execute
+	uint32_t max_rows = 0;				// Maximum number of rows to return (0 for no limit)
+	/**
+	 * @brief Parses the PgSQL_Execute_Message from the provided packet.
+	 *
+	 * This method extracts the portal name and maximum rows from the packet
+	 * and initializes the internal state of the PgSQL_Execute_Message object.
+	 *
+	 * @param pkt The packet containing the PgSQL_Execute_Message data.
+	 *
+	 * @return True if parsing was successful, false otherwise.
+	 */
+	bool parse(PtrSize_t& pkt);
+	PtrSize_t detach();
+
 private:
 	PtrSize_t _pkt = {};
 };
@@ -829,6 +917,7 @@ public:
 	bool generate_ready_for_query_packet(bool send, char trx_state, PtrSize_t* _ptr = NULL);
 	bool generate_describe_completion_packet(bool send, bool ready, const PgSQL_Describe_Prepared_Info* desc, char trx_state, PtrSize_t* _ptr = NULL);
 	bool generate_close_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr = NULL);
+	bool generate_bind_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr = NULL);
 
 	// temporary overriding generate_pkt_OK to avoid crash. FIXME remove this
 	bool generate_pkt_OK(bool send, void** ptr, unsigned int* len, uint8_t sequence_id, unsigned int affected_rows, 

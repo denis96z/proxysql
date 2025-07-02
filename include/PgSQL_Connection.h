@@ -260,17 +260,17 @@ public:
 	void stmt_prepare_cont(short event);
 	void stmt_describe_prepared_start();
 	void stmt_describe_prepared_cont(short event);
-	//void stmt_execute_start();
-	//void stmt_execute_cont(short event);
+	void stmt_execute_start();
+	void stmt_execute_cont(short event);
 	void reset_session_start();
 	void reset_session_cont(short event);
 	
-	int  async_connect(short event);
-
-	int  async_query(short event, const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr, void* execute_data = nullptr);
-	int  async_ping(short event);
-	int  async_reset_session(short event);
-	int	 async_send_simple_command(short event, char* stmt, unsigned long length); // no result set expected
+	int async_connect(short event);
+	int async_query(short event, const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr,
+		bool is_prepare_stmt = false, PgSQL_Bind_Message* bind_message = nullptr);
+	int async_ping(short event);
+	int async_reset_session(short event);
+	int async_send_simple_command(short event, char* stmt, unsigned long length); // no result set expected
 
 	void next_event(PG_ASYNC_ST new_st);
 	bool IsAutoCommit();
@@ -446,7 +446,8 @@ public:
 
 	unsigned int reorder_dynamic_variables_idx();
 	unsigned int number_of_matching_session_variables(const PgSQL_Connection* client_conn, unsigned int& not_matching);
-	void set_query(const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr);
+	void set_query(const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr, 
+		const PgSQL_Bind_Message* bind_msg = nullptr);
 	void reset();
 
 	bool IsKeepMultiplexEnabledVariables(char* query_digest_text);
@@ -455,6 +456,7 @@ public:
 		unsigned long length;
 		const char* ptr;
 		const char* backend_stmt_name;
+		const PgSQL_Bind_Message* bind_message;
 	} query;
 
 	struct {

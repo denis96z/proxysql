@@ -277,6 +277,7 @@ PG_ASYNC_ST PgSQL_Connection::handler(short event) {
 #if ENABLE_TIMER
 	Timer timer(myds->sess->thread->Timers.Connections_Handlers);
 #endif // ENABLE_TIMER
+	ASYNC_ST USE_RESULT_END = ASYNC_QUERY_END;
 	uint64_t processed_bytes = 0;	// issue #527 : this variable will store the amount of bytes processed during this event
 	if (pgsql_conn == NULL) {
 		// it is the first time handler() is being called
@@ -402,6 +403,7 @@ handler_again:
 				!set_single_row_mode()) {
 				NEXT_IMMEDIATE(ASYNC_QUERY_END);
 			}
+			USE_RESULT_END = ASYNC_QUERY_END;
 			NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
 		}
 		break;
@@ -409,7 +411,7 @@ handler_again:
 		fetch_result_start();
 		if (async_exit_status == PG_EVENT_NONE) {
 			if (is_error_present()) {
-				NEXT_IMMEDIATE(ASYNC_QUERY_END);
+				NEXT_IMMEDIATE(USE_RESULT_END);
 			}
 			new_result = true;
 			if (myds->sess->mirror == false) {
@@ -502,7 +504,7 @@ handler_again:
 						proxy_warning("Unable to process the 'COPY' command. Please report a bug for future enhancements.\n");
 					}
 					set_error(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION, "Unable to process 'COPY' command", true);
-					NEXT_IMMEDIATE(ASYNC_QUERY_END);
+					NEXT_IMMEDIATE(USE_RESULT_END);
 					break;
 				case PGRES_BAD_RESPONSE:
 				case PGRES_NONFATAL_ERROR:
@@ -615,7 +617,7 @@ handler_again:
 		query_result->add_ready_status(PQtransactionStatus(pgsql_conn));
 		update_bytes_recv(6);
 		//processing_multi_statement = false;
-		NEXT_IMMEDIATE(ASYNC_QUERY_END);
+		NEXT_IMMEDIATE(USE_RESULT_END);
 	}
 	break;
 	case ASYNC_QUERY_END:
@@ -785,6 +787,41 @@ handler_again:
 	case ASYNC_DESCRIBE_PREPARED_SUCCESSFUL:
 	case ASYNC_DESCRIBE_PREPARED_FAILED:
 	//case ASYNC_DESCRIBE_PREPARED_TIMEOUT:
+		break;
+	case ASYNC_STMT_EXECUTE_START:
+		stmt_execute_start();
+		if (async_exit_status) {
+			next_event(ASYNC_STMT_EXECUTE_CONT);
+		} else {
+			NEXT_IMMEDIATE(ASYNC_STMT_EXECUTE_END);
+		}
+		break;
+	case ASYNC_STMT_EXECUTE_CONT:
+		if (event) {
+			stmt_execute_cont(event);
+		}
+		if (async_exit_status) {
+			next_event(ASYNC_STMT_EXECUTE_CONT);
+		} else {
+			if (is_error_present() ||
+				!set_single_row_mode()) {
+				NEXT_IMMEDIATE(ASYNC_STMT_EXECUTE_END);
+			}
+			USE_RESULT_END = ASYNC_STMT_EXECUTE_END;
+			NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
+		}
+		break;
+	case ASYNC_STMT_EXECUTE_END:
+		PROXY_TRACE2();
+		if (is_error_present()) {
+			compute_unknown_transaction_status();
+		} else {
+			unknown_transaction_status = false;
+		}
+		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
+		// should be NULL
+		assert(!pgsql_result);
+		assert(!is_copy_out);
 		break;
 	default:
 		// not implemented yet
@@ -1264,7 +1301,8 @@ bool PgSQL_Connection::IsAutoCommit() {
 // 0 when the query is completed
 // 1 when the query is not completed
 // the calling function should check pgsql error in pgsql struct
-int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long length, const char* backend_stmt_name, void* execute_data) {
+int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long length,
+	const char* backend_stmt_name, bool is_prepare_stmt, PgSQL_Bind_Message* bind_message) {
 	PROXY_TRACE();
 	PROXY_TRACE2();
 	assert(pgsql_conn);
@@ -1279,6 +1317,7 @@ int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long l
 		}
 	}
 	switch (async_state_machine) {
+	case ASYNC_STMT_EXECUTE_END:
 	case ASYNC_QUERY_END:
 		processing_multi_statement = false;	// no matter if we are processing a multi statement or not, we reached the end
 		return 0;
@@ -1295,13 +1334,15 @@ int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long l
 		if (!backend_stmt_name) {
 			async_state_machine = ASYNC_QUERY_START;
 		} else {
-			if (execute_data) {
-				async_state_machine = ASYNC_DESCRIBE_PREPARED_START;
-			} else {
+			if (is_prepare_stmt) {
 				async_state_machine = ASYNC_STMT_PREPARE_START;
+			} else if (bind_message) {
+				async_state_machine = ASYNC_STMT_EXECUTE_START;
+			} else {
+				async_state_machine = ASYNC_DESCRIBE_PREPARED_START;
 			}
 		}
-		set_query(stmt, length, backend_stmt_name);
+		set_query(stmt, length, backend_stmt_name, bind_message);
 	default:
 		handler(event);
 		break;
@@ -1657,6 +1698,100 @@ void PgSQL_Connection::stmt_describe_prepared_cont(short event) {
 		return;
 	}
 	pgsql_result = PQgetResult(pgsql_conn);
+}
+
+void PgSQL_Connection::stmt_execute_start() {
+	PROXY_TRACE();
+	reset_error();
+	processing_multi_statement = false;
+	async_exit_status = PG_EVENT_NONE;
+	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
+
+	//const PgSQL_Formatted_Bind_Message* formatted_bind_message = query.formatted_bind_message; 
+	//assert(formatted_bind_message != NULL);
+
+	const PgSQL_Bind_Message* bind_msg = query.bind_message;
+
+	std::vector<const char*> param_values;
+	std::vector<int> param_lengths;
+	std::vector<int> param_formats;
+	std::vector<int> result_formats;
+
+	if (bind_msg->num_param_values > 0) {
+		PgSQL_Bind_Message::ParamValueIterCtx valCtx;
+		bind_msg->init_param_value_iter(&valCtx);
+
+		param_values.resize(bind_msg->num_param_values);
+		param_lengths.resize(bind_msg->num_param_values);
+
+		for (int i = 0; i < bind_msg->num_param_values; ++i) {
+			PgSQL_Bind_Message::ParamValue_t param;
+			if (!bind_msg->next_param_value(&valCtx, &param)) {
+				proxy_error("Failed to read param value at index %u\n", i);
+				set_error(PGSQL_GET_ERROR_CODE_STR(ERRCODE_INVALID_PARAMETER_VALUE),
+					"Failed to read param value", false);
+				return;
+			}
+
+			param_values[i] = (reinterpret_cast<const char*>(param.value));
+			param_lengths[i] = param.len;
+		}
+	}
+
+	if (bind_msg->num_param_formats > 0) {
+		PgSQL_Bind_Message::FormatIterCtx fmtCtx;
+		bind_msg->init_param_format_iter(&fmtCtx);
+
+		param_formats.resize(bind_msg->num_param_formats);
+
+		for (int i = 0; i < bind_msg->num_param_formats; ++i) {
+			uint16_t format;
+
+			if (!bind_msg->next_format(&fmtCtx, &format)) {
+				proxy_error("Failed to read param format at index %u\n", i);
+				set_error(PGSQL_GET_ERROR_CODE_STR(ERRCODE_INVALID_PARAMETER_VALUE),
+					"Failed to read param format", false);
+				return;
+				return;
+			}
+
+			param_formats[i] = format;
+		}
+	}
+
+	if (bind_msg->num_result_formats > 0) {
+		PgSQL_Bind_Message::FormatIterCtx fmtCtx;
+		bind_msg->init_result_format_iter(&fmtCtx);
+		result_formats.resize(bind_msg->num_result_formats);
+		for (int i = 0; i < bind_msg->num_result_formats; ++i) {
+			uint16_t format;
+			if (!bind_msg->next_format(&fmtCtx, &format)) {
+				proxy_error("Failed to read result format at index %u\n", i);
+				set_error(PGSQL_GET_ERROR_CODE_STR(ERRCODE_INVALID_PARAMETER_VALUE),
+					"Failed to read result format", false);
+				return;
+			}
+			result_formats[i] = format;
+		}
+	}
+
+	if (PQsendQueryPrepared(pgsql_conn, query.backend_stmt_name, param_values.size(),
+		param_values.data(), param_lengths.data(), param_formats.data(),
+		(result_formats.size() > 0) ? result_formats[0] : 0) == 0) {
+		set_error_from_PQerrorMessage();
+		proxy_error("Failed to send execute prepared statement. %s\n", get_error_code_with_message().c_str());
+		return;
+	}
+	flush();
+}
+
+void PgSQL_Connection::stmt_execute_cont(short event) {
+	PROXY_TRACE();
+	proxy_debug(PROXY_DEBUG_MYSQL_PROTOCOL, 6, "event=%d\n", event);
+	async_exit_status = PG_EVENT_NONE;
+	if (event & POLLOUT) {
+		flush();
+	}
 }
 
 void PgSQL_Connection::reset_session_start() {
@@ -2189,13 +2324,15 @@ bool PgSQL_Connection::AutocommitFalse_AndSavepoint() {
 	return ret;
 }
 
-void PgSQL_Connection::set_query(const char* stmt, unsigned long length, const char* backend_stmt_name) {
+void PgSQL_Connection::set_query(const char* stmt, unsigned long length, const char* backend_stmt_name, 
+	const PgSQL_Bind_Message* bind_msg) {
 	query.length = length;
 	query.ptr = stmt;
 	if (length > largest_query_length) {
 		largest_query_length = length;
 	}
 	query.backend_stmt_name = backend_stmt_name;
+	query.bind_message = bind_msg;
 }
 
 bool PgSQL_Connection::IsKeepMultiplexEnabledVariables(char* query_digest_text) {

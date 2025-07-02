@@ -303,17 +303,20 @@ PgSQL_Query_Info::PgSQL_Query_Info() {
 	end_time=0;
 	stmt_backend_id = 0;
 	stmt_client_name = NULL;
+	bind_msg = NULL;
 	stmt_global_id = 0;
 }
 
 PgSQL_Query_Info::~PgSQL_Query_Info() {
 	GloPgQPro->query_parser_free(&QueryParserArgs);
-	if (stmt_info) {
-		stmt_info=NULL;
-	}
+	stmt_info=NULL;
 	if (stmt_client_name) {
 		free(stmt_client_name);
 		stmt_client_name = NULL;
+	}
+	if (bind_msg) {
+		delete bind_msg;
+		bind_msg = NULL;
 	}
 }
 
@@ -344,15 +347,16 @@ void PgSQL_Query_Info::end() {
 	if ((end_time-start_time) > (unsigned int)pgsql_thread___long_query_time *1000) {
 		__sync_add_and_fetch(&sess->thread->status_variables.stvar[st_var_queries_slow],1);
 	}
-	if (stmt_info) {
-		stmt_info=NULL;
-	}
+	stmt_info = NULL;
 	stmt_backend_id = 0;
-	stmt_client_name = NULL;
 	stmt_global_id = 0;
 	if (stmt_client_name) {
 		free(stmt_client_name);
 		stmt_client_name = NULL;
+	}
+	if (bind_msg) {
+		delete bind_msg;
+		bind_msg = NULL;
 	}
 }
 
@@ -367,12 +371,15 @@ void PgSQL_Query_Info::init(unsigned char *_p, int len, bool header) {
 	affected_rows=0;
 	rows_sent=0;
 	stmt_backend_id = 0;
-	stmt_client_name = NULL;
 	stmt_global_id = 0;
 	stmt_info = NULL;
 	if (stmt_client_name) {
 		free(stmt_client_name);
 		stmt_client_name = NULL;
+	}
+	if (bind_msg) {
+		delete bind_msg;
+		bind_msg = NULL;
 	}
 }
 
@@ -2527,10 +2534,17 @@ __get_pkts_from_client:
 							}
 							break;
 						case 'B':
+							if (handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_BIND(pkt) == false) {
+								handler_ret = -1;
+								return handler_ret;
+							}
+							break;
 						case 'E':
-							//ignore
-							l_free(pkt.size, pkt.ptr);
-							continue;
+							if (handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_EXECUTE(pkt) == false) {
+								handler_ret = -1;
+								return handler_ret;
+							}
+							break;
 						case 'S':
 						{
 							__run_sync_again:
@@ -2552,7 +2566,6 @@ __get_pkts_from_client:
 									pkt.size = 0;
 								}
 							}
-
 						}
 							break;
 						default:
@@ -3069,21 +3082,22 @@ int PgSQL_Session::RunQuery(PgSQL_Data_Stream* myds, PgSQL_Connection* myconn) {
 			}
 			 // this is used to generate the name of the prepared statement in the backend
 			const std::string& backend_stmt_name = std::string(PROXYSQL_PS_PREFIX) + std::to_string(CurrentQuery.stmt_backend_id);
-			rc = myconn->async_query(myds->revents, (char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength, backend_stmt_name.c_str());
+			rc = myconn->async_query(myds->revents, (char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength, backend_stmt_name.c_str(), true);
 		}	
 		break;
 	case PROCESSING_STMT_DESCRIBE:
 		assert(CurrentQuery.stmt_backend_id);
 		{
 			const std::string& backend_stmt_name = std::string(PROXYSQL_PS_PREFIX) + std::to_string(CurrentQuery.stmt_backend_id);
-			rc = myconn->async_query(myds->revents, (char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength, backend_stmt_name.c_str(), (void*)0x123456);
+			rc = myconn->async_query(myds->revents, (char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength, backend_stmt_name.c_str());
 		}
 		break;
 	case PROCESSING_STMT_EXECUTE:
 		assert(CurrentQuery.stmt_backend_id);
 		{
 			const std::string& backend_stmt_name = std::string(PROXYSQL_PS_PREFIX) + std::to_string(CurrentQuery.stmt_backend_id);
-			rc = myconn->async_query(myds->revents, (char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength, backend_stmt_name.c_str());
+			rc = myconn->async_query(myds->revents, (char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength, backend_stmt_name.c_str(), false,
+				CurrentQuery.bind_msg);
 		}
 		break;
 	default:
@@ -3407,13 +3421,10 @@ handler_again:
 				}
 				break;
 				case PROCESSING_STMT_DESCRIBE:
-				{
-					enum session_status st;
-					handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(st, myds, prepared_stmt_with_no_params);
-				}
+					handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(myds, prepared_stmt_with_no_params);
 					break;
 				case PROCESSING_STMT_EXECUTE:
-					//handler_rc0_PROCESSING_STMT_EXECUTE(myds);
+					PgSQL_Result_to_PgSQL_wire(myconn, myconn->myds);
 					break;
 				default:
 					// LCOV_EXCL_START
@@ -3498,7 +3509,7 @@ handler_again:
 				}
 			}
 
-			/*
+			
             // FIXME: Temporary workaround. Update the logic below when pipeline mode is implemented
 			if (rc != 1 && pkt.size && pkt.ptr && ((char*)pkt.ptr)[0] == 'S') { // it's a sync packet
 				// sent sync packet again to client queue, to execute sync in next iteration to handle remaining pending packets
@@ -3513,7 +3524,7 @@ handler_again:
 					pkt.size = 0;
 				}
 			}
-			*/
+			
 			goto __exit_DSS__STATE_NOT_INITIALIZED;
 		}
 		break;
@@ -5793,8 +5804,7 @@ void PgSQL_Session::finishQuery(PgSQL_Data_Stream* myds, PgSQL_Connection* mycon
 			myds->DSS = STATE_NOT_INITIALIZED;
 			if (mysql_thread___autocommit_false_not_reusable && myds->myconn->IsAutoCommit() == false) {
 				create_new_session_and_reset_connection(myds);
-			}
-			else {
+			} else {
 				myds->return_MySQL_Connection_To_Pool();
 			}
 		}
@@ -6140,7 +6150,7 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 				thread->status_variables.stvar[st_var_hostgroup_locked_queries]++;
 				RequestEnd(NULL);
 				free(buf);
-				return 0;
+				return 2;
 			}
 		}
 	}
@@ -6225,10 +6235,9 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
 		client_myds->DSS = STATE_SLEEP;
 		status = WAITING_CLIENT_DATA;
-		return 0;
+		free((void*)stmt_client_name);
+		return 2;
 	}
-	CurrentQuery.stmt_client_name = (char*)stmt_client_name;
-	CurrentQuery.stmt_global_id = stmt_global_id;
 
 	// now we get the statement information
 	PgSQL_STMT_Global_info* stmt_info = GloPgStmt->find_prepared_statement_by_stmt_id(stmt_global_id);
@@ -6240,8 +6249,11 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
 		client_myds->DSS = STATE_SLEEP;
 		status = WAITING_CLIENT_DATA;
-		return 0;
+		free((void*)stmt_client_name);
+		return 2;
 	}
+	CurrentQuery.stmt_client_name = (char*)stmt_client_name;
+	CurrentQuery.stmt_global_id = stmt_global_id;
 	CurrentQuery.stmt_info = stmt_info;
 	CurrentQuery.start_time = thread->curtime;
 
@@ -6311,7 +6323,7 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 				thread->status_variables.stvar[st_var_hostgroup_locked_queries]++;
 				RequestEnd(NULL);
 				free(buf);
-				return 0;
+				return 2;
 			}
 		}
 	}
@@ -6347,6 +6359,150 @@ int PgSQL_Session::handle_post_sync_close_message(PgSQL_Close_Message* close_msg
 	return 0;
 }
 
+int PgSQL_Session::handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg) {
+	//thread->status_variables.stvar[st_var_frontend_stmt_bind]++;
+	thread->status_variables.stvar[st_var_queries]++;
+
+	const char* stmt_client_name = bind_msg->stmt_name ? bind_msg->stmt_name : "";
+
+	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
+	if (stmt_global_id == 0) {
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		std::string err_msg = "prepared statement \"" + std::string(stmt_client_name) + "\" does not exist";
+		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
+		client_myds->DSS = STATE_SLEEP;
+		status = WAITING_CLIENT_DATA;
+		return 2;
+	}
+	//std::unique_ptr<PgSQL_Formatted_Bind_Message> formatted_bind (new PgSQL_Formatted_Bind_Message(bind_msg));
+	//bind_to_execute = std::move(formatted_bind);
+	bind_to_execute.reset(bind_msg->release()); // release the ownership of the bind message
+	client_myds->setDSS_STATE_QUERY_SENT_NET();
+	unsigned int nTxn = NumActiveTransactions();
+	char txn_state = (nTxn ? 'T' : 'I');
+	bool send_ready = pending_packets.empty();
+	client_myds->myprot.generate_bind_completion_packet(true, send_ready, txn_state);
+	client_myds->DSS = STATE_SLEEP;
+	status = WAITING_CLIENT_DATA;
+	return 0;
+}
+
+int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execute_msg) {
+	//thread->status_variables.stvar[st_var_frontend_stmt_describe]++; // FIXME
+	thread->status_variables.stvar[st_var_queries]++;
+
+	bool lock_hostgroup = false;
+	bool rc_break = false;
+
+	//CurrentQuery.begin(nullptr, 0, false);
+	//FIXME: replace strdup with s_strdup
+	const char* portal_name = execute_msg->portal_name ? execute_msg->portal_name : ""; // currently only supporting unanmed prepared statements
+	if (!bind_to_execute) {
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		std::string err_msg = "portal \"" + std::string(portal_name) + "\" does not exist";
+		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_CURSOR, false, true);
+		client_myds->DSS = STATE_SLEEP;
+		status = WAITING_CLIENT_DATA;
+		return 2;
+	}
+	//FIXME: replace strdup with s_strdup
+	const char* stmt_client_name = strdup(bind_to_execute->stmt_name ? bind_to_execute->stmt_name : "");
+	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
+	if (stmt_global_id == 0) {
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		std::string err_msg = "prepared statement \"" + std::string(stmt_client_name) + "\" does not exist";
+		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
+		client_myds->DSS = STATE_SLEEP;
+		status = WAITING_CLIENT_DATA;
+		free((void*)stmt_client_name);
+		return 2;
+	}
+
+	// now we get the statement information
+	PgSQL_STMT_Global_info* stmt_info = GloPgStmt->find_prepared_statement_by_stmt_id(stmt_global_id);
+	if (stmt_info == NULL) {
+		// we couldn't find it
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		std::string err_msg = "prepared statement \"" + std::string(stmt_client_name) + "\" does not exist";
+		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
+		client_myds->DSS = STATE_SLEEP;
+		status = WAITING_CLIENT_DATA;
+		free((void*)stmt_client_name);
+		return 2;
+	}
+
+	CurrentQuery.stmt_client_name = (char*)stmt_client_name;
+	CurrentQuery.stmt_global_id = stmt_global_id;
+	CurrentQuery.stmt_info = stmt_info;
+	CurrentQuery.start_time = thread->curtime;
+	CurrentQuery.bind_msg = bind_to_execute.release();
+
+	timespec begint;
+	timespec endt;
+	if (thread->variables.stats_time_query_processor) {
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &begint);
+	}
+	qpo = GloPgQPro->process_query(this, nullptr, 0, &CurrentQuery);
+	if (qpo->max_lag_ms >= 0) {
+		thread->status_variables.stvar[st_var_queries_with_max_lag_ms]++;
+	}
+	if (thread->variables.stats_time_query_processor) {
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &endt);
+		thread->status_variables.stvar[st_var_query_processor_time] = thread->status_variables.stvar[st_var_query_processor_time] +
+			(endt.tv_sec * 1000000000 + endt.tv_nsec) -
+			(begint.tv_sec * 1000000000 + begint.tv_nsec);
+	}
+	assert(qpo);	// GloPgQPro->process_mysql_query() should always return a qpo
+
+	// setting 'prepared' to prevent fetching results from the cache if the digest matches
+	rc_break = handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY_qpo(&pkt, &lock_hostgroup, PGSQL_EXTENDED_QUERY_TYPE_DESCRIBE);
+	if (rc_break == true) {
+		return 0;
+	}
+
+	if (pgsql_thread___set_query_lock_on_hostgroup == 1) {
+		if (locked_on_hostgroup < 0) {
+			if (lock_hostgroup) {
+				// we are locking on hostgroup now
+				locked_on_hostgroup = current_hostgroup;
+			}
+		}
+		if (locked_on_hostgroup >= 0) {
+			if (current_hostgroup != locked_on_hostgroup) {
+				client_myds->DSS = STATE_QUERY_SENT_NET;
+				int l = CurrentQuery.QueryLength;
+				char* end = (char*)"";
+				if (l > 256) {
+					l = 253;
+					end = (char*)"...";
+				}
+				string nqn = string((char*)CurrentQuery.QueryPointer, l);
+				char* err_msg = (char*)"Session trying to reach HG %d while locked on HG %d . Rejecting query: %s";
+				char* buf = (char*)malloc(strlen(err_msg) + strlen(nqn.c_str()) + strlen(end) + 64);
+				sprintf(buf, err_msg, current_hostgroup, locked_on_hostgroup, nqn.c_str(), end);
+				client_myds->myprot.generate_error_packet(true, true, buf, PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION,
+					false, true);
+				thread->status_variables.stvar[st_var_hostgroup_locked_queries]++;
+				RequestEnd(NULL);
+				free(buf);
+				return 2;
+			}
+		}
+	}
+	mybe = find_or_create_backend(current_hostgroup);
+	status = PROCESSING_STMT_EXECUTE;
+	mybe->server_myds->connect_retries_on_failure = pgsql_thread___connect_retries_on_failure;
+	mybe->server_myds->wait_until = 0;
+	pause_until = 0;
+	mybe->server_myds->killed_at = 0;
+	mybe->server_myds->kill_type = 0;
+	auto execute_pkt = execute_msg->detach(); // detach the packet 
+	mybe->server_myds->pgsql_real_query.init(&execute_pkt); // mem leak fix
+	mybe->server_myds->statuses.questions++;
+	client_myds->setDSS_STATE_QUERY_SENT_NET();
+	return 1;
+}
+
 int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC(PtrSize_t& pkt) {
 	if (session_type != PROXYSQL_SESSION_PGSQL) { // only PgSQL module supports prepared statement!!
 		client_myds->setDSS_STATE_QUERY_SENT_NET();
@@ -6363,7 +6519,7 @@ int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_S
 		client_myds->myprot.generate_ready_for_query_packet(true, txn_state);
 		return 0;
 	}
-	
+
 	// we have pending packets, so we will process them now
 	auto packet = std::move(pending_packets.front()); // get the packet from the queue
 	pending_packets.pop(); // remove the packet from the queue
@@ -6376,6 +6532,10 @@ int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_S
 		rc = handle_post_sync_describe_message(describe_msg->get());
 	} else if (const std::unique_ptr<PgSQL_Close_Message>* close_msg = std::get_if<std::unique_ptr<PgSQL_Close_Message>>(&packet)) {
 		rc = handle_post_sync_close_message(close_msg->get());
+	} else if (const std::unique_ptr<PgSQL_Bind_Message>* bind_msg = std::get_if<std::unique_ptr<PgSQL_Bind_Message>>(&packet)) {
+		rc = handle_post_sync_bind_message(bind_msg->get());
+	} else if (const std::unique_ptr<PgSQL_Execute_Message>* execute_msg = std::get_if<std::unique_ptr<PgSQL_Execute_Message>>(&packet)) {
+		rc = handle_post_sync_execute_message(execute_msg->get());
 	} else {
 		proxy_error("unknown packet type\n");
 		client_myds->setDSS_STATE_QUERY_SENT_NET();
@@ -6383,7 +6543,16 @@ int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_S
 			true);
 	}
 
-	return rc; // make sure to not return before unlocking GloMyStmt
+	if (rc == 2) {
+		// incase of error, we discard all pending messages
+		bind_to_execute.reset(nullptr);
+		while (pending_packets.empty() == false) {
+			pending_packets.pop();
+		}
+		rc = 0;
+	}
+
+	return rc; 
 }
 
 bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_PARSE(PtrSize_t& pkt) {
@@ -6460,6 +6629,56 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_C
 	return true;
 }
 
+bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_BIND(PtrSize_t& pkt) {
+	if (session_type != PROXYSQL_SESSION_PGSQL) { // only PgSQL module supports prepared statement!!
+		l_free(pkt.size, pkt.ptr);
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		client_myds->myprot.generate_error_packet(true, false, "Prepared statements not supported", PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED,
+			false, true);
+		client_myds->DSS = STATE_SLEEP;
+		status = WAITING_CLIENT_DATA;
+		return true;
+	}
+	std::unique_ptr<PgSQL_Bind_Message> bind_msg(new PgSQL_Bind_Message());
+	bool rc = bind_msg->parse(pkt);
+	if (rc == false) {
+		l_free(pkt.size, pkt.ptr);
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		client_myds->myprot.generate_error_packet(true, false, "invalid string in message", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION,
+			true, true);
+		writeout();
+		return false;
+	}
+	pending_packets.push(std::move(bind_msg)); // we will process it later, after sync packet
+	return true;
+
+}
+
+bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_EXECUTE(PtrSize_t& pkt) {
+	if (session_type != PROXYSQL_SESSION_PGSQL) { // only PgSQL module supports prepared statement!!
+		l_free(pkt.size, pkt.ptr);
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		client_myds->myprot.generate_error_packet(true, false, "Prepared statements not supported", PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED,
+			false, true);
+		client_myds->DSS = STATE_SLEEP;
+		status = WAITING_CLIENT_DATA;
+		return true;
+	}
+	std::unique_ptr<PgSQL_Execute_Message> execute_msg(new PgSQL_Execute_Message());
+	bool rc = execute_msg->parse(pkt);
+	if (rc == false) {
+		l_free(pkt.size, pkt.ptr);
+		client_myds->setDSS_STATE_QUERY_SENT_NET();
+		client_myds->myprot.generate_error_packet(true, false, "invalid string in message", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION,
+			true, true);
+		writeout();
+		return false;
+	}
+	pending_packets.push(std::move(execute_msg)); // we will process it later, after sync packet
+	return true;
+
+}
+
 bool PgSQL_Session::handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params) {
 	thread->status_variables.stvar[st_var_backend_stmt_prepare]++;
 	uint64_t global_stmtid;
@@ -6514,8 +6733,7 @@ bool PgSQL_Session::handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& s
 	return false;
 }
 
-bool PgSQL_Session::handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params) {
-
+void PgSQL_Session::handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params) {
 	//thread->status_variables.stvar[st_var_backend_stmt_describe]++;
 	assert(CurrentQuery.stmt_info);
 	bool send_ready_packet = pending_packets.empty();
@@ -6531,7 +6749,6 @@ bool PgSQL_Session::handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(enum session_
 		delete myds->myconn->stmt_metadata_result;
 		myds->myconn->stmt_metadata_result = NULL;
 	}
-	return false;
 }
 
 // Optimized single‐pass parser for PostgreSQL DateStyle strings.
@@ -6741,3 +6958,176 @@ std::string PgSQL_DateStyle_Util::datestyle_to_string(PgSQL_DateStyle_t datestyl
 std::string PgSQL_DateStyle_Util::datestyle_to_string(std::string_view input, const PgSQL_DateStyle_t& default_datestyle) {
 	return datestyle_to_string(parse_datestyle(input), default_datestyle);
 }
+
+#if 0 // FIXME: remove after extended query support is fully implemented
+/*
+// implement PgSQL_Formatted_Bind_Message, also use itatrator to get aligned values
+PgSQL_Formatted_Bind_Message::PgSQL_Formatted_Bind_Message(PgSQL_Bind_Message* bind_msg) {
+	if (bind_msg == NULL) {
+		return;
+	}
+	num_param_formats = bind_msg->num_param_formats;
+	num_param_values = bind_msg->num_param_values;
+	num_result_formats = bind_msg->num_result_formats;
+	stmt_name = strdup(bind_msg->stmt_name ? bind_msg->stmt_name : "");
+	portal_name = strdup(bind_msg->portal_name ? bind_msg->portal_name : "");
+
+	if (num_param_formats > 0) {
+		PgSQL_Bind_Message::FormatIterCtx param_format_iter;
+		bind_msg->init_param_format_iter(&param_format_iter);
+		// Allocate memory for param_formats
+		param_formats = (const unsigned int*)malloc(num_param_formats * sizeof(unsigned int));
+		if (param_formats == NULL) {
+			proxy_error("PgSQL_Formatted_Bind_Message: Failed to allocate memory for param_formats\n");
+			return;
+		}
+		// Fill param_formats using the iterator
+		for (uint16_t i = 0; i < num_param_formats; ++i) {
+			if (!bind_msg->next_format(&param_format_iter, (uint16_t*)&param_formats[i])) {
+				proxy_error("PgSQL_Formatted_Bind_Message: Failed to read param format at index %u\n", i);
+				free((void*)param_formats);
+				param_formats = NULL;
+				return;
+			}
+		}
+	}
+
+	if (num_param_values > 0) {
+		PgSQL_Bind_Message::ParamValueIterCtx param_value_iter;
+		bind_msg->init_param_value_iter(&param_value_iter);
+		// Allocate memory for param_values
+		param_values = (const char*)malloc(num_param_values * sizeof(PgSQL_Bind_Message::ParamValue_t));
+		param_values_len = (int*)malloc(num_param_values * sizeof(int));
+		if (param_values == NULL) {
+			proxy_error("PgSQL_Formatted_Bind_Message: Failed to allocate memory for param_values\n");
+			return;
+		}
+		// Fill param_values using the iterator
+		for (uint16_t i = 0; i < num_param_values; ++i) {
+			PgSQL_Bind_Message::ParamValue_t value;
+			if (!bind_msg->next_param_value(&param_value_iter, &value)) {
+				proxy_error("PgSQL_Formatted_Bind_Message: Failed to read param value at index %u\n", i);
+				free((void*)param_values);
+				param_values = NULL;
+				return;
+			}
+			// Copy the value into the allocated memory
+			memcpy((void*)&param_values[i], &value, sizeof(PgSQL_Bind_Message::ParamValue_t));
+			// Store the length of the value
+			memcpy((void*)&param_values_len[i], (uint32_t*)&value.len, sizeof(int));
+		}
+	}
+
+	if (num_result_formats > 0) {
+		PgSQL_Bind_Message::FormatIterCtx result_format_iter;
+		bind_msg->init_result_format_iter(&result_format_iter);
+		// Allocate memory for result_formats
+		result_formats = (const int*)malloc(num_result_formats * sizeof(int));
+		if (result_formats == NULL) {
+			proxy_error("PgSQL_Formatted_Bind_Message: Failed to allocate memory for result_formats\n");
+			return;
+		}
+		// Fill result_formats using the iterator
+		for (uint16_t i = 0; i < num_result_formats; ++i) {
+			if (!bind_msg->next_format(&result_format_iter, (uint16_t*)&result_formats[i])) {
+				proxy_error("PgSQL_Formatted_Bind_Message: Failed to read result format at index %u\n", i);
+				free((void*)result_formats);
+				result_formats = NULL;
+				return;
+			}
+		}
+	}
+}
+
+PgSQL_Formatted_Bind_Message::~PgSQL_Formatted_Bind_Message() {
+	if (stmt_name) {
+		free((void*)stmt_name);
+		stmt_name = NULL;
+	}
+	if (portal_name) {
+		free((void*)portal_name);
+		portal_name = NULL;
+	}
+	if (param_formats) {
+		free((void*)param_formats);
+		param_formats = NULL;
+	}
+	if (param_values) {
+		free((void*)param_values);
+		param_values = NULL;
+	}
+	if (param_values_len) {
+		free((void*)param_values_len);
+		param_values_len = NULL;
+	}
+	if (result_formats) {
+		free((void*)result_formats);
+		result_formats = NULL;
+	}
+}
+*/
+
+PgSQL_Formatted_Bind_Message::PgSQL_Formatted_Bind_Message(PgSQL_Bind_Message* bind_msg) {
+	if (bind_msg == NULL) {
+		return;
+	}
+
+	stmt_name = bind_msg->stmt_name ? bind_msg->stmt_name : "";
+	portal_name = bind_msg->portal_name ? bind_msg->portal_name : "";
+
+	if (bind_msg->num_param_values > 0) {
+		PgSQL_Bind_Message::ParamValueIterCtx valCtx;
+		bind_msg->init_param_value_iter(&valCtx);
+
+		param_values.resize(bind_msg->num_param_values);
+		param_lengths.resize(bind_msg->num_param_values);
+
+		for (int i = 0; i < bind_msg->num_param_values; ++i) {
+			PgSQL_Bind_Message::ParamValue_t param;
+			if (!bind_msg->next_param_value(&valCtx, &param)) {
+				proxy_error("PgSQL_Formatted_Bind_Message: Failed to read param value at index %u\n", i);
+				return;
+			}
+
+			param_values[i] = (reinterpret_cast<const char*>(param.value));
+			param_lengths[i] = param.len;
+		}
+	}
+
+	if (bind_msg->num_param_formats > 0) {
+		PgSQL_Bind_Message::FormatIterCtx fmtCtx;
+		bind_msg->init_param_format_iter(&fmtCtx);
+
+		param_formats.resize(bind_msg->num_param_formats);
+
+		for (int i = 0; i < bind_msg->num_param_formats; ++i) {
+			uint16_t format;
+
+			if (!bind_msg->next_format(&fmtCtx, &format)) {
+				proxy_error("PgSQL_Formatted_Bind_Message: Failed to read param format at index %u\n", i);
+				return;
+			}
+
+			param_formats[i] = format;
+		}
+	}
+
+	if (bind_msg->num_result_formats > 0) {
+		PgSQL_Bind_Message::FormatIterCtx fmtCtx;
+		bind_msg->init_result_format_iter(&fmtCtx);
+		result_formats.resize(bind_msg->num_result_formats);
+		for (int i = 0; i < bind_msg->num_result_formats; ++i) {
+			uint16_t format;
+			if (!bind_msg->next_format(&fmtCtx, &format)) {
+				proxy_error("PgSQL_Formatted_Bind_Message: Failed to read result format at index %u\n", i);
+				return;
+			}
+			result_formats[i] = format;
+		}
+	}
+}
+
+PgSQL_Formatted_Bind_Message::~PgSQL_Formatted_Bind_Message() {
+
+}
+#endif 
