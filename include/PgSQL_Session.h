@@ -187,7 +187,7 @@ public:
 
 	PgSQL_Session* sess;
 	unsigned char* QueryPointer;
-	char* stmt_client_name;
+	const char* stmt_client_name;
 	PgSQL_STMT_Global_info* stmt_info;
 	PgSQL_Bind_Message* bind_msg;
 	SQP_par_t QueryParserArgs;
@@ -221,7 +221,7 @@ private:
 	using PktType = std::variant<std::unique_ptr<PgSQL_Parse_Message>,std::unique_ptr<PgSQL_Describe_Message>,
 		std::unique_ptr<PgSQL_Close_Message>, std::unique_ptr<PgSQL_Bind_Message>, std::unique_ptr<PgSQL_Execute_Message>>;
 
-	std::queue<PktType> pending_packets;
+	std::queue<PktType> extended_query_frame;
 	std::unique_ptr<PgSQL_Bind_Message> bind_to_execute;
 
 	//int handler_ret;
@@ -276,9 +276,10 @@ private:
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_CLOSE(PtrSize_t& pkt);
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_BIND(PtrSize_t& pkt);
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_EXECUTE(PtrSize_t& pkt);
-	int handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC(PtrSize_t& pkt);
+	int handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC();
 	bool handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params);
 	void handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params);
+	int handler___status_PROCESSING_EXTENDED_QUERY_SYNC();
 	int handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg);
 	int handle_post_sync_describe_message(PgSQL_Describe_Message* describe_msg);
 	int handle_post_sync_close_message(PgSQL_Close_Message* close_msg);

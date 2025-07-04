@@ -722,7 +722,7 @@ void PgSQL_Logger::log_request(PgSQL_Session *sess, PgSQL_Data_Stream *myds) {
 		case PROCESSING_STMT_EXECUTE:
 			c = (char *)sess->CurrentQuery.stmt_info->query;
 			ql = sess->CurrentQuery.stmt_info->query_length;
-			me.set_client_stmt_name(sess->CurrentQuery.stmt_client_name);
+			me.set_client_stmt_name((char*)sess->CurrentQuery.stmt_client_name);
 			break;
 		case PROCESSING_STMT_PREPARE:
 		default:
@@ -733,7 +733,7 @@ void PgSQL_Logger::log_request(PgSQL_Session *sess, PgSQL_Data_Stream *myds) {
 			// global cache and due to that we immediately reply to the client and session doesn't reach
 			// 'PROCESSING_STMT_PREPARE' state. 'stmt_client_id' is expected to be '0' for anything that isn't
 			// a prepared statement, still, logging should rely 'log_event_type' instead of this value.
-			me.set_client_stmt_name(sess->CurrentQuery.stmt_client_name);
+			me.set_client_stmt_name((char*)sess->CurrentQuery.stmt_client_name);
 			break;
 	}
 	if (c) {

@@ -8,6 +8,7 @@ using json = nlohmann::json;
 #include "proxysql.h"
 #include "cpp.h"
 #include "Command_Counter.h"
+#include "PgSQL_PreparedStatement.h"
 #include "PgSQL_Query_Processor.h"
 
 extern PgSQL_Threads_Handler* GloPTH;
@@ -271,14 +272,14 @@ PgSQL_Query_Processor_Output* PgSQL_Query_Processor::process_query(PgSQL_Session
 	SQP_par_t stmt_exec_qp;
 	SQP_par_t* qp = NULL;
 	if (qi) {
-		// NOTE: if ptr == NULL , we are calling process_mysql_query() on an STMT_EXECUTE
+		// NOTE: if ptr == NULL , we are calling process_mysql_query() on an STMT_EXECUTE or STMT_DESCRIBE
 		if (ptr) {
 			qp = (SQP_par_t*)&qi->QueryParserArgs;
 		} else {
 			qp = &stmt_exec_qp;
-			//qp->digest = qi->stmt_info->digest;
-			//qp->digest_text = qi->stmt_info->digest_text;
-			//qp->first_comment = qi->stmt_info->first_comment;
+			qp->digest = qi->stmt_info->digest;
+			qp->digest_text = qi->stmt_info->digest_text;
+			qp->first_comment = qi->stmt_info->first_comment;
 		}
 	}
 #define stackbuffer_size 128
