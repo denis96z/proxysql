@@ -273,7 +273,6 @@ public:
 	int async_send_simple_command(short event, char* stmt, unsigned long length); // no result set expected
 
 	void next_event(PG_ASYNC_ST new_st);
-	bool IsAutoCommit();
 	bool is_connected() const;
 	void compute_unknown_transaction_status();
 	void async_free_result();
@@ -441,8 +440,6 @@ public:
 	void set_status(bool set, uint32_t status_flag);
 	bool get_status(uint32_t status_flag);
 	bool MultiplexDisabled(bool check_delay_token = true);
-
-	bool AutocommitFalse_AndSavepoint();
 
 	unsigned int reorder_dynamic_variables_idx();
 	unsigned int number_of_matching_session_variables(const PgSQL_Connection* client_conn, unsigned int& not_matching);

@@ -1273,30 +1273,6 @@ void PgSQL_Connection::async_free_result() {
 	new_result = false;
 }
 
-bool PgSQL_Connection::IsAutoCommit() {
-	bool ret = true;
-	/*if (pgsql) {
-		ret = (pgsql->server_status & SERVER_STATUS_AUTOCOMMIT);
-		if (ret) {
-			if (options.last_set_autocommit == 0) {
-				// it seems we hit bug http://bugs.pgsql.com/bug.php?id=66884
-				// we last sent SET AUTOCOMMIT = 0 , but the server says it is 1
-				// we assume that what we sent last is correct .  #873
-				ret = false;
-			}
-		}
-		else {
-			if (options.last_set_autocommit == -1) {
-				// if a connection was reset (thus last_set_autocommit==-1)
-				// the information related to SERVER_STATUS_AUTOCOMMIT is lost
-				// therefore we fall back on the safe assumption that autocommit==1
-				ret = true;
-			}
-		}
-	}*/
-	return ret;
-}
-
 // Returns:
 // 0 when the query is completed
 // 1 when the query is not completed
@@ -1552,13 +1528,6 @@ bool PgSQL_Connection::IsActiveTransaction() {
 		if (in_txn == false && is_error_present() && unknown_transaction_status == true) {
 			in_txn = true;
 		} 
-		/*if (ret == false) {
-			//bool r = ( mysql_thread___autocommit_false_is_transaction || mysql_thread___forward_autocommit ); // deprecated , see #3253
-			bool r = (mysql_thread___autocommit_false_is_transaction);
-			if (r && (IsAutoCommit() == false)) {
-				ret = true;
-			}
-		}*/
 	}
 	return in_txn;
 }
@@ -2049,8 +2018,7 @@ void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text, in
 				mul = myds->sess->qpo->multiplex;
 				if (mul == 0) {
 					set_status(true, STATUS_MYSQL_CONNECTION_NO_MULTIPLEX);
-				}
-				else {
+				} else {
 					if (mul == 1) {
 						set_status(false, STATUS_MYSQL_CONNECTION_NO_MULTIPLEX);
 					}
@@ -2309,18 +2277,6 @@ bool PgSQL_Connection::MultiplexDisabled(bool check_delay_token) {
 		ret = true;
 	}
 	if (check_delay_token && auto_increment_delay_token) return true;
-	return ret;
-}
-
-// This function check if autocommit=0 and if there are any savepoint.
-// this is an attempt to mitigate MySQL bug https://bugs.pgsql.com/bug.php?id=107875
-bool PgSQL_Connection::AutocommitFalse_AndSavepoint() {
-	bool ret = false;
-	if (IsAutoCommit() == false) {
-		if (get_status(STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT) == true) {
-			ret = true;
-		}
-	}
 	return ret;
 }
 

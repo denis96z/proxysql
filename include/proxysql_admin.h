@@ -146,13 +146,13 @@ extern int admin__web_verbosity;
 
 struct incoming_servers_t {
 	SQLite3_result* incoming_mysql_servers_v2 = NULL;
-	SQLite3_result* runtime_mysql_servers = NULL;
 	SQLite3_result* incoming_replication_hostgroups = NULL;
 	SQLite3_result* incoming_group_replication_hostgroups = NULL;
 	SQLite3_result* incoming_galera_hostgroups = NULL;
 	SQLite3_result* incoming_aurora_hostgroups = NULL;
 	SQLite3_result* incoming_hostgroup_attributes = NULL;
 	SQLite3_result* incoming_mysql_servers_ssl_params = NULL;
+	SQLite3_result* runtime_mysql_servers = NULL;
 
 	incoming_servers_t();
 	incoming_servers_t(SQLite3_result*, SQLite3_result*, SQLite3_result*, SQLite3_result*, SQLite3_result*, SQLite3_result*, SQLite3_result*, SQLite3_result*);
@@ -195,9 +195,9 @@ struct peer_mysql_servers_v2_t {
 
 struct incoming_pgsql_servers_t {
 	SQLite3_result* incoming_pgsql_servers_v2 = NULL;
-	SQLite3_result* runtime_pgsql_servers = NULL;
 	SQLite3_result* incoming_replication_hostgroups = NULL;
 	SQLite3_result* incoming_hostgroup_attributes = NULL;
+	SQLite3_result* runtime_pgsql_servers = NULL;
 
 	incoming_pgsql_servers_t();
 	incoming_pgsql_servers_t(SQLite3_result*, SQLite3_result*, SQLite3_result*, SQLite3_result*);

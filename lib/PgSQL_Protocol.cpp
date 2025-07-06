@@ -3035,10 +3035,6 @@ PtrSize_t PgSQL_Bind_Message::detach() {
 
 PgSQL_Bind_Message* PgSQL_Bind_Message::release() {
 	PgSQL_Bind_Message* msg = new PgSQL_Bind_Message();
-	if (msg == NULL) {
-		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 1, "Failed to allocate memory for PgSQL_Bind_Message\n");
-		return NULL;
-	}
 	*msg = *this; // Copy the current state to the new message
 	this->detach(); // Clear the current message
 	return msg;

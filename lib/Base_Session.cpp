@@ -506,24 +506,22 @@ void Base_Session<S,DS,B,T>::housekeeping_before_pkts() {
 	if (thread___multiplexing) {
 		for (const int hg_id : hgs_expired_conns) {
 			B * mybe = find_backend(hg_id);
-
 			if (mybe != nullptr) {
 				DS * myds = mybe->server_myds;
-				// FIXME: NOTE: the logic for autocommit is relevant only for MYSQL
-				if (mysql_thread___autocommit_false_not_reusable && myds->myconn->IsAutoCommit()==false) {
-					if constexpr (std::is_same_v<S, MySQL_Session>) {
+				if constexpr (std::is_same_v<S, MySQL_Session>) {
+					if (mysql_thread___autocommit_false_not_reusable && myds->myconn->IsAutoCommit() == false) {
 						if (mysql_thread___reset_connection_algorithm == 2) {
 							create_new_session_and_reset_connection(myds);
 						} else {
 							myds->destroy_MySQL_Connection_From_Pool(true);
 						}
-					} else if constexpr (std::is_same_v<S, PgSQL_Session>) {
-						create_new_session_and_reset_connection(myds);
 					} else {
-						assert(0);
+						myds->return_MySQL_Connection_To_Pool();
 					}
-				} else {
+				} else if constexpr (std::is_same_v<S, PgSQL_Session>) {
 					myds->return_MySQL_Connection_To_Pool();
+				} else {
+					assert(0);
 				}
 			}
 		}

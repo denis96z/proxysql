@@ -222,7 +222,7 @@ private:
 		std::unique_ptr<PgSQL_Close_Message>, std::unique_ptr<PgSQL_Bind_Message>, std::unique_ptr<PgSQL_Execute_Message>>;
 
 	std::queue<PktType> extended_query_frame;
-	std::unique_ptr<PgSQL_Bind_Message> bind_to_execute;
+	std::unique_ptr<PgSQL_Bind_Message> bind_waiting_for_execute;
 
 	//int handler_ret;
 	void handler___status_CONNECTING_CLIENT___STATE_SERVER_HANDSHAKE(PtrSize_t*, bool*);
@@ -277,14 +277,16 @@ private:
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_BIND(PtrSize_t& pkt);
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_EXECUTE(PtrSize_t& pkt);
 	int handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC();
-	bool handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params);
-	void handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds, bool& prepared_stmt_with_no_params);
+	bool handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds);
+	void handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds);
 	int handler___status_PROCESSING_EXTENDED_QUERY_SYNC();
 	int handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg);
 	int handle_post_sync_describe_message(PgSQL_Describe_Message* describe_msg);
 	int handle_post_sync_close_message(PgSQL_Close_Message* close_msg);
 	int handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg);
 	int handle_post_sync_execute_message(PgSQL_Execute_Message* execute_msg);
+	void reset_extended_query_frame();
+
 
 	//void return_proxysql_internal(PtrSize_t*);
 	bool handler_special_queries(PtrSize_t*, bool* lock_hostgroup);
@@ -420,6 +422,10 @@ public:
 	std::string untracked_option_parameters;
 	PgSQL_DateStyle_t current_datestyle = {};
 	char* default_session_variables[PGSQL_NAME_LAST_HIGH_WM] = {};
+
+#ifdef DEBUG
+	PgSQL_Connection* dbg_extended_query_backend_conn = nullptr;
+#endif
 
 #if 0
 	// uint64_t
@@ -568,7 +574,7 @@ public:
 	 * @param prepared_stmt_with_no_params specifies if the processed query was a prepared statement with no
 	 *   params.
 	 */
-	void finishQuery(PgSQL_Data_Stream* myds, PgSQL_Connection* myconn, bool);
+	void finishQuery(PgSQL_Data_Stream* myds, PgSQL_Connection* myconn, bool sticky_backend_connection);
 	void generate_proxysql_internal_session_json(nlohmann::json&) override;
 	bool known_query_for_locked_on_hostgroup(uint64_t);
 	void unable_to_parse_set_statement(bool*);
