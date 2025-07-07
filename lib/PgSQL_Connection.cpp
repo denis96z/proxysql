@@ -12,7 +12,8 @@ using json = nlohmann::json;
 #include "PgSQL_PreparedStatement.h"
 #include "PgSQL_Data_Stream.h"
 #include "PgSQL_Query_Processor.h"
-#include "MySQL_Variables.h"
+#include "PgSQL_Variables.h"
+#include "PgSQL_Extended_Query_Message.h"
 
 extern char * binary_sha1;
 
@@ -1680,20 +1681,21 @@ void PgSQL_Connection::stmt_execute_start() {
 	//assert(formatted_bind_message != NULL);
 
 	const PgSQL_Bind_Message* bind_msg = query.bind_message;
+	const PgSQL_Bind_Data* bind_data = bind_msg->data();
 
 	std::vector<const char*> param_values;
 	std::vector<int> param_lengths;
 	std::vector<int> param_formats;
 	std::vector<int> result_formats;
 
-	if (bind_msg->num_param_values > 0) {
+	if (bind_data->num_param_values > 0) {
 		PgSQL_Bind_Message::ParamValueIterCtx valCtx;
 		bind_msg->init_param_value_iter(&valCtx);
 
-		param_values.resize(bind_msg->num_param_values);
-		param_lengths.resize(bind_msg->num_param_values);
+		param_values.resize(bind_data->num_param_values);
+		param_lengths.resize(bind_data->num_param_values);
 
-		for (int i = 0; i < bind_msg->num_param_values; ++i) {
+		for (int i = 0; i < bind_data->num_param_values; ++i) {
 			PgSQL_Bind_Message::ParamValue_t param;
 			if (!bind_msg->next_param_value(&valCtx, &param)) {
 				proxy_error("Failed to read param value at index %u\n", i);
@@ -1707,13 +1709,13 @@ void PgSQL_Connection::stmt_execute_start() {
 		}
 	}
 
-	if (bind_msg->num_param_formats > 0) {
+	if (bind_data->num_param_formats > 0) {
 		PgSQL_Bind_Message::FormatIterCtx fmtCtx;
 		bind_msg->init_param_format_iter(&fmtCtx);
 
-		param_formats.resize(bind_msg->num_param_formats);
+		param_formats.resize(bind_data->num_param_formats);
 
-		for (int i = 0; i < bind_msg->num_param_formats; ++i) {
+		for (int i = 0; i < bind_data->num_param_formats; ++i) {
 			uint16_t format;
 
 			if (!bind_msg->next_format(&fmtCtx, &format)) {
@@ -1728,11 +1730,11 @@ void PgSQL_Connection::stmt_execute_start() {
 		}
 	}
 
-	if (bind_msg->num_result_formats > 0) {
+	if (bind_data->num_result_formats > 0) {
 		PgSQL_Bind_Message::FormatIterCtx fmtCtx;
 		bind_msg->init_result_format_iter(&fmtCtx);
-		result_formats.resize(bind_msg->num_result_formats);
-		for (int i = 0; i < bind_msg->num_result_formats; ++i) {
+		result_formats.resize(bind_data->num_result_formats);
+		for (int i = 0; i < bind_data->num_result_formats; ++i) {
 			uint16_t format;
 			if (!bind_msg->next_format(&fmtCtx, &format)) {
 				proxy_error("Failed to read result format at index %u\n", i);

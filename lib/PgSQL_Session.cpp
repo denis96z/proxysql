@@ -26,6 +26,7 @@ using json = nlohmann::json;
 #include "PgSQL_Query_Cache.h"
 #include "PgSQL_Variables_Validator.h"
 #include "PgSQL_ExplicitTxnStateMgr.h"
+#include "PgSQL_Extended_Query_Message.h"
 #include "libinjection.h"
 #include "libinjection_sqli.h"
 
@@ -5869,18 +5870,19 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 	thread->status_variables.stvar[st_var_queries]++;
 
 	bool lock_hostgroup = false;
+	const PgSQL_Parse_Data* parse_data = parse_msg->data();
 
-	CurrentQuery.begin((unsigned char*)parse_msg->query_string, strlen(parse_msg->query_string) + 1, false);
+	CurrentQuery.begin((unsigned char*)parse_data->query_string, strlen(parse_data->query_string) + 1, false);
 	// parse_msg memory will be freed in pgsql_real_query.end(), if message is sent to backend server
 	// CurrentQuery.stmt_client_name may briefly become a dangling pointer until CurrentQuery.end() is invoked
-	CurrentQuery.stmt_client_name = parse_msg->stmt_name;
+	CurrentQuery.stmt_client_name = parse_data->stmt_name;
 
 	timespec begint;
 	timespec endt;
 	if (thread->variables.stats_time_query_processor) {
 		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &begint);
 	}
-	qpo = GloPgQPro->process_query(this, (unsigned char*)parse_msg->query_string, strlen(parse_msg->query_string) + 1, &CurrentQuery);
+	qpo = GloPgQPro->process_query(this, (unsigned char*)parse_data->query_string, strlen(parse_data->query_string) + 1, &CurrentQuery);
 	if (thread->variables.stats_time_query_processor) {
 		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &endt);
 		thread->status_variables.stvar[st_var_query_processor_time] = thread->status_variables.stvar[st_var_query_processor_time] +
@@ -6006,8 +6008,9 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 	thread->status_variables.stvar[st_var_queries]++;
 
 	bool lock_hostgroup = false;
+	const PgSQL_Describe_Data* describe_data = describe_msg->data();
 
-	const char* stmt_client_name = describe_msg->stmt_name;
+	const char* stmt_client_name = describe_data->stmt_name;
 	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
 	if (stmt_global_id == 0) {
 		client_myds->setDSS_STATE_QUERY_SENT_NET();
@@ -6130,7 +6133,9 @@ int PgSQL_Session::handle_post_sync_close_message(PgSQL_Close_Message* close_msg
 	thread->status_variables.stvar[st_var_frontend_stmt_close]++;
 	thread->status_variables.stvar[st_var_queries]++;
 	
-	const std::string& stmt_client_name = close_msg->stmt_name ? close_msg->stmt_name : "";
+	const PgSQL_Close_Data* close_data = close_msg->data();
+
+	const std::string& stmt_client_name = close_data->stmt_name;
 	client_myds->myconn->local_stmts->client_close(stmt_client_name);
 	client_myds->setDSS_STATE_QUERY_SENT_NET();
 	unsigned int nTxn = NumActiveTransactions();
@@ -6146,7 +6151,9 @@ int PgSQL_Session::handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg) {
 	//thread->status_variables.stvar[st_var_frontend_stmt_bind]++;
 	thread->status_variables.stvar[st_var_queries]++;
 
-	const char* stmt_client_name = bind_msg->stmt_name ? bind_msg->stmt_name : "";
+	const PgSQL_Bind_Data* bind_data = bind_msg->data();
+	
+	const char* stmt_client_name = bind_data->stmt_name;
 
 	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
 	if (stmt_global_id == 0) {
@@ -6174,10 +6181,11 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 	thread->status_variables.stvar[st_var_queries]++;
 
 	bool lock_hostgroup = false;
+	const PgSQL_Execute_Data* execute_data = execute_msg->data();
 
 	//CurrentQuery.begin(nullptr, 0, false);
 	//FIXME: replace strdup with s_strdup
-	const char* portal_name = execute_msg->portal_name ? execute_msg->portal_name : ""; // currently only supporting unanmed prepared statements
+	const char* portal_name = execute_data->portal_name; // currently only supporting unanmed prepared statements
 	if (!bind_waiting_for_execute) {
 		client_myds->setDSS_STATE_QUERY_SENT_NET();
 		std::string err_msg = "portal \"" + std::string(portal_name) + "\" does not exist";
@@ -6187,7 +6195,7 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 		return 2;
 	}
 	//FIXME: replace strdup with s_strdup
-	const char* stmt_client_name = bind_waiting_for_execute->stmt_name;
+	const char* stmt_client_name = bind_waiting_for_execute->data()->stmt_name;
 	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
 	if (stmt_global_id == 0) {
 		client_myds->setDSS_STATE_QUERY_SENT_NET();
