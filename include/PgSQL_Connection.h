@@ -526,6 +526,12 @@ public:
 	bool unknown_transaction_status;
 
 private:
+	// Set end state for the fetch result to indicate that it originates from a simple query or statement execution.
+	ASYNC_ST fetch_result_end_st = ASYNC_QUERY_END;
+	inline void set_fetch_result_end_state(ASYNC_ST st) {
+		assert(st == ASYNC_QUERY_END || st == ASYNC_STMT_EXECUTE_END);
+		fetch_result_end_st = st;
+	}
 	// Handles the COPY OUT response from the server.
 	// Returns true if it consumes all buffer data, or false if the threshold for result size is reached
 	bool handle_copy_out(const PGresult* result, uint64_t* processed_bytes);

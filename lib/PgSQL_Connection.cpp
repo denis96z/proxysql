@@ -278,7 +278,6 @@ PG_ASYNC_ST PgSQL_Connection::handler(short event) {
 #if ENABLE_TIMER
 	Timer timer(myds->sess->thread->Timers.Connections_Handlers);
 #endif // ENABLE_TIMER
-	ASYNC_ST USE_RESULT_END = ASYNC_QUERY_END;
 	uint64_t processed_bytes = 0;	// issue #527 : this variable will store the amount of bytes processed during this event
 	if (pgsql_conn == NULL) {
 		// it is the first time handler() is being called
@@ -404,7 +403,7 @@ handler_again:
 				!set_single_row_mode()) {
 				NEXT_IMMEDIATE(ASYNC_QUERY_END);
 			}
-			USE_RESULT_END = ASYNC_QUERY_END;
+			set_fetch_result_end_state(ASYNC_QUERY_END);
 			NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
 		}
 		break;
@@ -412,7 +411,7 @@ handler_again:
 		fetch_result_start();
 		if (async_exit_status == PG_EVENT_NONE) {
 			if (is_error_present()) {
-				NEXT_IMMEDIATE(USE_RESULT_END);
+				NEXT_IMMEDIATE(fetch_result_end_st);
 			}
 			new_result = true;
 			if (myds->sess->mirror == false) {
@@ -505,7 +504,7 @@ handler_again:
 						proxy_warning("Unable to process the 'COPY' command. Please report a bug for future enhancements.\n");
 					}
 					set_error(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION, "Unable to process 'COPY' command", true);
-					NEXT_IMMEDIATE(USE_RESULT_END);
+					NEXT_IMMEDIATE(fetch_result_end_st);
 					break;
 				case PGRES_BAD_RESPONSE:
 				case PGRES_NONFATAL_ERROR:
@@ -618,7 +617,7 @@ handler_again:
 		query_result->add_ready_status(PQtransactionStatus(pgsql_conn));
 		update_bytes_recv(6);
 		//processing_multi_statement = false;
-		NEXT_IMMEDIATE(USE_RESULT_END);
+		NEXT_IMMEDIATE(fetch_result_end_st);
 	}
 	break;
 	case ASYNC_QUERY_END:
@@ -808,7 +807,7 @@ handler_again:
 				!set_single_row_mode()) {
 				NEXT_IMMEDIATE(ASYNC_STMT_EXECUTE_END);
 			}
-			USE_RESULT_END = ASYNC_STMT_EXECUTE_END;
+			set_fetch_result_end_state(ASYNC_STMT_EXECUTE_END);
 			NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
 		}
 		break;
