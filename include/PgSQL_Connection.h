@@ -14,6 +14,7 @@ class PgSQL_SrvC;
 class PgSQL_Query_Result;
 class PgSQL_STMTs_local_v14;
 class PgSQL_Describe_Prepared_Info;
+class PgSQL_Bind_Info;
 //#define STATUS_MYSQL_CONNECTION_TRANSACTION          0x00000001 // DEPRECATED
 #define STATUS_MYSQL_CONNECTION_COMPRESSION          0x00000002
 #define STATUS_MYSQL_CONNECTION_USER_VARIABLE        0x00000004
@@ -256,12 +257,66 @@ public:
 	void query_cont(short event);
 	void fetch_result_start();
 	void fetch_result_cont(short event);
-	void stmt_prepare_start();
-	void stmt_prepare_cont(short event);
-	void stmt_describe_prepared_start();
-	void stmt_describe_prepared_cont(short event);
-	void stmt_execute_start();
-	void stmt_execute_cont(short event);
+
+    /**
+     * @brief Initiates the asynchronous preparation of a SQL statement.
+     *
+     * This method starts the process of preparing a SQL statement on the PostgreSQL backend.
+     *
+     * The actual continuation and completion of the statement preparation is handled
+     * by stmt_prepare_cont(short event).
+     */
+    void stmt_prepare_start();
+
+    /**
+     * @brief Continues the asynchronous preparation of a SQL statement.
+     *
+     * This method is called after stmt_prepare_start() to handle the next step in the
+     * asynchronous state machine for preparing a SQL statement on the PostgreSQL backend.
+     *
+     * @param event The event flag indicating the current I/O event.
+     */
+    void stmt_prepare_cont(short event);
+
+    /**
+     * @brief Initiates the asynchronous description of a prepared SQL statement.
+     *
+     * This method starts the process of describing a previously prepared SQL statement
+     * on the PostgreSQL backend.
+	 * 
+     */
+    void stmt_describe_prepared_start();
+
+    /**
+     * @brief Continues the asynchronous description of a prepared SQL statement.
+     *
+     * This method is called after stmt_describe_prepared_start() to handle the next step in the
+     * asynchronous state machine for describing a prepared SQL statement on the PostgreSQL backend.
+     *
+     * @param event The event flag indicating the current I/O event.
+     */
+    void stmt_describe_prepared_cont(short event);
+
+    /**
+     * @brief Initiates the asynchronous execution of a prepared SQL statement.
+     *
+     * This method starts the process of executing a previously prepared SQL statement
+     * on the PostgreSQL backend. It sends Bind and Execute message to server
+     * and transitions the connection's state machine to handle the subsequent response.
+	 * 
+     */
+    void stmt_execute_start();
+
+    /**
+     * @brief Continues the asynchronous execution of a prepared SQL statement.
+     *
+     * This method is called after stmt_execute_start() to handle the next step in the
+     * asynchronous state machine for executing a prepared SQL statement on the PostgreSQL backend.
+     *
+     * @param returned The event flag indicating the current I/O event.
+     */
+    void stmt_execute_cont(short event);
+
 	void reset_session_start();
 	void reset_session_cont(short event);
 	

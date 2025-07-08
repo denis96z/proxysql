@@ -280,6 +280,7 @@ void PgSQL_STMTs_local_v14::backend_insert(uint64_t global_stmt_id, uint32_t bac
 }
 
 void PgSQL_STMTs_local_v14::client_insert(uint64_t global_stmt_id, const std::string& client_stmt_name) {
+	// validate that client_stmt_name is not empty and global_stmt_id is a valid id
 	stmt_name_to_global_ids.insert(std::make_pair(client_stmt_name, global_stmt_id));
 	global_id_to_stmt_names.insert(std::make_pair(global_stmt_id, client_stmt_name));
 	GloPgStmt->ref_count_client(global_stmt_id, 1, false); // do not lock!

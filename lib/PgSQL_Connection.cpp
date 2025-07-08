@@ -750,9 +750,6 @@ handler_again:
 			stmt_describe_prepared_cont(event);
 		}
 		if (async_exit_status) {
-			//if (myds->wait_until != 0 && myds->sess->thread->curtime >= myds->wait_until) {
-			//	NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_TIMEOUT);
-			//}
 			next_event(ASYNC_DESCRIBE_PREPARED_CONT);
 			break;
 		}
@@ -786,7 +783,6 @@ handler_again:
 		break;
 	case ASYNC_DESCRIBE_PREPARED_SUCCESSFUL:
 	case ASYNC_DESCRIBE_PREPARED_FAILED:
-	//case ASYNC_DESCRIBE_PREPARED_TIMEOUT:
 		break;
 	case ASYNC_STMT_EXECUTE_START:
 		stmt_execute_start();
@@ -1680,7 +1676,8 @@ void PgSQL_Connection::stmt_execute_start() {
 	//assert(formatted_bind_message != NULL);
 
 	const PgSQL_Bind_Message* bind_msg = query.bind_message;
-	const PgSQL_Bind_Data* bind_data = bind_msg->data();
+	assert(bind_msg); // should never be null
+	const PgSQL_Bind_Data* bind_data = bind_msg->data(); // will always have valid data
 
 	std::vector<const char*> param_values;
 	std::vector<int> param_lengths;

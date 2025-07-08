@@ -6194,7 +6194,7 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 		status = WAITING_CLIENT_DATA;
 		return 2;
 	}
-	//FIXME: replace strdup with s_strdup
+	// bind_waiting_for_execute will be released on CurrentQuery.end() call or session destory
 	const char* stmt_client_name = bind_waiting_for_execute->data()->stmt_name;
 	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
 	if (stmt_global_id == 0) {
@@ -6353,6 +6353,7 @@ int PgSQL_Session::handler___status_PROCESSING_EXTENDED_QUERY_SYNC() {
 		client_myds->setDSS_STATE_QUERY_SENT_NET();
 		client_myds->myprot.generate_error_packet(true, false, "Unknown extended query message", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION,
 			true);
+		// will terminate current session
 	}
 
 	if (rc == 2) {
@@ -6501,11 +6502,12 @@ bool PgSQL_Session::handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& s
 		CurrentQuery.QueryLength,
 		CurrentQuery.QueryParserArgs.first_comment,
 		false);
+	assert(stmt_info); // GloPgStmt->add_prepared_statement() should always return a valid pointer
 	if (CurrentQuery.QueryParserArgs.digest_text) {
 		if (stmt_info->digest_text == NULL) {
 			stmt_info->digest_text = strdup(CurrentQuery.QueryParserArgs.digest_text);
 			stmt_info->digest = CurrentQuery.QueryParserArgs.digest;	// copy digest
-			stmt_info->PgQueryCmd = CurrentQuery.PgQueryCmd; // copy MyComQueryCmd
+			stmt_info->PgQueryCmd = CurrentQuery.PgQueryCmd; // copy PgComQueryCmd
 			stmt_info->calculate_mem_usage();
 		}
 	}
@@ -6513,23 +6515,21 @@ bool PgSQL_Session::handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& s
 	global_stmtid = stmt_info->statement_id;
 	
 	myds->myconn->local_stmts->backend_insert(global_stmtid, CurrentQuery.stmt_backend_id);
-	// We only perform the client_insert when there is no previous status, this
-	// is, when 'PROCESSING_STMT_PREPARE' is reached directly without transitioning from a previous status
-	// like 'PROCESSING_STMT_EXECUTE'.
-	if (previous_status.size() == 0) {
-		assert(CurrentQuery.stmt_client_name);
-		client_myds->myconn->local_stmts->client_insert(global_stmtid, CurrentQuery.stmt_client_name);
-	}
 	st = status;
-	size_t sts = previous_status.size();
-	if (sts) {
+	
+	if (previous_status.empty() == false) {
 		myds->myconn->async_state_machine = ASYNC_IDLE;
 		myds->DSS = STATE_MARIADB_GENERIC;
 		st = previous_status.top();
 		previous_status.pop();
 		GloPgStmt->unlock();
 		return true;
-	} 
+	}
+	// We only perform the client_insert when there is no previous status, this
+	// is, when 'PROCESSING_STMT_PREPARE' is reached directly without transitioning from a previous status
+	// like 'PROCESSING_STMT_EXECUTE'.
+	assert(CurrentQuery.stmt_client_name);
+	client_myds->myconn->local_stmts->client_insert(global_stmtid, CurrentQuery.stmt_client_name);
 
 	bool send_ready_packet = extended_query_frame.empty();
 	char txn_state = myds->myconn->get_transaction_status_char();
