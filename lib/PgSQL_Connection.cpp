@@ -736,25 +736,25 @@ handler_again:
 	case ASYNC_STMT_PREPARE_SUCCESSFUL:
 		break;
 
-	case ASYNC_DESCRIBE_PREPARED_START:
-		stmt_describe_prepared_start();
+	case ASYNC_DESCRIBE_START:
+		stmt_describe_start();
 		if (async_exit_status) {
-			next_event(ASYNC_DESCRIBE_PREPARED_CONT);
+			next_event(ASYNC_DESCRIBE_CONT);
 		} else {
-			NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_END);
+			NEXT_IMMEDIATE(ASYNC_DESCRIBE_END);
 		}
 		break;
-	case ASYNC_DESCRIBE_PREPARED_CONT:
+	case ASYNC_DESCRIBE_CONT:
 	{
 		if (event) {
-			stmt_describe_prepared_cont(event);
+			stmt_describe_cont(event);
 		}
 		if (async_exit_status) {
-			next_event(ASYNC_DESCRIBE_PREPARED_CONT);
+			next_event(ASYNC_DESCRIBE_CONT);
 			break;
 		}
 		if (is_error_present()) {
-			NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_END);
+			NEXT_IMMEDIATE(ASYNC_DESCRIBE_END);
 		}
 		PGresult* result = get_result();
 		if (result) {
@@ -767,22 +767,22 @@ handler_again:
 			}
 			stmt_metadata_result->populate(result);
 			PQclear(result);
-			NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_CONT);
+			NEXT_IMMEDIATE(ASYNC_DESCRIBE_CONT);
 		}
-		NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_END);
+		NEXT_IMMEDIATE(ASYNC_DESCRIBE_END);
 	}
 	break;
-	case ASYNC_DESCRIBE_PREPARED_END:
+	case ASYNC_DESCRIBE_END:
 		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
 		if (is_error_present()) {
 			proxy_error("Failed to describe prepared statement: %s\n", get_error_code_with_message().c_str());
-			NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_FAILED);
+			NEXT_IMMEDIATE(ASYNC_DESCRIBE_FAILED);
 		} else {
-			NEXT_IMMEDIATE(ASYNC_DESCRIBE_PREPARED_SUCCESSFUL);
+			NEXT_IMMEDIATE(ASYNC_DESCRIBE_SUCCESSFUL);
 		}
 		break;
-	case ASYNC_DESCRIBE_PREPARED_SUCCESSFUL:
-	case ASYNC_DESCRIBE_PREPARED_FAILED:
+	case ASYNC_DESCRIBE_SUCCESSFUL:
+	case ASYNC_DESCRIBE_FAILED:
 		break;
 	case ASYNC_STMT_EXECUTE_START:
 		stmt_execute_start();
@@ -1273,8 +1273,8 @@ void PgSQL_Connection::async_free_result() {
 // 0 when the query is completed
 // 1 when the query is not completed
 // the calling function should check pgsql error in pgsql struct
-int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long length,
-	const char* backend_stmt_name, bool is_prepare_stmt, PgSQL_Bind_Message* bind_message) {
+int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long length, const char* backend_stmt_name, 
+	PgSQL_Extended_Query_Type type, const PgSQL_Extended_Query_Info* extended_query_info) {
 	PROXY_TRACE();
 	PROXY_TRACE2();
 	assert(pgsql_conn);
@@ -1303,18 +1303,20 @@ int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long l
 				myds->sess->transaction_started_at = myds->sess->thread->curtime;
 			}
 		}
-		if (!backend_stmt_name) {
+		if (!extended_query_info) {
 			async_state_machine = ASYNC_QUERY_START;
 		} else {
-			if (is_prepare_stmt) {
+			if (type == PGSQL_EXTENDED_QUERY_TYPE_PARSE) {
 				async_state_machine = ASYNC_STMT_PREPARE_START;
-			} else if (bind_message) {
+			} else if (type == PGSQL_EXTENDED_QUERY_TYPE_DESCRIBE) {
+				async_state_machine = ASYNC_DESCRIBE_START;
+			} else if (type == PGSQL_EXTENDED_QUERY_TYPE_EXECUTE) {
 				async_state_machine = ASYNC_STMT_EXECUTE_START;
 			} else {
-				async_state_machine = ASYNC_DESCRIBE_PREPARED_START;
+				assert(0); // should never reach here
 			}
 		}
-		set_query(stmt, length, backend_stmt_name, bind_message);
+		set_query(stmt, length, backend_stmt_name, extended_query_info);
 	default:
 		handler(event);
 		break;
@@ -1337,11 +1339,11 @@ int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long l
 
 	if (async_state_machine == ASYNC_STMT_PREPARE_SUCCESSFUL || 
 		async_state_machine == ASYNC_STMT_PREPARE_FAILED || 
-		async_state_machine == ASYNC_DESCRIBE_PREPARED_SUCCESSFUL ||
-		async_state_machine == ASYNC_DESCRIBE_PREPARED_FAILED) {
+		async_state_machine == ASYNC_DESCRIBE_SUCCESSFUL ||
+		async_state_machine == ASYNC_DESCRIBE_FAILED) {
 		compute_unknown_transaction_status();
 		if (async_state_machine == ASYNC_STMT_PREPARE_FAILED ||
-			async_state_machine == ASYNC_DESCRIBE_PREPARED_FAILED) {
+			async_state_machine == ASYNC_DESCRIBE_FAILED) {
 			return -1;
 		} else {
 			return 0;
@@ -1624,22 +1626,38 @@ void PgSQL_Connection::stmt_prepare_cont(short event) {
 	pgsql_result = PQgetResult(pgsql_conn);
 }
 
-void PgSQL_Connection::stmt_describe_prepared_start() {
+void PgSQL_Connection::stmt_describe_start() {
 	PROXY_TRACE();
 	reset_error();
 	processing_multi_statement = false;
 	async_exit_status = PG_EVENT_NONE;
 	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
 
-	// We need to send a describe prepared statement to get the parameter types
-	if (PQsendDescribePrepared(pgsql_conn, query.backend_stmt_name) == 0) {
-		set_error_from_PQerrorMessage();
-		proxy_error("Failed to send describe prepared. %s\n", get_error_code_with_message().c_str());
+	const PgSQL_Extended_Query_Info* extended_query_info = query.extended_query_info;
+
+	switch (extended_query_info->stmt_type) {
+	case 'P': // Portal
+		if (PQsendDescribePortal(pgsql_conn, extended_query_info->stmt_client_portal_name) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to send describe portal message. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+		break;
+	case 'S': // Prepared Statement
+		if (PQsendDescribePrepared(pgsql_conn, query.backend_stmt_name) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to send describe prepared statement. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+		break;
+	default:
+		set_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, "Invalid statement type for describe", false);
+		proxy_error("Failed to send describe message. %s\n", get_error_code_with_message().c_str());
 		return;
 	}
 	flush();
 }
-void PgSQL_Connection::stmt_describe_prepared_cont(short event) {
+void PgSQL_Connection::stmt_describe_cont(short event) {
 	PROXY_TRACE();
 	proxy_debug(PROXY_DEBUG_MYSQL_PROTOCOL, 6, "event=%d\n", event);
 	async_exit_status = PG_EVENT_NONE;
@@ -1672,10 +1690,7 @@ void PgSQL_Connection::stmt_execute_start() {
 	async_exit_status = PG_EVENT_NONE;
 	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
 
-	//const PgSQL_Formatted_Bind_Message* formatted_bind_message = query.formatted_bind_message; 
-	//assert(formatted_bind_message != NULL);
-
-	const PgSQL_Bind_Message* bind_msg = query.bind_message;
+	const PgSQL_Bind_Message* bind_msg = query.extended_query_info->bind_msg;
 	assert(bind_msg); // should never be null
 	const PgSQL_Bind_Data* bind_data = bind_msg->data(); // will always have valid data
 
@@ -1695,7 +1710,7 @@ void PgSQL_Connection::stmt_execute_start() {
 			PgSQL_Bind_Message::ParamValue_t param;
 			if (!bind_msg->next_param_value(&valCtx, &param)) {
 				proxy_error("Failed to read param value at index %u\n", i);
-				set_error(PGSQL_GET_ERROR_CODE_STR(ERRCODE_INVALID_PARAMETER_VALUE),
+				set_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE,
 					"Failed to read param value", false);
 				return;
 			}
@@ -1716,7 +1731,7 @@ void PgSQL_Connection::stmt_execute_start() {
 
 			if (!bind_msg->next_format(&fmtCtx, &format)) {
 				proxy_error("Failed to read param format at index %u\n", i);
-				set_error(PGSQL_GET_ERROR_CODE_STR(ERRCODE_INVALID_PARAMETER_VALUE),
+				set_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE,
 					"Failed to read param format", false);
 				return;
 				return;
@@ -1734,7 +1749,7 @@ void PgSQL_Connection::stmt_execute_start() {
 			uint16_t format;
 			if (!bind_msg->next_format(&fmtCtx, &format)) {
 				proxy_error("Failed to read result format at index %u\n", i);
-				set_error(PGSQL_GET_ERROR_CODE_STR(ERRCODE_INVALID_PARAMETER_VALUE),
+				set_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE,
 					"Failed to read result format", false);
 				return;
 			}
@@ -2278,15 +2293,14 @@ bool PgSQL_Connection::MultiplexDisabled(bool check_delay_token) {
 	return ret;
 }
 
-void PgSQL_Connection::set_query(const char* stmt, unsigned long length, const char* backend_stmt_name, 
-	const PgSQL_Bind_Message* bind_msg) {
+void PgSQL_Connection::set_query(const char* stmt, unsigned long length, const char* _backend_stmt_name, const PgSQL_Extended_Query_Info* extended_query_info) {
 	query.length = length;
 	query.ptr = stmt;
 	if (length > largest_query_length) {
 		largest_query_length = length;
 	}
-	query.backend_stmt_name = backend_stmt_name;
-	query.bind_message = bind_msg;
+	query.backend_stmt_name = _backend_stmt_name;
+	query.extended_query_info = extended_query_info;
 }
 
 bool PgSQL_Connection::IsKeepMultiplexEnabledVariables(char* query_digest_text) {

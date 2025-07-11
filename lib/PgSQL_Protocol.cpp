@@ -1529,46 +1529,55 @@ bool PgSQL_Protocol::generate_ready_for_query_packet(bool send, char trx_state, 
 	return true;
 }
 
-bool PgSQL_Protocol::generate_describe_completion_packet(bool send, bool ready, const PgSQL_Describe_Prepared_Info* desc, char trx_state, PtrSize_t* _ptr) {
+bool PgSQL_Protocol::generate_describe_completion_packet(bool send, bool ready, const PgSQL_Describe_Prepared_Info* desc, uint8_t stmt_type, char trx_state, PtrSize_t* _ptr) {
 	// to avoid memory leak
 	assert(send == true || _ptr);
 	PG_pkt pgpkt{};
-	uint32_t size = 0;
-	// Describe completion message
-	size = desc->parameter_types_count * sizeof(uint32_t) + sizeof(uint16_t) + 4; // size of the packet, including the type byte
 
-	pgpkt.put_char('t');
-	pgpkt.put_uint32(size); // size of the packet, including the type byte
-	// If there are no parameters, we still need to write a zero
-	pgpkt.put_uint16(desc->parameter_types_count); // number of parameters
-	for (size_t i = 0; i < desc->parameter_types_count; i++) {
-		pgpkt.put_uint32(desc->parameter_types[i]); // parameter type OID
+	// ----------- Parameter Description ('t') -----------
+	if (stmt_type == 'S') {
+		uint32_t size = desc->parameter_types_count * sizeof(uint32_t) + sizeof(uint16_t) + 4; // size of the packet, including the type byte
+
+		pgpkt.put_char('t');
+		pgpkt.put_uint32(size); // size of the packet, including the type byte
+		// If there are no parameters, we still need to write a zero
+		pgpkt.put_uint16(desc->parameter_types_count); // number of parameters
+		for (size_t i = 0; i < desc->parameter_types_count; i++) {
+			pgpkt.put_uint32(desc->parameter_types[i]); // parameter type OID
+		}
 	}
 
-	size = desc->columns_count * (sizeof(uint32_t) + // table OID
-		sizeof(uint16_t) + // column index
-		sizeof(uint32_t) + // type OID
-		sizeof(uint16_t) + // column length
-		sizeof(uint32_t) + // type modifier
-		sizeof(uint16_t)) + // format code
-		sizeof(uint16_t) + 4; // Field count + size of the packet
+	// ----------- Row Description ('T') -----------
+	if (desc->columns_count > 0) {
+		uint32_t size = desc->columns_count * (sizeof(uint32_t) + // table OID
+			sizeof(uint16_t) + // column index
+			sizeof(uint32_t) + // type OID
+			sizeof(uint16_t) + // column length
+			sizeof(uint32_t) + // type modifier
+			sizeof(uint16_t)) + // format code
+			sizeof(uint16_t) + 4; // Field count + size of the packet
 
-	for (size_t i = 0; i < desc->columns_count; i++) {
-		size += strlen(desc->columns[i].name) + 1; // field name + null terminator
-	}
-	pgpkt.put_char('T');
-	// If there are no result fields, we still need to write a zero
-	pgpkt.put_uint32(size); // size of the packet, including the type byte
-	pgpkt.put_uint16(desc->columns_count); // number of result fields
+		for (size_t i = 0; i < desc->columns_count; i++) {
+			size += strlen(desc->columns[i].name) + 1; // field name + null terminator
+		}
+		pgpkt.put_char('T');
+		// If there are no result fields, we still need to write a zero
+		pgpkt.put_uint32(size); // size of the packet, including the type byte
+		pgpkt.put_uint16(desc->columns_count); // number of result fields
 
-	for (size_t i = 0; i < desc->columns_count; i++) {
-		pgpkt.put_string(desc->columns[i].name); // field name
-		pgpkt.put_uint32(desc->columns[i].table_oid); // table OID
-		pgpkt.put_uint16(desc->columns[i].column_index); // column index
-		pgpkt.put_uint32(desc->columns[i].type_oid); // type OID
-		pgpkt.put_uint16(desc->columns[i].length); // column length
-		pgpkt.put_uint32(desc->columns[i].type_modifier); // type modifier
-		pgpkt.put_uint16(desc->columns[i].format); // format code
+		for (size_t i = 0; i < desc->columns_count; i++) {
+			pgpkt.put_string(desc->columns[i].name); // field name
+			pgpkt.put_uint32(desc->columns[i].table_oid); // table OID
+			pgpkt.put_uint16(desc->columns[i].column_index); // column index
+			pgpkt.put_uint32(desc->columns[i].type_oid); // type OID
+			pgpkt.put_uint16(desc->columns[i].length); // column length
+			pgpkt.put_uint32(desc->columns[i].type_modifier); // type modifier
+			pgpkt.put_uint16(desc->columns[i].format); // format code
+		}
+	} else {
+		// return NoData packet if there are no result fields
+		pgpkt.put_char('n');
+		pgpkt.put_uint32(4); // size of the NoData packet (Fixed 4 bytes)
 	}
 	
 	if (ready == true) {

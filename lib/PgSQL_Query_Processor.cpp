@@ -277,9 +277,9 @@ PgSQL_Query_Processor_Output* PgSQL_Query_Processor::process_query(PgSQL_Session
 			qp = (SQP_par_t*)&qi->QueryParserArgs;
 		} else {
 			qp = &stmt_exec_qp;
-			qp->digest = qi->stmt_info->digest;
-			qp->digest_text = qi->stmt_info->digest_text;
-			qp->first_comment = qi->stmt_info->first_comment;
+			qp->digest = qi->extended_query_info.stmt_info->digest;
+			qp->digest_text = qi->extended_query_info.stmt_info->digest_text;
+			qp->first_comment = qi->extended_query_info.stmt_info->first_comment;
 		}
 	}
 #define stackbuffer_size 128

@@ -126,6 +126,10 @@ bool PgSQL_Parse_Message::parse(PtrSize_t& pkt) {
 		offset += _data.num_param_types * sizeof(uint32_t);
 	}
 
+	if (offset != pkt_len) {
+		return false;
+	}
+
 	// take "ownership"
 	_pkt = pkt;
 
@@ -395,6 +399,11 @@ bool PgSQL_Bind_Message::parse(PtrSize_t& pkt) {
 		// Move past the result formats
 		offset += _data.num_result_formats * sizeof(uint16_t);
 	}
+
+	if (offset != pkt_len) {
+		return false;
+	}
+
 	// take "ownership"
 	_pkt = pkt;
 	// If we reach here, the packet is valid and fully parsed

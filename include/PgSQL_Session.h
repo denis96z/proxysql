@@ -43,39 +43,11 @@ enum proxysql_session_type {
 */
 
 enum PgSQL_Extended_Query_Type : uint8_t {
-	PGSQL_EXTENDED_QUERY_TYPE_NOT_SET	= 0x0,
-	PGSQL_EXTENDED_QUERY_TYPE_PARSE		= 0x1,
-	PGSQL_EXTENDED_QUERY_TYPE_DESCRIBE	= 0x2,
-	PGSQL_EXTENDED_QUERY_TYPE_EXECUTE	= 0x4,
+	PGSQL_EXTENDED_QUERY_TYPE_NOT_SET			 = 0x00,
+	PGSQL_EXTENDED_QUERY_TYPE_PARSE				 = 0x01,
+	PGSQL_EXTENDED_QUERY_TYPE_DESCRIBE			 = 0x02,
+	PGSQL_EXTENDED_QUERY_TYPE_EXECUTE			 = 0x04,
 };
-
-#if 0 //FIXME: remove after extended query support is fully implemented
-class PgSQL_Formatted_Bind_Message {
-public:
-	/*uint16_t num_param_formats = 0;
-	uint16_t num_param_values = 0;
-	uint16_t num_result_formats = 0;
-
-	const unsigned int* param_formats = NULL;
-	const char* param_values = NULL;
-	const int* param_values_len = NULL;
-	const int* result_formats = NULL;
-
-	const char* stmt_name = NULL;
-	const char* portal_name = NULL;
-	*/
-
-	std::vector<const char*> param_values;
-	std::vector<int> param_lengths;
-	std::vector<int> param_formats;
-	std::vector<int> result_formats;
-	std::string stmt_name;
-	std::string portal_name;
-
-	PgSQL_Formatted_Bind_Message(PgSQL_Bind_Message* bind_msg);
-	~PgSQL_Formatted_Bind_Message();
-};
-#endif
 
 /* Enumerated types for output format and date order */
 typedef enum {
@@ -176,23 +148,28 @@ public:
 
 class PgSQL_STMT_Global_info;
 
+struct PgSQL_Extended_Query_Info {
+	const char* stmt_client_name;
+	const char* stmt_client_portal_name;
+	PgSQL_STMT_Global_info* stmt_info;
+	PgSQL_Bind_Message* bind_msg;
+	uint64_t stmt_global_id;
+	uint32_t stmt_backend_id;
+	uint8_t stmt_type;
+};
+
 class PgSQL_Query_Info {
 public:
 	unsigned long long start_time;
 	unsigned long long end_time;
-	uint64_t stmt_global_id;
 	uint64_t affected_rows;
 	uint64_t rows_sent;
 	uint64_t waiting_since;
 
+	PgSQL_Extended_Query_Info extended_query_info;
 	PgSQL_Session* sess;
 	unsigned char* QueryPointer;
-	const char* stmt_client_name;
-	PgSQL_STMT_Global_info* stmt_info;
-	PgSQL_Bind_Message* bind_msg;
 	SQP_par_t QueryParserArgs;
-
-	uint32_t stmt_backend_id;
 	int QueryLength;
 	enum PGSQL_QUERY_command PgQueryCmd;
 
@@ -213,6 +190,7 @@ public:
 	bool is_select_NOT_for_update();
 
 private:
+	void reset_extended_query_info(bool init = false);
 	void init(unsigned char* _p, int len, bool header = false);
 };
 

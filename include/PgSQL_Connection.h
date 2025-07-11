@@ -285,17 +285,17 @@ public:
      * on the PostgreSQL backend.
 	 * 
      */
-    void stmt_describe_prepared_start();
+    void stmt_describe_start();
 
     /**
      * @brief Continues the asynchronous description of a prepared SQL statement.
      *
-     * This method is called after stmt_describe_prepared_start() to handle the next step in the
+     * This method is called after stmt_describe_start() to handle the next step in the
      * asynchronous state machine for describing a prepared SQL statement on the PostgreSQL backend.
      *
      * @param event The event flag indicating the current I/O event.
      */
-    void stmt_describe_prepared_cont(short event);
+    void stmt_describe_cont(short event);
 
     /**
      * @brief Initiates the asynchronous execution of a prepared SQL statement.
@@ -321,8 +321,8 @@ public:
 	void reset_session_cont(short event);
 	
 	int async_connect(short event);
-	int async_query(short event, const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr,
-		bool is_prepare_stmt = false, PgSQL_Bind_Message* bind_message = nullptr);
+	int async_query(short event, const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr, 
+		PgSQL_Extended_Query_Type type = PGSQL_EXTENDED_QUERY_TYPE_NOT_SET, const PgSQL_Extended_Query_Info* extended_query_info = nullptr);
 	int async_ping(short event);
 	int async_reset_session(short event);
 	int async_send_simple_command(short event, char* stmt, unsigned long length); // no result set expected
@@ -498,8 +498,7 @@ public:
 
 	unsigned int reorder_dynamic_variables_idx();
 	unsigned int number_of_matching_session_variables(const PgSQL_Connection* client_conn, unsigned int& not_matching);
-	void set_query(const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr, 
-		const PgSQL_Bind_Message* bind_msg = nullptr);
+	void set_query(const char* stmt, unsigned long length, const char* _backend_stmt_name = nullptr, const PgSQL_Extended_Query_Info* extended_query_info = nullptr);
 	void reset();
 
 	bool IsKeepMultiplexEnabledVariables(char* query_digest_text);
@@ -508,7 +507,7 @@ public:
 		unsigned long length;
 		const char* ptr;
 		const char* backend_stmt_name;
-		const PgSQL_Bind_Message* bind_message;
+		const PgSQL_Extended_Query_Info* extended_query_info;
 	} query;
 
 	struct {
