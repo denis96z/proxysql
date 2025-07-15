@@ -301,7 +301,7 @@ PgSQL_Query_Info::PgSQL_Query_Info() {
 	rows_sent=0;
 	start_time=0;
 	end_time=0;
-	reset_extended_query_info(true);
+	reset_extended_query_info();
 }
 
 PgSQL_Query_Info::~PgSQL_Query_Info() {
@@ -339,9 +339,7 @@ void PgSQL_Query_Info::end() {
 	reset_extended_query_info();
 }
 
-void PgSQL_Query_Info::reset_extended_query_info(bool init) {
-	if (!init && extended_query_info.bind_msg)
-		delete extended_query_info.bind_msg;
+void PgSQL_Query_Info::reset_extended_query_info() {
 	extended_query_info.bind_msg = nullptr;
 	extended_query_info.stmt_client_name = nullptr;
 	extended_query_info.stmt_client_portal_name = nullptr;
@@ -506,7 +504,6 @@ PgSQL_Session::PgSQL_Session() {
 	autocommit = true;
 	autocommit_handled = false;
 	sending_set_autocommit = false;
-	autocommit_on_hostgroup = -1;
 	killed = false;
 	session_type = PROXYSQL_SESSION_PGSQL;
 	//admin=false;
@@ -562,7 +559,6 @@ void PgSQL_Session::reset() {
 	autocommit = true;
 	autocommit_handled = false;
 	sending_set_autocommit = false;
-	autocommit_on_hostgroup = -1;
 	warning_in_hg = -1;
 	current_hostgroup = -1;
 	default_hostgroup = -1;
@@ -2372,8 +2368,6 @@ __get_pkts_from_client:
 									handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY___create_mirror_session();
 								}
 
-								if (autocommit_on_hostgroup >= 0) {
-								}
 								if (pgsql_thread___set_query_lock_on_hostgroup == 1) { // algorithm introduced in 2.0.6
 									if (locked_on_hostgroup < 0) {
 										if (lock_hostgroup) {
@@ -2811,6 +2805,15 @@ int PgSQL_Session::RunQuery(PgSQL_Data_Stream* myds, PgSQL_Connection* myconn) {
 			const std::string& backend_stmt_name = std::string(PROXYSQL_PS_PREFIX) + std::to_string(CurrentQuery.extended_query_info.stmt_backend_id);
 			rc = myconn->async_query(myds->revents, (char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength, 
 				backend_stmt_name.c_str(), type, &CurrentQuery.extended_query_info);
+
+			// Handle edge case: Since libpq automatically sends a Sync after Execute,
+			// the Bind message is no longer pending on the backend. We must reset
+			// bind_waiting_for_execute in case the client sends a sequence like
+			// Bind/Describe/Execute/Describe/Sync, so that a subsequent Describe Portal
+			// does not incorrectly assume a pending Bind.
+			if (rc != 1 && type == PGSQL_EXTENDED_QUERY_TYPE_EXECUTE) {
+				bind_waiting_for_execute.reset(nullptr);
+			}
 		}
 		break;
 /*	case PROCESSING_STMT_EXECUTE:
@@ -2880,8 +2883,9 @@ int PgSQL_Session::handler() {
 			}
 		}
 	}
+	if (!hgs_expired_conns.empty())
+		housekeeping_before_pkts();
 
-	housekeeping_before_pkts();
 	handler_ret = get_pkts_from_client(wrong_pass, pkt);
 	if (handler_ret != 0) {
 		return handler_ret;
@@ -2899,13 +2903,13 @@ handler_again:
 			return handler_ret;
 		}
 
-		if (rc == 0 && extended_query_frame.empty() == false) {
-			writeout();
-			NEXT_IMMEDIATE(PROCESSING_EXTENDED_QUERY_SYNC);
-		} 
-		
 		// Extended query synchronization complete; clean up and prepare for next command
-		if (extended_query_frame.empty() == true){
+		if (rc == 0){
+			if (extended_query_frame.empty() == false) {
+				writeout();
+				NEXT_IMMEDIATE(PROCESSING_EXTENDED_QUERY_SYNC);
+			}
+
 			proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Extended query sync completed for session %p\n", this);
 			// we are done with extended query sync
 			bind_waiting_for_execute.reset(nullptr);
@@ -2916,13 +2920,6 @@ handler_again:
 #ifdef DEBUG
 						assert(dbg_extended_query_backend_conn == myds->myconn);
 #endif
-						/* Replaced with finishQuery() call
-						if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false
-							&& myds->myconn->MultiplexDisabled() == false) {
-							myds->DSS = STATE_NOT_INITIALIZED;
-							myds->return_MySQL_Connection_To_Pool();
-						}*/
-
 						// Return to pool if connection is reusable
 						finishQuery(myds, myds->myconn, false);
 					}
@@ -3213,6 +3210,11 @@ handler_again:
 					proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5, "Session=%p client_myds=%p server_myds=%p myconn=%p Remaining extended query messages '%lu'."
 						"Sticky Backend='%s'\n",
 						this, client_myds, myds, myconn, extended_query_frame.size(), (has_pending_messages ? "yes" : "no"));
+
+					if (!has_pending_messages) {
+						proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Extended query sync completed for session %p\n", this);
+						bind_waiting_for_execute.reset(nullptr);
+					}
 #ifdef DEBUG
 					if (dbg_extended_query_backend_conn)
 						assert(dbg_extended_query_backend_conn == myconn);
@@ -5103,9 +5105,10 @@ void PgSQL_Session::PgSQL_Result_to_PgSQL_wire(PgSQL_Connection* _conn, PgSQL_Da
 		}
 		CurrentQuery.rows_sent = num_rows;
 		bool resultset_completed = query_result->get_resultset(client_myds->PSarrayOUT);
-		if (_conn->processing_multi_statement == false)
+		if (_conn->processing_multi_statement == false && status != PROCESSING_STMT_EXECUTE)
 			assert(resultset_completed); // the resultset should always be completed if PgSQL_Result_to_PgSQL_wire is called
-		if (transfer_started == false && _conn->processing_multi_statement == false) { // we have all the resultset when PgSQL_Result_to_PgSQL_wire was called
+		if (transfer_started == false && _conn->processing_multi_statement == false && 
+			status != PROCESSING_STMT_EXECUTE) { // we have all the resultset when PgSQL_Result_to_PgSQL_wire was called
 			if (qpo && qpo->cache_ttl > 0 && is_tuple == true) { // the resultset should be cached
 				
 				if (_conn->is_error_present() == false &&
@@ -5336,7 +5339,8 @@ void PgSQL_Session::RequestEnd(PgSQL_Data_Stream* myds, const unsigned int myerr
 	// check if multiplexing needs to be disabled
 	char* qdt = NULL;
 
-	if (status != PROCESSING_STMT_EXECUTE) {
+	if (status != PROCESSING_STMT_EXECUTE || 
+		status != PROCESSING_STMT_DESCRIBE) {
 		qdt = CurrentQuery.get_digest_text();
 	} else {
 		qdt = CurrentQuery.extended_query_info.stmt_info->digest_text;
@@ -5864,8 +5868,15 @@ void PgSQL_Session::reset_default_session_variable(enum pgsql_variable_name idx)
 	}
 }
 
-int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg) {
+void PgSQL_Session::handle_post_sync_error(PGSQL_ERROR_CODES errcode, const char* errmsg, bool fatal) {
+	client_myds->setDSS_STATE_QUERY_SENT_NET();
+	client_myds->myprot.generate_error_packet(true, true, errmsg, errcode, fatal, true);
+	client_myds->DSS = STATE_SLEEP;
+	status = WAITING_CLIENT_DATA;
+}
 
+int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg) {
+	PROXY_TRACE();
 	thread->status_variables.stvar[st_var_frontend_stmt_prepare]++;
 	thread->status_variables.stvar[st_var_queries]++;
 
@@ -6006,6 +6017,7 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 }
 
 int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* describe_msg) {
+	PROXY_TRACE();
 	//thread->status_variables.stvar[st_var_frontend_stmt_describe]++; // FIXME
 	thread->status_variables.stvar[st_var_queries]++;
 
@@ -6019,21 +6031,15 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 	case 'P': // Portal
 		if (describe_data->stmt_name[0] != '\0') {
 			// we don't support named portals yet
-			client_myds->setDSS_STATE_QUERY_SENT_NET();
-			std::string err_msg = "only unnamed portals are supported";
-			client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, false, true);
-			client_myds->DSS = STATE_SLEEP;
-			status = WAITING_CLIENT_DATA;
+			handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED,
+				"only unnamed portals are supported", false);
 			return 2;
 		}
 
 		// if we are describing a portal, Bind message must exists
 		if (!bind_waiting_for_execute) {
-			client_myds->setDSS_STATE_QUERY_SENT_NET();
-			std::string err_msg = "portal \"" + std::string(describe_data->stmt_name) + "\" does not exist";
-			client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_CURSOR, false, true);
-			client_myds->DSS = STATE_SLEEP;
-			status = WAITING_CLIENT_DATA;
+			const std::string& errmsg = "portal \"" + std::string(describe_data->stmt_name) + "\" does not exist";
+			handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_CURSOR, errmsg.c_str(), false);
 			return 2;
 		}
 
@@ -6051,11 +6057,9 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 
 	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
 	if (stmt_global_id == 0) {
-		client_myds->setDSS_STATE_QUERY_SENT_NET();
-		std::string err_msg = "prepared statement \"" + std::string(stmt_client_name) + "\" does not exist";
-		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
-		client_myds->DSS = STATE_SLEEP;
-		status = WAITING_CLIENT_DATA;
+		const std::string& errmsg = stmt_client_name[0] != '\0' ? ("prepared statement \"" + std::string(stmt_client_name) + "\" does not exist") :
+			"unnamed prepared statement does not exist";
+		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, errmsg.c_str(), false);
 		return 2;
 	}
 
@@ -6063,11 +6067,9 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 	PgSQL_STMT_Global_info* stmt_info = GloPgStmt->find_prepared_statement_by_stmt_id(stmt_global_id);
 	if (stmt_info == NULL) {
 		// we couldn't find it
-		client_myds->setDSS_STATE_QUERY_SENT_NET();
-		std::string err_msg = "prepared statement \"" + std::string(stmt_client_name) + "\" does not exist";
-		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
-		client_myds->DSS = STATE_SLEEP;
-		status = WAITING_CLIENT_DATA;
+		const std::string& errmsg = stmt_client_name[0] != '\0' ? ("prepared statement \"" + std::string(stmt_client_name) + "\" does not exist") :
+			"unnamed prepared statement does not exist";
+		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, errmsg.c_str(), false);
 		return 2;
 	}
     // describe_msg memory will be freed in pgsql_real_query.end()
@@ -6171,11 +6173,11 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 	mybe->server_myds->pgsql_real_query.init(&describe_pkt); // Transfer packet ownership
 	mybe->server_myds->statuses.questions++;
 	client_myds->setDSS_STATE_QUERY_SENT_NET();
-
 	return 1;
 }
 
 int PgSQL_Session::handle_post_sync_close_message(PgSQL_Close_Message* close_msg) {
+	PROXY_TRACE();
 	thread->status_variables.stvar[st_var_frontend_stmt_close]++;
 	thread->status_variables.stvar[st_var_queries]++;
 	
@@ -6184,15 +6186,12 @@ int PgSQL_Session::handle_post_sync_close_message(PgSQL_Close_Message* close_msg
 	
 	switch (stmt_type) {
 	case 'P': // Portal
-		if (close_data->stmt_name[0] == '\0') {
+		if (close_data->stmt_name[0] != '\0') {
 			// we don't support unnamed portals yet
-			client_myds->setDSS_STATE_QUERY_SENT_NET();
-			std::string err_msg = "only named portals are supported";
-			client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, false, true);
-			client_myds->DSS = STATE_SLEEP;
-			status = WAITING_CLIENT_DATA;
+			handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, "only unnamed portals are supported", false);
 			return 2;
 		}
+		bind_waiting_for_execute.reset(nullptr); // release the ownership of the bind message
 		break;
 	case 'S': // Statement
 		client_myds->myconn->local_stmts->client_close(close_data->stmt_name);
@@ -6212,6 +6211,7 @@ int PgSQL_Session::handle_post_sync_close_message(PgSQL_Close_Message* close_msg
 }
 
 int PgSQL_Session::handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg) {
+	PROXY_TRACE();
 	//thread->status_variables.stvar[st_var_frontend_stmt_bind]++;
 	thread->status_variables.stvar[st_var_queries]++;
 
@@ -6219,11 +6219,7 @@ int PgSQL_Session::handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg) {
 
 	if (bind_data->portal_name[0] != '\0') {
 		// we don't support portals yet
-		client_myds->setDSS_STATE_QUERY_SENT_NET();
-		std::string err_msg = "only unnamed portals are supported";
-		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, false, true);
-		client_myds->DSS = STATE_SLEEP;
-		status = WAITING_CLIENT_DATA;
+		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, "only unnamed portals are supported", false);
 		return 2;
 	}
 	
@@ -6231,11 +6227,9 @@ int PgSQL_Session::handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg) {
 
 	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
 	if (stmt_global_id == 0) {
-		client_myds->setDSS_STATE_QUERY_SENT_NET();
-		std::string err_msg = "prepared statement \"" + std::string(stmt_client_name) + "\" does not exist";
-		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
-		client_myds->DSS = STATE_SLEEP;
-		status = WAITING_CLIENT_DATA;
+		const std::string& errmsg = stmt_client_name[0] != '\0' ? ("prepared statement \"" + std::string(stmt_client_name) + "\" does not exist") :
+			"unnamed prepared statement does not exist";
+		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, errmsg.c_str(), false);
 		return 2;
 	}
 
@@ -6251,6 +6245,7 @@ int PgSQL_Session::handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg) {
 }
 
 int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execute_msg) {
+	PROXY_TRACE();
 	//thread->status_variables.stvar[st_var_frontend_stmt_describe]++; // FIXME
 	thread->status_variables.stvar[st_var_queries]++;
 
@@ -6258,22 +6253,15 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 	const PgSQL_Execute_Data* execute_data = execute_msg->data();
 
 	if (execute_data->portal_name[0] != '\0') {
-		// we don't support portals yet
-		client_myds->setDSS_STATE_QUERY_SENT_NET();
-		std::string err_msg = "only unnamed portals are supported";
-		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, false, true);
-		client_myds->DSS = STATE_SLEEP;
-		status = WAITING_CLIENT_DATA;
+		// we don't support named portals yet
+		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, "only unnamed portals are supported", false);
 		return 2;
 	}
 
 	const char* portal_name = execute_data->portal_name; 
 	if (!bind_waiting_for_execute) {
-		client_myds->setDSS_STATE_QUERY_SENT_NET();
-		std::string err_msg = "portal \"" + std::string(portal_name) + "\" does not exist";
-		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_CURSOR, false, true);
-		client_myds->DSS = STATE_SLEEP;
-		status = WAITING_CLIENT_DATA;
+		const std::string& errmsg = "portal \"" + std::string(portal_name) + "\" does not exist";
+		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_CURSOR, errmsg.c_str(), false);
 		return 2;
 	}
 	assert(strcmp(portal_name, bind_waiting_for_execute->data()->portal_name) == 0); // portal name should match the one in bind_waiting_for_execute
@@ -6282,11 +6270,9 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 	const char* stmt_client_name = bind_waiting_for_execute->data()->stmt_name;
 	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
 	if (stmt_global_id == 0) {
-		client_myds->setDSS_STATE_QUERY_SENT_NET();
-		std::string err_msg = "prepared statement \"" + std::string(stmt_client_name) + "\" does not exist";
-		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
-		client_myds->DSS = STATE_SLEEP;
-		status = WAITING_CLIENT_DATA;
+		const std::string& errmsg = stmt_client_name[0] != '\0' ? ("prepared statement \"" + std::string(stmt_client_name) + "\" does not exist") :
+			"unnamed prepared statement does not exist";
+		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, errmsg.c_str(), false);
 		return 2;
 	}
 
@@ -6294,11 +6280,9 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 	PgSQL_STMT_Global_info* stmt_info = GloPgStmt->find_prepared_statement_by_stmt_id(stmt_global_id);
 	if (stmt_info == NULL) {
 		// we couldn't find it
-		client_myds->setDSS_STATE_QUERY_SENT_NET();
-		std::string err_msg = "prepared statement \"" + std::string(stmt_client_name) + "\" does not exist";
-		client_myds->myprot.generate_error_packet(true, true, err_msg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
-		client_myds->DSS = STATE_SLEEP;
-		status = WAITING_CLIENT_DATA;
+		const std::string& errmsg = stmt_client_name[0] != '\0' ? ("prepared statement \"" + std::string(stmt_client_name) + "\" does not exist") :
+			"unnamed prepared statement does not exist";
+		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, errmsg.c_str(), false);
 		return 2;
 	}
 	PgSQL_Extended_Query_Info& extended_query_info = CurrentQuery.extended_query_info;
@@ -6306,7 +6290,7 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 	extended_query_info.stmt_client_name = stmt_client_name;
 	extended_query_info.stmt_global_id = stmt_global_id;
 	extended_query_info.stmt_info = stmt_info;
-	extended_query_info.bind_msg = bind_waiting_for_execute.release();
+	extended_query_info.bind_msg = bind_waiting_for_execute.get();
 	CurrentQuery.start_time = thread->curtime;
 
 	timespec begint;
@@ -6390,7 +6374,7 @@ void PgSQL_Session::reset_extended_query_frame() {
 }
 
 int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC() {
-
+	PROXY_TRACE();
 	if (session_type != PROXYSQL_SESSION_PGSQL) { // only PgSQL module supports prepared statement!!
 		client_myds->setDSS_STATE_QUERY_SENT_NET();
 		client_myds->myprot.generate_error_packet(true, false, "Prepared statements not supported", PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED,
@@ -6417,6 +6401,7 @@ int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_S
 }
 
 int PgSQL_Session::handler___status_PROCESSING_EXTENDED_QUERY_SYNC() {
+	PROXY_TRACE();
 	// we have pending packets, so we will process them now
 	auto packet = std::move(extended_query_frame.front()); // get the packet from the queue
 	extended_query_frame.pop(); // remove the packet from the queue
@@ -6641,7 +6626,7 @@ void PgSQL_Session::handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_St
 			myds->myconn->stmt_metadata_result = NULL;
 		}
 	} else {
-		// For portals, we don't cache metadata, so we just send an empty packet
+		// For portals, we don't cache metadata
 		client_myds->myprot.generate_describe_completion_packet(true, send_ready_packet, myds->myconn->stmt_metadata_result, 
 			extended_query_info.stmt_type, txn_state);
 		LogQuery(myds);

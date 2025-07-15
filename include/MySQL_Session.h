@@ -329,7 +329,6 @@ class MySQL_Session: public Base_Session<MySQL_Session, MySQL_Data_Stream, MySQL
 	int mirror_hostgroup;
 	int mirror_flagOUT;
 	unsigned int active_transactions;
-	int autocommit_on_hostgroup;
 	int transaction_persistent_hostgroup;
 	int to_process;
 	int pending_connect;
@@ -354,6 +353,7 @@ class MySQL_Session: public Base_Session<MySQL_Session, MySQL_Data_Stream, MySQL
 	//bool started_sending_data_to_client; // this status variable tracks if some result set was sent to the client, or if proxysql is still buffering everything
 	bool use_ssl;
 #endif // 0
+	int autocommit_on_hostgroup;
 	/**
 	 * @brief This status variable tracks whether the session is performing an
 	 *   'Auth Switch' due to a 'COM_CHANGE_USER' packet.

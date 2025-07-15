@@ -4736,7 +4736,7 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 						}
 					}
 					else { // prepared statement
-						PgSQL_STMT_Global_info* si = sess->CurrentQuery.extended_query_info.stmt_info;
+						const PgSQL_STMT_Global_info* si = sess->CurrentQuery.extended_query_info.stmt_info;
 						if (si->query_length) {
 							pta[13] = (char*)malloc(si->query_length + 1);
 							strncpy(pta[13], si->query, si->query_length);

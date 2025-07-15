@@ -9,9 +9,9 @@
 #include "proxysql.h"
 #include "Base_Session.h"
 #include "cpp.h"
+#include "PgSQL_Error_Helper.h"
 #include "PgSQL_Variables.h"
 #include "PgSQL_Variables_Validator.h"
-#include "Base_Session.h"
 
 
 class PgSQL_Query_Result;
@@ -28,19 +28,6 @@ class PgSQL_Execute_Message;
 #endif // PROXYJSON
 
 extern class PgSQL_Variables pgsql_variables;
-
-/*
-enum proxysql_session_type {
-	PROXYSQL_SESSION_MYSQL,
-	PROXYSQL_SESSION_ADMIN,
-	PROXYSQL_SESSION_STATS,
-	PROXYSQL_SESSION_SQLITE,
-	PROXYSQL_SESSION_CLICKHOUSE,
-	PROXYSQL_SESSION_MYSQL_EMU,
-
-	PROXYSQL_SESSION_NONE
-};
-*/
 
 enum PgSQL_Extended_Query_Type : uint8_t {
 	PGSQL_EXTENDED_QUERY_TYPE_NOT_SET			 = 0x00,
@@ -151,8 +138,8 @@ class PgSQL_STMT_Global_info;
 struct PgSQL_Extended_Query_Info {
 	const char* stmt_client_name;
 	const char* stmt_client_portal_name;
+	const PgSQL_Bind_Message* bind_msg;
 	PgSQL_STMT_Global_info* stmt_info;
-	PgSQL_Bind_Message* bind_msg;
 	uint64_t stmt_global_id;
 	uint32_t stmt_backend_id;
 	uint8_t stmt_type;
@@ -190,7 +177,7 @@ public:
 	bool is_select_NOT_for_update();
 
 private:
-	void reset_extended_query_info(bool init = false);
+	void reset_extended_query_info();
 	void init(unsigned char* _p, int len, bool header = false);
 };
 
@@ -263,6 +250,7 @@ private:
 	int handle_post_sync_close_message(PgSQL_Close_Message* close_msg);
 	int handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg);
 	int handle_post_sync_execute_message(PgSQL_Execute_Message* execute_msg);
+	void handle_post_sync_error(PGSQL_ERROR_CODES errcode, const char* errmsg, bool fatal);
 	void reset_extended_query_frame();
 
 
@@ -388,6 +376,10 @@ private:
 	void switch_fast_forward_to_normal_mode();
 
 public:
+	inline bool is_extended_query_frame_empty() const {
+		return extended_query_frame.empty();
+	}
+
 	bool handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, const char* var_name, const char* var_value, bool no_quote = false, bool set_transaction = false);
 #if 0
 	bool handler_again___status_SETTING_SQL_LOG_BIN(int*);
@@ -452,7 +444,6 @@ public:
 	int mirror_hostgroup;
 	int mirror_flagOUT;
 	unsigned int active_transactions;
-	int autocommit_on_hostgroup;
 	int transaction_persistent_hostgroup;
 	int to_process;
 	int pending_connect;

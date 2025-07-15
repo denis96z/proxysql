@@ -301,7 +301,7 @@ public:
      * @brief Initiates the asynchronous execution of a prepared SQL statement.
      *
      * This method starts the process of executing a previously prepared SQL statement
-     * on the PostgreSQL backend. It sends Bind and Execute message to server
+     * on the PostgreSQL backend. It sends Bind and Execute messages to the server
      * and transitions the connection's state machine to handle the subsequent response.
 	 * 
      */

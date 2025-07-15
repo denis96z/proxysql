@@ -613,6 +613,11 @@ handler_again:
 			query_result->add_error(NULL);
 		}
 
+		if (fetch_result_end_st == ASYNC_STMT_EXECUTE_END &&
+			!myds->sess->is_extended_query_frame_empty()) {
+			// Skip sending ReadyForQuery if there are still extended query messages pending in the queue
+			NEXT_IMMEDIATE(fetch_result_end_st);
+		}
 		// finally add ready for query packet
 		query_result->add_ready_status(PQtransactionStatus(pgsql_conn));
 		update_bytes_recv(6);

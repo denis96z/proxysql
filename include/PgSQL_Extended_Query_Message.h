@@ -4,41 +4,49 @@
 #include "proxysql.h"
 #include "cpp.h"
 
+
+/**
+ * @brief Base class for handling PostgreSQL extended query messages.
+ *
+ * @tparam DATA    The structure type holding parsed message data.
+ * @tparam DERIVED The derived message class type.
+ */
 template<typename DATA, typename DERIVED>
 class Base_Extended_Query_Message {
 
 public:
 	Base_Extended_Query_Message();
 	~Base_Extended_Query_Message();
+
 	/**
-	 * @brief Releases the ownership of the packet and returns a new message object.
-	 *
-	 * This method transfers ownership of the packet data to a new message object
-	 * and resets the current message's internal state.
-	 *
-	 * @return A pointer to the newly created message object with transferred data.
-	 */
+	  * @brief Releases the ownership of the packet and returns a new message object.
+	  *
+	  * This method transfers ownership of the packet data to a new message object
+	  * and resets the current message's internal state.
+	  *
+	  * @return A pointer to the newly created message object with transferred data.
+	  */
 	DERIVED* release();
 
 	/**
-	 * @brief Parses the packet data and populates the message data.
-	 *
-	 * This method should be implemented by derived classes to parse the packet
-	 * and fill the `_data` member with relevant information.
-	 *
-	 * @param pkt The packet data to parse.
-	 * @return True if parsing was successful, false otherwise.
-	 */
+	  * @brief Detaches the packet data from the message.
+	  *
+	  * @return The detached packet data as a PtrSize_t structure.
+	  */
 	PtrSize_t detach();
 
-
+	/**
+	  * @brief Returns a pointer to the parsed message data.
+	  *
+	  * @return Pointer to the DATA structure containing parsed message information.
+	  */
 	inline const DATA* data() const {
 		return &_data;
 	}
 
 protected:
-	DATA _data {};
-	PtrSize_t _pkt = {};
+	DATA _data {};      ///< Parsed message data.
+	PtrSize_t _pkt = {};///< Packet data pointer.
 };
 
 struct PgSQL_Parse_Data {
@@ -88,7 +96,7 @@ struct PgSQL_Close_Data {
 	const char* stmt_name;	// The name of the prepared statement or portal
 };
 
-//create close statement message 
+// Class for handling Close messages for prepared statements and portals
 class PgSQL_Close_Message : public Base_Extended_Query_Message<PgSQL_Close_Data,PgSQL_Close_Message> {
 public:
 	/**

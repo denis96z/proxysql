@@ -76,7 +76,6 @@ class Base_Session {
 	int mirror_hostgroup;
 	int mirror_flagOUT;
 	unsigned int active_transactions;
-	int autocommit_on_hostgroup;
 	int transaction_persistent_hostgroup;
 	int to_process;
 	int pending_connect;
