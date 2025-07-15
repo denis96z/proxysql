@@ -109,9 +109,9 @@ void ProxySQL_Admin::p_stats___memory_metrics() {
 	this->metrics.p_gauge_array[p_admin_gauge::connpool_memory_bytes]->Set(connpool_mem);
 
 	// proxysql_sqlite3_memory_bytes metric
-	int highwater = 0;
-	int current = 0;
-	(*proxy_sqlite3_status)(SQLITE_STATUS_MEMORY_USED, &current, &highwater, 0);
+	long long highwater = 0;
+	long long current = 0;
+	(*proxy_sqlite3_status64)(SQLITE_STATUS_MEMORY_USED, &current, &highwater, 0);
 	this->metrics.p_gauge_array[p_admin_gauge::sqlite3_memory_bytes]->Set(current);
 
 	// proxysql_jemalloc_* memory metrics
@@ -206,8 +206,8 @@ void ProxySQL_Admin::stats___memory_metrics() {
 	if (!GloMTH) return;
 	SQLite3_result * resultset = NULL;
 
-	int highwater;
-	int current;
+	long long highwater = 0;
+	long long current = 0;
 	char bu[32];
 	char *vn=NULL;
 	char *query=NULL;
@@ -218,9 +218,9 @@ void ProxySQL_Admin::stats___memory_metrics() {
 		delete resultset;
 		resultset=NULL;
 	}
-	(*proxy_sqlite3_status)(SQLITE_STATUS_MEMORY_USED, &current, &highwater, 0);
+	(*proxy_sqlite3_status64)(SQLITE_STATUS_MEMORY_USED, &current, &highwater, 0);
 	vn=(char *)"SQLite3_memory_bytes";
-	sprintf(bu,"%d",current);
+	sprintf(bu,"%lld",current);
 	query=(char *)malloc(strlen(a)+strlen(vn)+strlen(bu)+16);
 	sprintf(query,a,vn,bu);
 	statsdb->execute(query);
@@ -492,6 +492,8 @@ const void sqlite3_global_stats_row_step(
 		sprintf(buf, "%lu", val);
 	} else if constexpr (std::is_same_v<T, unsigned long long>) {
 		sprintf(buf, "%llu", val);
+	} else if constexpr (std::is_same_v<T, long long>) {
+		sprintf(buf, "%lld", val);
 	} else if constexpr (std::is_same_v<T, bool>) {
 		sprintf(buf, "%s", val ? "true" : "false");
 	} else {
@@ -521,12 +523,17 @@ void ProxySQL_Admin::stats___mysql_global() {
 		"INSERT INTO stats_mysql_global VALUES " + generate_multi_rows_query(32, 2)
 	};
 
-	sqlite3_stmt* row_stmt = nullptr;
-	int rc = statsdb->prepare_v2(q_row_insert.c_str(), &row_stmt);
+	int rc = 0;
+
+	stmt_unique_ptr u_row_stmt { nullptr };
+	std::tie(rc, u_row_stmt) = statsdb->prepare_v2(q_row_insert.c_str());
 	ASSERT_SQLITE_OK(rc, statsdb);
-	sqlite3_stmt* bulk_stmt = nullptr;
-	rc = statsdb->prepare_v2(q_bulk_insert.c_str(), &bulk_stmt);
+	sqlite3_stmt* const row_stmt { u_row_stmt.get() };
+
+	stmt_unique_ptr u_bulk_stmt { nullptr };
+	std::tie(rc, u_bulk_stmt) = statsdb->prepare_v2(q_bulk_insert.c_str());
 	ASSERT_SQLITE_OK(rc, statsdb);
+	sqlite3_stmt* const bulk_stmt { u_bulk_stmt.get() };
 
 	sqlite3_bulk_step(statsdb, row_stmt, bulk_stmt, resultset, stats_mysql_global___bind_row);
 
@@ -542,8 +549,8 @@ void ProxySQL_Admin::stats___mysql_global() {
 	}
 
 	{
-		int highwater, current = 0;
-		(*proxy_sqlite3_status)(SQLITE_STATUS_MEMORY_USED, &current, &highwater, 0);
+		long long highwater, current = 0;
+		(*proxy_sqlite3_status64)(SQLITE_STATUS_MEMORY_USED, &current, &highwater, 0);
 		sqlite3_global_stats_row_step(statsdb, row_stmt, "SQLite3_memory_bytes", current);
 	}
 
@@ -647,14 +654,14 @@ void ProxySQL_Admin::stats___pgsql_global() {
 		resultset = NULL;
 	}
 
-	int highwater;
-	int current;
-	(*proxy_sqlite3_status)(SQLITE_STATUS_MEMORY_USED, &current, &highwater, 0);
+	long long highwater = 0;
+	long long current = 0;
+	(*proxy_sqlite3_status64)(SQLITE_STATUS_MEMORY_USED, &current, &highwater, 0);
 	char bu[32];
 	char* vn = NULL;
 	char* query = NULL;
 	vn = (char*)"SQLite3_memory_bytes";
-	sprintf(bu, "%d", current);
+	sprintf(bu, "%lld", current);
 	query = (char*)malloc(strlen(a) + strlen(vn) + strlen(bu) + 16);
 	sprintf(query, a, vn, bu);
 	statsdb->execute(query);
