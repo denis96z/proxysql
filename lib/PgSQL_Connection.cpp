@@ -706,9 +706,6 @@ handler_again:
 				stmt_prepare_cont(event);
 			}
 			if (async_exit_status) {
-				//if (myds->wait_until != 0 && myds->sess->thread->curtime >= myds->wait_until) {
-				//	NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_TIMEOUT);
-				//}
 				next_event(ASYNC_STMT_PREPARE_END);
 				break;
 			}
