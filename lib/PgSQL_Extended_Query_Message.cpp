@@ -458,7 +458,7 @@ bool PgSQL_Bind_Message::next_format(FormatIterCtx* ctx, uint16_t* out) const {
 		return false;
 	}
 
-	ctx->current++;
+	ctx->current += sizeof(uint16_t);
 	ctx->remaining--;
 	return true;
 }
