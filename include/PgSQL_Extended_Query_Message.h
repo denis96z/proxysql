@@ -15,8 +15,8 @@ template<typename DATA, typename DERIVED>
 class Base_Extended_Query_Message {
 
 public:
-	Base_Extended_Query_Message();
-	~Base_Extended_Query_Message();
+	Base_Extended_Query_Message() noexcept = default;
+	~Base_Extended_Query_Message() noexcept;
 
 	/**
 	  * @brief Releases the ownership of the packet and returns a new message object.
@@ -26,27 +26,47 @@ public:
 	  *
 	  * @return A pointer to the newly created message object with transferred data.
 	  */
-	DERIVED* release();
+	DERIVED* release() noexcept;
 
 	/**
 	  * @brief Detaches the packet data from the message.
 	  *
 	  * @return The detached packet data as a PtrSize_t structure.
 	  */
-	PtrSize_t detach();
+	PtrSize_t detach() noexcept;
 
 	/**
-	  * @brief Returns a pointer to the parsed message data.
-	  *
-	  * @return Pointer to the DATA structure containing parsed message information.
-	  */
-	inline const DATA* data() const {
-		return &_data;
+	 * @brief Returns a const reference to the parsed data.
+	 *
+	 * @return Const reference to the DATA structure.
+	 */
+	inline const DATA& data() const noexcept {
+		return _data;
 	}
 
 protected:
-	DATA _data {};      ///< Parsed message data.
-	PtrSize_t _pkt = {};///< Packet data pointer.
+	/**
+	 * @brief Provides mutable access to the internal data.
+	 *
+	 * @return Reference to the DATA structure.
+	 */
+	inline DATA& mutable_data() noexcept {
+		return _data;
+	}
+
+	/**
+	 * @brief Moves ownership of packet data from source to internal storage.
+	 *
+	 * @param src Rvalue reference to the source PtrSize_t.
+	 */
+	inline void move_pkt(PtrSize_t&& src) noexcept {
+		_pkt = { src.size, src.ptr };
+		src = PtrSize_t{ 0, nullptr };
+	}
+
+private:
+	DATA _data = {};		///< Parsed message data.
+	PtrSize_t _pkt = {};	///< Packet data pointer.
 };
 
 struct PgSQL_Parse_Data {
@@ -138,13 +158,7 @@ public:
 	typedef struct {
 		const unsigned char* current;   // Current position in values
 		uint16_t remaining;            // Parameters remaining
-	} ParamValueIterCtx;
-
-	// Iterator context for format arrays
-	typedef struct {
-		const unsigned char* current;   // Current position in array
-		uint16_t remaining;         // Formats remaining
-	} FormatIterCtx;
+	} IteratorCtx;
 
 	/**
 	 * @brief Parses the PgSQL_Bind_Message from the provided packet.
@@ -160,15 +174,15 @@ public:
 	bool parse(PtrSize_t& pkt);
 
 	// Initialize param format iterator
-	void init_param_format_iter(FormatIterCtx* ctx) const;
+	void init_param_format_iter(IteratorCtx* ctx) const;
 	// Initialize parameter value iterator
-	void init_param_value_iter(ParamValueIterCtx* ctx) const;
+	void init_param_value_iter(IteratorCtx* ctx) const;
 	// Get next parameter value
-	bool next_param_value(ParamValueIterCtx* ctx, ParamValue_t* out) const;
+	bool next_param_value(IteratorCtx* ctx, ParamValue_t* out) const;
 	// Initialize result format iterator
-	void init_result_format_iter(FormatIterCtx* ctx) const;
+	void init_result_format_iter(IteratorCtx* ctx) const;
 	// Get next format value
-	bool next_format(FormatIterCtx* ctx, uint16_t* out) const;
+	bool next_format(IteratorCtx* ctx, uint16_t* out) const;
 };
 
 struct PgSQL_Execute_Data {

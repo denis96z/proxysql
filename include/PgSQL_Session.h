@@ -187,7 +187,7 @@ private:
 		std::unique_ptr<PgSQL_Close_Message>, std::unique_ptr<PgSQL_Bind_Message>, std::unique_ptr<PgSQL_Execute_Message>>;
 
 	std::queue<PktType> extended_query_frame;
-	std::unique_ptr<PgSQL_Bind_Message> bind_waiting_for_execute;
+	std::unique_ptr<const PgSQL_Bind_Message> bind_waiting_for_execute;
 
 	//int handler_ret;
 	void handler___status_CONNECTING_CLIENT___STATE_SERVER_HANDSHAKE(PtrSize_t*, bool*);

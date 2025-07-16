@@ -1,3 +1,4 @@
+// NOSONAR - TAP test files do not need to follow the same rules as production code
 /**
  * @file pgsql-extended_query_protocol_test-t.cpp
  * @brief This TAP test suite verifies the correct handling of PostgreSQL's Extended Query Protocol 
@@ -59,7 +60,8 @@ PGConnPtr createNewConnection(ConnType conn_type, const std::string& options = "
 bool executeQueries(PGconn* conn, const std::vector<std::string>& queries) {
 	auto fnResultType = [](const char* query) -> int {
 		const char* fs = strchr(query, ' ');
-		size_t qtlen = strlen(query);
+		// NOSONAR: strlen is safe here as we control the input
+		size_t qtlen = strlen(query); // NOSONAR
 		if (fs != NULL) {
 			qtlen = (fs - query) + 1;
 		}

@@ -1557,7 +1557,8 @@ bool PgSQL_Protocol::generate_describe_completion_packet(bool send, bool ready, 
 			sizeof(uint16_t) + 4; // Field count + size of the packet
 
 		for (size_t i = 0; i < desc->columns_count; i++) {
-			size += strlen(desc->columns[i].name) + 1; // field name + null terminator
+			// NOSONAR: strlen is safe here, as the column names are expected to be null-terminated strings
+			size += strlen(desc->columns[i].name) + 1; // NOSONAR : field name + null terminator
 		}
 		pgpkt.put_char('T');
 		// If there are no result fields, we still need to write a zero

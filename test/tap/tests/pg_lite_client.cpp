@@ -1,3 +1,4 @@
+// NOSONAR - TAP test files do not need to follow the same rules as production code
 /* This is a minimal PostgreSQL client intended >>only for testing or experimentation<<
  * >> Do not use in production <<
  * This library provides basic functionality to connect to a PostgreSQL database and execute simple queries.

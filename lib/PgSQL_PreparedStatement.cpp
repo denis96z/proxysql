@@ -9,50 +9,39 @@
 #include "PgSQL_PreparedStatement.h"
 #include "PgSQL_Protocol.h"
 
-//extern MySQL_STMT_Manager *GloMyStmt;
-//static uint32_t add_prepared_statement_calls = 0;
-//static uint32_t find_prepared_statement_by_hash_calls = 0;
-//#else
 extern PgSQL_STMT_Manager_v14 *GloPgStmt;
-//#endif
 
 const int PS_GLOBAL_STATUS_FIELD_NUM = 9;
 
 static uint64_t stmt_compute_hash(char *user,
                                   char *schema, char *query,
                                   unsigned int query_length) {
-	int l = 0;
-	l += strlen(user);
-	l += strlen(schema);
-// two random seperators
-#define _COMPUTE_HASH_DEL1_ "-ujhtgf76y576574fhYTRDFwdt-"
-#define _COMPUTE_HASH_DEL2_ "-8k7jrhtrgJHRgrefgreRFewg6-"
-	l += strlen(_COMPUTE_HASH_DEL1_);
-	l += strlen(_COMPUTE_HASH_DEL2_);
+	// two random seperators
+	static const char DELIM1[] = "-ZiODNjvcNHTFaARXoqqSPDqQe-";
+	static const char DELIM2[] = "-aSfpWDoswfuRsJXqZKfcelzCL-";
+
+	// NOSONAR: strlen is safe here 
+	size_t user_length = strlen(user); // NOSONAR
+	// NOSONAR: strlen is safe here 
+	size_t schema_length = strlen(schema); // NOSONAR
+	size_t delim1_length = sizeof(DELIM1) - 1;
+	size_t delim2_length = sizeof(DELIM2) - 1;
+
+	size_t l = 0;
+	l += user_length;
+	l += schema_length;
+	l += delim1_length;
+	l += delim2_length;
 	l += query_length;
-	char *buf = (char *)malloc(l);
+
+	auto buf = (char *)malloc(l);
 	l = 0;
-
-	// write user
-	strcpy(buf + l, user);
-	l += strlen(user);
-
-	// write delimiter1
-	strcpy(buf + l, _COMPUTE_HASH_DEL1_);
-	l += strlen(_COMPUTE_HASH_DEL1_);
-
-	// write schema
-	strcpy(buf + l, schema);
-	l += strlen(schema);
-
-	// write delimiter2
-	strcpy(buf + l, _COMPUTE_HASH_DEL2_);
-	l += strlen(_COMPUTE_HASH_DEL2_);
-
-	// write query
-	memcpy(buf + l, query, query_length);
-	l += query_length;
-
+	memcpy(buf + l, user, user_length);		l += user_length;		// write user
+	memcpy(buf + l, DELIM1, delim1_length); l += delim1_length; // write delimiter1
+	memcpy(buf + l, schema, schema_length); l += schema_length; // write schema
+	memcpy(buf + l, DELIM2, delim2_length); l += delim2_length; // write delimiter2
+	memcpy(buf + l, query, query_length);	l += query_length; 	// write query
+	
 	uint64_t hash = SpookyHash::Hash64(buf, l, 0);
 	free(buf);
 	return hash;
@@ -73,7 +62,7 @@ PgSQL_STMT_Global_info::PgSQL_STMT_Global_info(uint64_t id,
 	statement_id = id;
 	ref_count_client = 0;
 	ref_count_server = 0;
-	digest_text = NULL;
+	digest_text = nullptr;
 	stmt_metadata = nullptr;
 	username = strdup(u);
 	schemaname = strdup(s);
@@ -84,7 +73,7 @@ PgSQL_STMT_Global_info::PgSQL_STMT_Global_info(uint64_t id,
 	if (fc) {
 		first_comment = strdup(fc);
 	} else {
-		first_comment = NULL;
+		first_comment = nullptr;
 	}
 	PgQueryCmd = PGSQL_QUERY__UNINITIALIZED;
 	
@@ -125,16 +114,7 @@ PgSQL_STMT_Global_info::PgSQL_STMT_Global_info(uint64_t id,
 							// let simplify. If NOWAIT is used, we assume FOR UPDATE|SHARE is used
 							__sync_fetch_and_add(&MyHGM->status.select_for_update_or_equivalent, 1);
 							goto __exit_PgSQL_STMT_Global_info___search_select;
-/*
-							if (strcasestr(q," FOR UPDATE ")) {
-								__sync_fetch_and_add(&MyHGM->status.select_for_update_or_equivalent, 1);
-								goto __exit_PgSQL_STMT_Global_info___search_select;
-							}
-							if (strcasestr(q," FOR SHARE ")) {
-								__sync_fetch_and_add(&MyHGM->status.select_for_update_or_equivalent, 1);
-								goto __exit_PgSQL_STMT_Global_info___search_select;
-							}
-*/
+
 						}
 						p = q;
 						p += ql-12;
@@ -142,16 +122,6 @@ PgSQL_STMT_Global_info::PgSQL_STMT_Global_info(uint64_t id,
 							// let simplify. If SKIP LOCKED is used, we assume FOR UPDATE|SHARE is used
 							__sync_fetch_and_add(&MyHGM->status.select_for_update_or_equivalent, 1);
 							goto __exit_PgSQL_STMT_Global_info___search_select;
-/*
-							if (strcasestr(q," FOR UPDATE ")==NULL) {
-								__sync_fetch_and_add(&MyHGM->status.select_for_update_or_equivalent, 1);
-								goto __exit_PgSQL_STMT_Global_info___search_select;
-							}
-							if (strcasestr(q," FOR SHARE ")==NULL) {
-								__sync_fetch_and_add(&MyHGM->status.select_for_update_or_equivalent, 1);
-								goto __exit_PgSQL_STMT_Global_info___search_select;
-							}
-*/
 						}
 						p=q;
 						char buf[129];
@@ -187,10 +157,11 @@ void PgSQL_STMT_Global_info::calculate_mem_usage() {
 	total_mem_usage = sizeof(PgSQL_STMT_Global_info) +
 		query_length + 1;
 
-	if (username) total_mem_usage += strlen(username) + 1;
-	if (schemaname) total_mem_usage += strlen(schemaname) + 1;
-	if (first_comment) total_mem_usage += strlen(first_comment) + 1;
-	if (digest_text) total_mem_usage += strlen(digest_text) + 1;
+	// NOSONAR: strlen is safe here 
+	if (username) total_mem_usage += strlen(username) + 1; // NOSONAR
+	if (schemaname) total_mem_usage += strlen(schemaname) + 1; // NOSONAR
+	if (first_comment) total_mem_usage += strlen(first_comment) + 1; // NOSONAR
+	if (digest_text) total_mem_usage += strlen(digest_text) + 1; // NOSONAR
 
 	if (stmt_metadata) {
 		total_mem_usage += sizeof(PgSQL_Describe_Prepared_Info);
@@ -198,7 +169,8 @@ void PgSQL_STMT_Global_info::calculate_mem_usage() {
 		total_mem_usage += stmt_metadata->columns_count * sizeof(ColumnMetadata);
 		for (uint16_t i = 0; i < stmt_metadata->columns_count; i++) {
 			if (stmt_metadata->columns[i].name)
-				total_mem_usage += strlen(stmt_metadata->columns[i].name) + 1;
+				// NOSONAR: strlen is safe here
+				total_mem_usage += strlen(stmt_metadata->columns[i].name) + 1; // NOSONAR
 		}
 	}
 }
@@ -210,7 +182,7 @@ void PgSQL_STMT_Global_info::update_stmt_metadata(PgSQL_Describe_Prepared_Info**
 
 	if (stmt_metadata == nullptr) {
 		stmt_metadata = *new_stmt_metadata;
-		*new_stmt_metadata = NULL;
+		*new_stmt_metadata = nullptr;
 		pthread_rwlock_unlock(&rwlock_);
 		return;
 	}
@@ -233,7 +205,7 @@ void PgSQL_STMT_Global_info::update_stmt_metadata(PgSQL_Describe_Prepared_Info**
 			for (size_t i = 0; i < (*new_stmt_metadata)->columns_count; ++i) {
 				const auto& current_col = stmt_metadata->columns[i];
 				const auto& update_col = (*new_stmt_metadata)->columns[i];
-				if (current_col.name != update_col.name ||
+				if (strcmp(current_col.name, update_col.name) || // NOSONAR: strcmp is safe here
 					current_col.table_oid != update_col.table_oid ||
 					current_col.column_index != update_col.column_index ||
 					current_col.type_oid != update_col.type_oid ||
@@ -250,7 +222,7 @@ void PgSQL_STMT_Global_info::update_stmt_metadata(PgSQL_Describe_Prepared_Info**
 	if (need_refresh) {
 		delete stmt_metadata;
 		stmt_metadata = *new_stmt_metadata;
-		*new_stmt_metadata = NULL;
+		*new_stmt_metadata = nullptr;
 		calculate_mem_usage();
 	}
 	pthread_rwlock_unlock(&rwlock_);
@@ -260,17 +232,12 @@ PgSQL_STMT_Global_info::~PgSQL_STMT_Global_info() {
 	free(username);
 	free(schemaname);
 	free(query);
-	if (first_comment) {
+	if (first_comment)
 		free(first_comment);
-	}
-	if (digest_text) {
+	if (digest_text)
 		free(digest_text);
-		digest_text = NULL;
-	}
-	if (stmt_metadata) {
+	if (stmt_metadata)
 		delete stmt_metadata;
-		stmt_metadata = nullptr;
-	}
 	pthread_rwlock_destroy(&rwlock_);
 }
 
@@ -281,8 +248,8 @@ void PgSQL_STMTs_local_v14::backend_insert(uint64_t global_stmt_id, uint32_t bac
 
 void PgSQL_STMTs_local_v14::client_insert(uint64_t global_stmt_id, const std::string& client_stmt_name) {
 	// validate that client_stmt_name is not empty and global_stmt_id is a valid id
-	stmt_name_to_global_ids.insert(std::make_pair(client_stmt_name, global_stmt_id));
-	global_id_to_stmt_names.insert(std::make_pair(global_stmt_id, client_stmt_name));
+	stmt_name_to_global_ids.emplace(client_stmt_name, global_stmt_id);
+	global_id_to_stmt_names.emplace(global_stmt_id, client_stmt_name);
 	GloPgStmt->ref_count_client(global_stmt_id, 1, false); // do not lock!
 }
 
@@ -362,11 +329,6 @@ void PgSQL_STMT_Manager_v14::ref_count_client(uint64_t _stmt_id ,int _v, bool lo
 							map_stmt_hash_to_info.erase(s2);
 						}
 						__sync_sub_and_fetch(&num_stmt_with_ref_client_count_zero,1);
-						//if (a->ref_count_server == 0) {
-							//__sync_sub_and_fetch(&num_stmt_with_ref_server_count_zero,1);
-						//}
-						// m.erase(it);
-						// delete a;
 						i++;
 						torem[i] = it->first;
 					}
@@ -423,13 +385,6 @@ PgSQL_STMTs_local_v14::~PgSQL_STMTs_local_v14() {
 			GloPgStmt->ref_count_client(global_stmt_id, -1);
 		}
 	} else {
-		/*for (std::map<uint64_t, MYSQL_STMT*>::iterator it = global_stmt_to_backend_stmt.begin();
-			it != global_stmt_to_backend_stmt.end(); ++it) {
-			uint64_t global_stmt_id = it->first;
-			MYSQL_STMT *stmt = it->second;
-			proxy_mysql_stmt_close(stmt);
-			GloPgStmt->ref_count_server(global_stmt_id, -1);
-		}*/
 		for (auto it = backend_stmt_to_global_ids.begin();
 			it != backend_stmt_to_global_ids.end(); ++it) {
 			uint64_t global_stmt_id = it->second;
@@ -440,7 +395,7 @@ PgSQL_STMTs_local_v14::~PgSQL_STMTs_local_v14() {
 
 
 PgSQL_STMT_Global_info *PgSQL_STMT_Manager_v14::find_prepared_statement_by_hash(uint64_t hash, bool lock) {
-	PgSQL_STMT_Global_info *ret = NULL;  // assume we do not find it
+	PgSQL_STMT_Global_info *ret = nullptr;  // assume we do not find it
 	if (lock) {
 		rdlock();
 	}
@@ -457,7 +412,7 @@ PgSQL_STMT_Global_info *PgSQL_STMT_Manager_v14::find_prepared_statement_by_hash(
 
 PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::find_prepared_statement_by_stmt_id(
     uint64_t id, bool lock) {
-	PgSQL_STMT_Global_info*ret = NULL;  // assume we do not find it
+	PgSQL_STMT_Global_info*ret = nullptr;  // assume we do not find it
 	if (lock) {
 		rdlock();
 	}
@@ -523,7 +478,7 @@ bool PgSQL_STMTs_local_v14::client_close(const std::string& stmt_name) {
 PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::add_prepared_statement(
     char *u, char *s, char *q, unsigned int ql,
     char *fc, bool lock) {
-	PgSQL_STMT_Global_info *ret = NULL;
+	PgSQL_STMT_Global_info *ret = nullptr;
 	uint64_t hash = stmt_compute_hash(
 		u, s, q, ql);  // this identifies the prepared statement
 	if (lock) {
@@ -534,7 +489,6 @@ PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::add_prepared_statement(
 	if (f != map_stmt_hash_to_info.end()) {
 		// found it!
 		ret = f->second;
-		//ret->update_metadata(nullptr, false);
 	} else {
 		uint64_t next_id = 0;
 		if (!free_stmt_ids.empty()) {
@@ -572,21 +526,14 @@ void PgSQL_STMT_Manager_v14::get_memory_usage(uint64_t& prep_stmt_metadata_mem_u
 	prep_stmt_metadata_mem_usage += map_stmt_id_to_info.size() * (sizeof(uint64_t) + sizeof(PgSQL_STMT_Global_info*));
 	prep_stmt_metadata_mem_usage += map_stmt_hash_to_info.size() * (sizeof(uint64_t) + sizeof(PgSQL_STMT_Global_info*));
 	prep_stmt_metadata_mem_usage += free_stmt_ids.size() * (sizeof(uint64_t));
-	for (const auto& keyval : map_stmt_id_to_info) {
-		const PgSQL_STMT_Global_info* stmt_global_info = keyval.second;
+	for (const auto&[key, value] : map_stmt_id_to_info) {
+		const PgSQL_STMT_Global_info* stmt_global_info = value;
 		prep_stmt_metadata_mem_usage += stmt_global_info->total_mem_usage;
-		prep_stmt_metadata_mem_usage += stmt_global_info->ref_count_server;// *
-			//((stmt_global_info->num_params * sizeof(MYSQL_BIND)) +
-			//(stmt_global_info->num_columns * sizeof(MYSQL_FIELD))) + 16; // ~16 bytes of memory utilized by global_stmt_id and stmt_id mappings
-		prep_stmt_metadata_mem_usage += stmt_global_info->ref_count_client;// *
-			//((stmt_global_info->num_params * sizeof(MYSQL_BIND)) +
-			//(stmt_global_info->num_columns * sizeof(MYSQL_FIELD))) + 16; // ~16 bytes of memory utilized by global_stmt_id and stmt_id mappings
+		prep_stmt_metadata_mem_usage += stmt_global_info->ref_count_server * 16; // ~16 bytes of memory utilized by global_stmt_id and stmt_id mappings
+		prep_stmt_metadata_mem_usage += stmt_global_info->ref_count_client * 40; // ~40 bytes of memory utilized by client_stmt_name and global_stmt_id mappings;
 
 		// backend
-		prep_stmt_backend_mem_usage += stmt_global_info->ref_count_server;// *(sizeof(MYSQL_STMT) +
-			//56// + //sizeof(MADB_STMT_EXTENSION)
-			//(stmt_global_info->num_params * sizeof(MYSQL_BIND)) + 
-			//(stmt_global_info->num_columns * sizeof(MYSQL_FIELD)));
+		prep_stmt_backend_mem_usage += stmt_global_info->ref_count_server; // FIXME: add backend memory usage
 	}
 	unlock();
 }
@@ -663,41 +610,33 @@ class PS_global_stats {
 		num_params = params;
 	}
 	~PS_global_stats() {
-		if (query) {
+		if (query) 
 			free(query);
-			query=NULL;
-		}
-		if (username) {
+		if (username)
 			free(username);
-			username=NULL;
-		}
-		if (schemaname) {
+		if (schemaname)
 			free(schemaname);
-			schemaname=NULL;
-		}
 	}
 	char **get_row() {
 		char buf[128];
 		char **pta=(char **)malloc(sizeof(char *)*PS_GLOBAL_STATUS_FIELD_NUM);
-		sprintf(buf,"%lu",statement_id);
+		snprintf(buf,sizeof(buf),"%lu",statement_id);
 		pta[0]=strdup(buf);
 		assert(schemaname);
 		pta[1]=strdup(schemaname);
 		assert(username);
 		pta[2]=strdup(username);
-
-		sprintf(buf,"0x%016llX", (long long unsigned int)digest);
+		snprintf(buf,sizeof(buf),"0x%016llX", (long long unsigned int)digest);
 		pta[3]=strdup(buf);
-
 		assert(query);
 		pta[4]=strdup(query);
-		sprintf(buf,"%llu",ref_count_client);
+		snprintf(buf,sizeof(buf),"%llu",ref_count_client);
 		pta[5]=strdup(buf);
-		sprintf(buf,"%llu",ref_count_server);
+		snprintf(buf,sizeof(buf),"%llu",ref_count_server);
 		pta[6]=strdup(buf);
-		sprintf(buf,"%lu",num_columns);
+		snprintf(buf,sizeof(buf),"%lu",num_columns);
 		pta[7]=strdup(buf);
-		sprintf(buf,"%lu",num_params);
+		snprintf(buf,sizeof(buf),"%lu",num_params);
 		pta[8]=strdup(buf);
 
 		return pta;

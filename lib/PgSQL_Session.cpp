@@ -5881,20 +5881,20 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 	thread->status_variables.stvar[st_var_queries]++;
 
 	bool lock_hostgroup = false;
-	const PgSQL_Parse_Data* parse_data = parse_msg->data();
+	const PgSQL_Parse_Data& parse_data = parse_msg->data();
 	PgSQL_Extended_Query_Info& extended_query_info = CurrentQuery.extended_query_info;
 
-	CurrentQuery.begin((unsigned char*)parse_data->query_string, strlen(parse_data->query_string) + 1, false);
+	CurrentQuery.begin((unsigned char*)parse_data.query_string, strlen(parse_data.query_string) + 1, false);
 	// parse_msg memory will be freed in pgsql_real_query.end(), if message is sent to backend server
 	// CurrentQuery.stmt_client_name may briefly become a dangling pointer until CurrentQuery.end() is invoked
-	extended_query_info.stmt_client_name = parse_data->stmt_name;
+	extended_query_info.stmt_client_name = parse_data.stmt_name;
 
 	timespec begint;
 	timespec endt;
 	if (thread->variables.stats_time_query_processor) {
 		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &begint);
 	}
-	qpo = GloPgQPro->process_query(this, (unsigned char*)parse_data->query_string, strlen(parse_data->query_string) + 1, &CurrentQuery);
+	qpo = GloPgQPro->process_query(this, (unsigned char*)parse_data.query_string, strlen(parse_data.query_string) + 1, &CurrentQuery);
 	if (thread->variables.stats_time_query_processor) {
 		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &endt);
 		thread->status_variables.stvar[st_var_query_processor_time] = thread->status_variables.stvar[st_var_query_processor_time] +
@@ -6021,15 +6021,15 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 	//thread->status_variables.stvar[st_var_frontend_stmt_describe]++; // FIXME
 	thread->status_variables.stvar[st_var_queries]++;
 
-	const PgSQL_Describe_Data* describe_data = describe_msg->data();
+	const PgSQL_Describe_Data& describe_data = describe_msg->data();
 	const char* stmt_client_name = NULL;
 	const char* portal_name = NULL;
 	bool lock_hostgroup = false;
-	uint8_t stmt_type = describe_data->stmt_type;
+	uint8_t stmt_type = describe_data.stmt_type;
 
 	switch (stmt_type) {
 	case 'P': // Portal
-		if (describe_data->stmt_name[0] != '\0') {
+		if (describe_data.stmt_name[0] != '\0') {
 			// we don't support named portals yet
 			handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED,
 				"only unnamed portals are supported", false);
@@ -6038,7 +6038,7 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 
 		// if we are describing a portal, Bind message must exists
 		if (!bind_waiting_for_execute) {
-			const std::string& errmsg = "portal \"" + std::string(describe_data->stmt_name) + "\" does not exist";
+			const std::string& errmsg = "portal \"" + std::string(describe_data.stmt_name) + "\" does not exist";
 			handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_CURSOR, errmsg.c_str(), false);
 			return 2;
 		}
@@ -6050,12 +6050,12 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 			}
 		}
 
-		portal_name = describe_data->stmt_name; // currently only supporting unanmed portals
-		stmt_client_name = bind_waiting_for_execute->data()->stmt_name; // data() will always be a valid pointer
-		assert(strcmp(portal_name, bind_waiting_for_execute->data()->portal_name) == 0); // portal name should match the one in bind_waiting_for_execute 
+		portal_name = describe_data.stmt_name; // currently only supporting unanmed portals
+		stmt_client_name = bind_waiting_for_execute->data().stmt_name; // data() will always be a valid pointer
+		assert(strcmp(portal_name, bind_waiting_for_execute->data().portal_name) == 0); // portal name should match the one in bind_waiting_for_execute 
 		break;
 	case 'S': // Statement
-		stmt_client_name = describe_data->stmt_name;
+		stmt_client_name = describe_data.stmt_name;
 		break;
 	default:
 		assert(0); // Invalid statement type, should never happen
@@ -6188,12 +6188,12 @@ int PgSQL_Session::handle_post_sync_close_message(PgSQL_Close_Message* close_msg
 	thread->status_variables.stvar[st_var_frontend_stmt_close]++;
 	thread->status_variables.stvar[st_var_queries]++;
 	
-	const PgSQL_Close_Data* close_data = close_msg->data(); // this will always be a valid pointer
-	uint8_t stmt_type = close_data->stmt_type;
+	const PgSQL_Close_Data& close_data = close_msg->data(); // this will always be a valid pointer
+	uint8_t stmt_type = close_data.stmt_type;
 	
 	switch (stmt_type) {
 	case 'P': // Portal
-		if (close_data->stmt_name[0] != '\0') {
+		if (close_data.stmt_name[0] != '\0') {
 			// we don't support unnamed portals yet
 			handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, "only unnamed portals are supported", false);
 			return 2;
@@ -6201,7 +6201,7 @@ int PgSQL_Session::handle_post_sync_close_message(PgSQL_Close_Message* close_msg
 		bind_waiting_for_execute.reset(nullptr); // release the ownership of the bind message
 		break;
 	case 'S': // Statement
-		client_myds->myconn->local_stmts->client_close(close_data->stmt_name);
+		client_myds->myconn->local_stmts->client_close(close_data.stmt_name);
 		break;
 	default:
 		assert(0); // this should never occur
@@ -6222,15 +6222,15 @@ int PgSQL_Session::handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg) {
 	//thread->status_variables.stvar[st_var_frontend_stmt_bind]++;
 	thread->status_variables.stvar[st_var_queries]++;
 
-	const PgSQL_Bind_Data* bind_data = bind_msg->data();
+	const PgSQL_Bind_Data& bind_data = bind_msg->data();
 
-	if (bind_data->portal_name[0] != '\0') {
+	if (bind_data.portal_name[0] != '\0') {
 		// we don't support portals yet
 		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, "only unnamed portals are supported", false);
 		return 2;
 	}
 	
-	const char* stmt_client_name = bind_data->stmt_name;
+	const char* stmt_client_name = bind_data.stmt_name;
 
 	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
 	if (stmt_global_id == 0) {
@@ -6257,24 +6257,24 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 	thread->status_variables.stvar[st_var_queries]++;
 
 	bool lock_hostgroup = false;
-	const PgSQL_Execute_Data* execute_data = execute_msg->data();
+	const PgSQL_Execute_Data& execute_data = execute_msg->data();
 
-	if (execute_data->portal_name[0] != '\0') {
+	if (execute_data.portal_name[0] != '\0') {
 		// we don't support named portals yet
 		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, "only unnamed portals are supported", false);
 		return 2;
 	}
 
-	const char* portal_name = execute_data->portal_name; 
+	const char* portal_name = execute_data.portal_name; 
 	if (!bind_waiting_for_execute) {
 		const std::string& errmsg = "portal \"" + std::string(portal_name) + "\" does not exist";
 		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_CURSOR, errmsg.c_str(), false);
 		return 2;
 	}
-	assert(strcmp(portal_name, bind_waiting_for_execute->data()->portal_name) == 0); // portal name should match the one in bind_waiting_for_execute
+	assert(strcmp(portal_name, bind_waiting_for_execute->data().portal_name) == 0); // portal name should match the one in bind_waiting_for_execute
 
 	// bind_waiting_for_execute will be released on CurrentQuery.end() call or session destory
-	const char* stmt_client_name = bind_waiting_for_execute->data()->stmt_name;
+	const char* stmt_client_name = bind_waiting_for_execute->data().stmt_name;
 	uint64_t stmt_global_id = client_myds->myconn->local_stmts->find_global_id_from_stmt_name(stmt_client_name);
 	if (stmt_global_id == 0) {
 		const std::string& errmsg = stmt_client_name[0] != '\0' ? ("prepared statement \"" + std::string(stmt_client_name) + "\" does not exist") :
