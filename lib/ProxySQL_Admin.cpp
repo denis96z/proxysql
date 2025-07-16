@@ -2071,17 +2071,6 @@ void* child_postgres(void* arg) {
 	arg_proxysql_adm* myarg = (arg_proxysql_adm*)arg;
 	int client = myarg->client_t;
 
-	//struct sockaddr *addr = arg->addr;
-	//socklen_t addr_size;
-
-	GloPTH->wrlock();
-	{
-		char* s = GloPTH->get_variable((char*)"server_capabilities");
-		mysql_thread___server_capabilities = atoi(s);
-		free(s);
-	}
-	GloPTH->wrunlock();
-
 	struct pollfd fds[1];
 	nfds_t nfds = 1;
 	int rc;

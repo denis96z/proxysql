@@ -406,7 +406,6 @@ static char* pgsql_thread_variables_names[] = {
 	(char*)"default_schema",
 	(char*)"poll_timeout",
 	(char*)"poll_timeout_on_failure",
-	(char*)"server_capabilities",
 	(char*)"server_version",
 	(char*)"server_encoding",
 	(char*)"keep_multiplexing_variables",
@@ -1035,9 +1034,6 @@ PgSQL_Threads_Handler::PgSQL_Threads_Handler() {
 	variables.eventslog_format = 1;
 	variables.auditlog_filename = strdup((char*)"");
 	variables.auditlog_filesize = 100 * 1024 * 1024;
-	//variables.server_capabilities=CLIENT_FOUND_ROWS | CLIENT_PROTOCOL_41 | CLIENT_IGNORE_SIGPIPE | CLIENT_TRANSACTIONS | CLIENT_SECURE_CONNECTION | CLIENT_CONNECT_WITH_DB;
-	// major upgrade in 2.0.0
-	variables.server_capabilities = CLIENT_MYSQL | CLIENT_FOUND_ROWS | CLIENT_PROTOCOL_41 | CLIENT_IGNORE_SIGPIPE | CLIENT_TRANSACTIONS | CLIENT_SECURE_CONNECTION | CLIENT_CONNECT_WITH_DB | CLIENT_PLUGIN_AUTH;;
 	variables.poll_timeout = 2000;
 	variables.poll_timeout_on_failure = 100;
 	variables.have_compress = true;
@@ -1314,14 +1310,6 @@ char* PgSQL_Threads_Handler::get_variable_string(char* name) {
 	// LCOV_EXCL_STOP
 }
 
-uint16_t PgSQL_Threads_Handler::get_variable_uint16(char* name) {
-	if (!strcasecmp(name, "server_capabilities")) return variables.server_capabilities;
-	// LCOV_EXCL_START
-	proxy_error("Not existing variable: %s\n", name); assert(0);
-	return 0;
-	// LCOV_EXCL_STOP
-}
-
 int PgSQL_Threads_Handler::get_variable_int(const char* name) {
 	// convert name to string, and lowercase
 	std::string nameS = string(name);
@@ -1442,11 +1430,6 @@ char* PgSQL_Threads_Handler::get_variable(char* name) {	// this is the public fu
 	if (!strcasecmp(name, "default_schema")) return strdup(variables.default_schema);
 	if (!strcasecmp(name, "keep_multiplexing_variables")) return strdup(variables.keep_multiplexing_variables);
 	if (!strcasecmp(name, "interfaces")) return strdup(variables.interfaces);
-	if (!strcasecmp(name, "server_capabilities")) {
-		// FIXME : make it human readable
-		sprintf(intbuf, "%d", variables.server_capabilities);
-		return strdup(intbuf);
-	}
 	// SSL variables
 	if (!strncasecmp(name, "ssl_", 4)) {
 		if (!strcasecmp(name, "ssl_p2s_ca")) {
@@ -1972,20 +1955,7 @@ bool PgSQL_Threads_Handler::set_variable(char* name, const char* value) {	// thi
 			return true;
 		}
 	}
-	if (!strcasecmp(name, "server_capabilities")) {
-		// replaced atoi() with strtoul() to have a 32 bit result
-		uint32_t intv = strtoul(value, NULL, 10);
-		if (intv > 10) {
-			// Note that:
-			// - some capabilities are changed at runtime while performing the handshake with the client
-			// - even if we support 32 bits capabilities, many of them do not have any real meaning for proxysql (not supported)
-			variables.server_capabilities = intv;
-			return true;
-		}
-		else {
-			return false;
-		}
-	}
+
 	if (!strcasecmp(name, "stacksize")) {
 		int intv = atoi(value);
 		if (intv >= 256 * 1024 && intv <= 4 * 1024 * 1024) {
@@ -2010,12 +1980,10 @@ bool PgSQL_Threads_Handler::set_variable(char* name, const char* value) {	// thi
 	if (!strcasecmp(name, "have_compress")) {
 		if (strcasecmp(value, "true") == 0 || strcasecmp(value, "1") == 0) {
 			variables.have_compress = true;
-			variables.server_capabilities |= CLIENT_COMPRESS;
 			return true;
 		}
 		if (strcasecmp(value, "false") == 0 || strcasecmp(value, "0") == 0) {
 			variables.have_compress = false;
-			variables.server_capabilities &= ~CLIENT_COMPRESS;
 			return true;
 		}
 		return false;
@@ -2023,12 +1991,10 @@ bool PgSQL_Threads_Handler::set_variable(char* name, const char* value) {	// thi
 	if (!strcasecmp(name, "have_ssl")) {
 		if (strcasecmp(value, "true") == 0 || strcasecmp(value, "1") == 0) {
 			variables.have_ssl = true;
-			variables.server_capabilities |= CLIENT_SSL;
 			return true;
 		}
 		if (strcasecmp(value, "false") == 0 || strcasecmp(value, "0") == 0) {
 			variables.have_ssl = false;
-			variables.server_capabilities &= ~CLIENT_SSL;
 			return true;
 		}
 		return false;
@@ -3984,8 +3950,7 @@ void PgSQL_Thread::refresh_variables() {
 	pgsql_thread___handle_unknown_charset = GloPTH->get_variable_int((char*)"handle_unknown_charset");
 
 	/*
-	mysql_thread___server_capabilities = GloPTH->get_variable_uint16((char*)"server_capabilities");
-	
+
 	mysql_thread___have_compress = (bool)GloPTH->get_variable_int((char*)"have_compress");
 	
 	mysql_thread___enforce_autocommit_on_reads = (bool)GloPTH->get_variable_int((char*)"enforce_autocommit_on_reads");

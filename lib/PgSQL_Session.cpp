@@ -6043,6 +6043,13 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 			return 2;
 		}
 
+		if (extended_query_frame.empty() == false) {
+			// peeking next message in the extended query frame
+			if (std::holds_alternative<std::unique_ptr<PgSQL_Execute_Message>>(extended_query_frame.front())) {
+				return 0; // assuming client is sending Bind/Describe/Execute in the correct order, so libpq alreay sends describe message
+			}
+		}
+
 		portal_name = describe_data->stmt_name; // currently only supporting unanmed portals
 		stmt_client_name = bind_waiting_for_execute->data()->stmt_name; // data() will always be a valid pointer
 		assert(strcmp(portal_name, bind_waiting_for_execute->data()->portal_name) == 0); // portal name should match the one in bind_waiting_for_execute 
