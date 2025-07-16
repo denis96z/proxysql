@@ -248,7 +248,14 @@ void PgSQL_STMTs_local_v14::backend_insert(uint64_t global_stmt_id, uint32_t bac
 
 void PgSQL_STMTs_local_v14::client_insert(uint64_t global_stmt_id, const std::string& client_stmt_name) {
 	// validate that client_stmt_name is not empty and global_stmt_id is a valid id
-	stmt_name_to_global_ids.emplace(client_stmt_name, global_stmt_id);
+	[[maybe_unused]] auto [it, inserted] = stmt_name_to_global_ids.try_emplace(client_stmt_name, global_stmt_id);
+	assert(inserted && "client_stmt_name already exists in stmt_name_to_global_ids"); // Should not happen, as we expect unique client_stmt_name
+#ifdef DEBUG
+	auto range = global_id_to_stmt_names.equal_range(global_stmt_id);
+	for (auto it = range.first; it != range.second; ++it) {
+		assert(it->second == client_stmt_name && "client_stmt_name is already mapped to global_stmt_id in global_id_to_stmt_names"); // Should not happen, as we expect unique client_stmt_name per global_stmt_id
+	}
+#endif
 	global_id_to_stmt_names.emplace(global_stmt_id, client_stmt_name);
 	GloPgStmt->ref_count_client(global_stmt_id, 1, false); // do not lock!
 }
@@ -285,8 +292,8 @@ PgSQL_STMT_Manager_v14::~PgSQL_STMT_Manager_v14() {
 void PgSQL_STMT_Manager_v14::ref_count_client(uint64_t _stmt_id ,int _v, bool lock) {
 	if (lock)
 		pthread_rwlock_wrlock(&rwlock_);
-	auto s = map_stmt_id_to_info.find(_stmt_id);
-	if (s != map_stmt_id_to_info.end()) {
+	
+	if (auto s = map_stmt_id_to_info.find(_stmt_id); s != map_stmt_id_to_info.end()) {
 		statuses.c_total += _v;
 		PgSQL_STMT_Global_info *stmt_info = s->second;
 		if (stmt_info->ref_count_client == 0 && _v == 1) {
@@ -313,9 +320,7 @@ void PgSQL_STMT_Manager_v14::ref_count_client(uint64_t _stmt_id ,int _v, bool lo
 				int i = -1;
 				uint64_t *torem =
 				    (uint64_t *)malloc(max_purge * sizeof(uint64_t));
-				for (std::map<uint64_t, PgSQL_STMT_Global_info*>::iterator it =
-				         map_stmt_id_to_info.begin();
-					it != map_stmt_id_to_info.end(); ++it) {
+				for (auto it = map_stmt_id_to_info.begin(); it != map_stmt_id_to_info.end(); ++it) {
 					if ( (i == (max_purge - 1)) || (i == ((int)num_client_count_zero - 1)) ) {
 						break; // nothing left to clean up
 					}
@@ -324,8 +329,7 @@ void PgSQL_STMT_Manager_v14::ref_count_client(uint64_t _stmt_id ,int _v, bool lo
 						(a->ref_count_server == 0) ) // this to avoid that IDs are incorrectly reused
 					{
 						uint64_t hash = a->hash;
-						auto s2 = map_stmt_hash_to_info.find(hash);
-						if (s2 != map_stmt_hash_to_info.end()) {
+						if (auto s2 = map_stmt_hash_to_info.find(hash); s2 != map_stmt_hash_to_info.end()) {
 							map_stmt_hash_to_info.erase(s2);
 						}
 						__sync_sub_and_fetch(&num_stmt_with_ref_client_count_zero,1);
@@ -399,8 +403,8 @@ PgSQL_STMT_Global_info *PgSQL_STMT_Manager_v14::find_prepared_statement_by_hash(
 	if (lock) {
 		rdlock();
 	}
-	auto s = map_stmt_hash_to_info.find(hash);
-	if (s != map_stmt_hash_to_info.end()) {
+	
+	if (auto s = map_stmt_hash_to_info.find(hash); s != map_stmt_hash_to_info.end()) {
 		ret = s->second;
 	}
 
@@ -417,8 +421,7 @@ PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::find_prepared_statement_by_stmt_
 		rdlock();
 	}
 
-	auto s = map_stmt_id_to_info.find(id);
-	if (s != map_stmt_id_to_info.end()) {
+	if (auto s = map_stmt_id_to_info.find(id); s != map_stmt_id_to_info.end()) {
 		ret = s->second;
 	}
 
@@ -441,24 +444,21 @@ uint32_t PgSQL_STMTs_local_v14::generate_new_backend_stmt_id() {
 
 uint64_t PgSQL_STMTs_local_v14::find_global_id_from_stmt_name(const std::string& client_stmt_name) {
 	uint64_t ret=0;
-	auto s = stmt_name_to_global_ids.find(client_stmt_name);
-	if (s != stmt_name_to_global_ids.end()) {
+	if (auto s = stmt_name_to_global_ids.find(client_stmt_name); s != stmt_name_to_global_ids.end()) {
 		ret = s->second;
 	}
 	return ret;
 }
 
 uint32_t PgSQL_STMTs_local_v14::find_backend_stmt_id_from_global_id(uint64_t global_id) {
-	auto s = global_stmt_to_backend_ids.find(global_id);
-	if (s != global_stmt_to_backend_ids.end()) {
+	if (auto s = global_stmt_to_backend_ids.find(global_id); s != global_stmt_to_backend_ids.end()) {
 		return s->second;
 	}
 	return 0;  // not found
 }
 
 bool PgSQL_STMTs_local_v14::client_close(const std::string& stmt_name) {
-	auto s = stmt_name_to_global_ids.find(stmt_name);
-	if (s != stmt_name_to_global_ids.end()) {  // found
+	if (auto s = stmt_name_to_global_ids.find(stmt_name); s != stmt_name_to_global_ids.end()) {  // found
 		uint64_t global_stmt_id = s->second;
 		stmt_name_to_global_ids.erase(s);
 		GloPgStmt->ref_count_client(global_stmt_id, -1);
@@ -485,8 +485,7 @@ PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::add_prepared_statement(
 		wrlock();
 	}
 	// try to find the statement
-	auto f = map_stmt_hash_to_info.find(hash);
-	if (f != map_stmt_hash_to_info.end()) {
+	if (auto f = map_stmt_hash_to_info.find(hash); f != map_stmt_hash_to_info.end()) {
 		// found it!
 		ret = f->second;
 	} else {
@@ -499,7 +498,7 @@ PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::add_prepared_statement(
 			next_statement_id++;
 		}
 
-		std::unique_ptr<PgSQL_STMT_Global_info> stmt_info (new PgSQL_STMT_Global_info(next_id, u, s, q, ql, fc, hash));
+		auto stmt_info = std::make_unique<PgSQL_STMT_Global_info>(next_id, u, s, q, ql, fc, hash);
 		// insert it in both maps
 		map_stmt_id_to_info.insert(std::make_pair(stmt_info->statement_id, stmt_info.get()));
 		map_stmt_hash_to_info.insert(std::make_pair(stmt_info->hash, stmt_info.get()));
@@ -652,9 +651,9 @@ class PS_global_stats {
 };
 
 
-SQLite3_result * PgSQL_STMT_Manager_v14::get_prepared_statements_global_infos() {
+SQLite3_result* PgSQL_STMT_Manager_v14::get_prepared_statements_global_infos() {
 	proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "Dumping current prepared statements global info\n");
-	SQLite3_result *result=new SQLite3_result(PS_GLOBAL_STATUS_FIELD_NUM);
+	auto result = std::make_unique<SQLite3_result>(PS_GLOBAL_STATUS_FIELD_NUM);
 	rdlock();
 	result->add_column_definition(SQLITE_TEXT,"stmt_id");
 	result->add_column_definition(SQLITE_TEXT,"schemaname");
@@ -670,17 +669,16 @@ SQLite3_result * PgSQL_STMT_Manager_v14::get_prepared_statements_global_infos() 
 		PgSQL_STMT_Global_info *a = it->second;
 		pthread_rwlock_rdlock(&a->rwlock_);
 		const PgSQL_Describe_Prepared_Info* stmt_metadata = a->stmt_metadata;
-		PS_global_stats* pgs = new PS_global_stats(a->statement_id,
+		auto pgs = std::make_unique<PS_global_stats>(a->statement_id,
 			a->schemaname, a->username,
 			a->hash, a->query,
 			a->ref_count_client, a->ref_count_server, 
-			stmt_metadata ? stmt_metadata->columns_count : 0, stmt_metadata ? stmt_metadata->parameter_types_count : 0);
+			(stmt_metadata ? stmt_metadata->columns_count : 0), (stmt_metadata ? stmt_metadata->parameter_types_count : 0));
 		pthread_rwlock_unlock(&a->rwlock_);
 		char **pta = pgs->get_row();
 		result->add_row(pta);
 		pgs->free_row(pta);
-		delete pgs;
 	}
 	unlock();
-	return result;
+	return result.release();
 }
