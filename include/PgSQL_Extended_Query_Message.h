@@ -18,6 +18,12 @@ public:
 	Base_Extended_Query_Message() noexcept = default;
 	~Base_Extended_Query_Message() noexcept;
 
+	// Disable copy and move operations to prevent slicing and ensure proper ownership semantics
+	Base_Extended_Query_Message(const Base_Extended_Query_Message&) = delete;
+	Base_Extended_Query_Message& operator=(const Base_Extended_Query_Message&) = delete;
+	Base_Extended_Query_Message(Base_Extended_Query_Message&&) = delete;
+	Base_Extended_Query_Message& operator=(Base_Extended_Query_Message&&) = delete;
+
 	/**
 	  * @brief Releases the ownership of the packet and returns a new message object.
 	  *
@@ -140,9 +146,9 @@ struct PgSQL_Bind_Data {
 	uint16_t num_result_formats;	// Number of result format codes
 
 private:
-	const uint16_t* param_formats;	// Array of parameter types (can be nullptr if none)
-	const uint8_t* param_values;	// Array of parameter values (can be nullptr if none)
-	const uint16_t* result_formats;	// Array of result format codes (can be nullptr if none)
+	const unsigned char* param_formats_start_ptr; // Pointer to the start of parameter formats (can be nullptr if none)
+	const unsigned char* param_values_start_ptr; // Pointer to the start of parameter values (can be nullptr if none)
+	const unsigned char* result_formats_start_ptr; // Pointer to the start of result formats (can be nullptr if none)
 
 	friend class PgSQL_Bind_Message;
 };

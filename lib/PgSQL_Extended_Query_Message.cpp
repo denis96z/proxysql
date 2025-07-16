@@ -346,7 +346,7 @@ bool PgSQL_Bind_Message::parse(PtrSize_t& pkt) {
 			return false;  // Not enough data for all parameter formats
 		}
 		// Read the parameter formats array (each is 2 bytes, big-endian)
-		data.param_formats = reinterpret_cast<const uint16_t*>(packet + offset);
+		data.param_formats_start_ptr = (packet + offset);
 		// Move past the parameter formats
 		offset += data.num_param_formats * sizeof(uint16_t);
 	}
@@ -362,7 +362,7 @@ bool PgSQL_Bind_Message::parse(PtrSize_t& pkt) {
 	offset += sizeof(int16_t);
 	// If there are parameter values, ensure there's enough data for all of them
 	if (data.num_param_values > 0) {
-		data.param_values = reinterpret_cast<const uint8_t*>(packet + offset);
+		data.param_values_start_ptr = (packet + offset);
 		// Calculate the size of the parameter values array
 		for (uint16_t i = 0; i < data.num_param_values; ++i) {
 			if (offset + sizeof(uint32_t) > pkt_len) {
@@ -398,7 +398,7 @@ bool PgSQL_Bind_Message::parse(PtrSize_t& pkt) {
 			return false;  // Not enough data for all result formats
 		}
 		// Read the result formats array (each is 2 bytes, big-endian)
-		data.result_formats = reinterpret_cast<const uint16_t*>(packet + offset);
+		data.result_formats_start_ptr = (packet + offset);
 		// Move past the result formats
 		offset += data.num_result_formats * sizeof(uint16_t);
 	}
@@ -416,13 +416,13 @@ bool PgSQL_Bind_Message::parse(PtrSize_t& pkt) {
 // Initialize param format iterator
 void PgSQL_Bind_Message::init_param_format_iter(IteratorCtx* ctx) const {
 	const PgSQL_Bind_Data& bind_data = data();
-	ctx->current = reinterpret_cast<const unsigned char*>(bind_data.param_formats);
+	ctx->current = bind_data.param_formats_start_ptr;
 	ctx->remaining = bind_data.num_param_formats;
 }
 
 void PgSQL_Bind_Message::init_param_value_iter(IteratorCtx* ctx) const {
 	const PgSQL_Bind_Data& bind_data = data();
-	ctx->current = bind_data.param_values;
+	ctx->current = bind_data.param_values_start_ptr;
 	ctx->remaining = bind_data.num_param_values;
 }
 
@@ -452,7 +452,7 @@ bool PgSQL_Bind_Message::next_param_value(IteratorCtx* ctx, ParamValue_t* out) c
 // Initialize format iterator
 void PgSQL_Bind_Message::init_result_format_iter(IteratorCtx* ctx) const {
 	const PgSQL_Bind_Data& bind_data = data();
-	ctx->current = reinterpret_cast<const unsigned char*>(bind_data.result_formats);
+	ctx->current = bind_data.result_formats_start_ptr;
 	ctx->remaining = bind_data.num_result_formats;
 }
 
@@ -460,7 +460,7 @@ void PgSQL_Bind_Message::init_result_format_iter(IteratorCtx* ctx) const {
 bool PgSQL_Bind_Message::next_format(IteratorCtx* ctx, uint16_t* out) const {
 	if (ctx->remaining == 0) return false;
 
-	if (!get_uint16be((const unsigned char*)ctx->current, out)) {
+	if (!get_uint16be(ctx->current, out)) {
 		return false;
 	}
 
