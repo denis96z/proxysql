@@ -667,12 +667,12 @@ SQLite3_result* PgSQL_STMT_Manager_v14::get_prepared_statements_global_infos() {
 		int parameter_types_count = -1;
 		PgSQL_STMT_Global_info *a = it->second;
 
-		pthread_rwlock_rdlock(&a->rwlock_);
+		a->rdlock();
 		if (const PgSQL_Describe_Prepared_Info* stmt_metadata = a->stmt_metadata; stmt_metadata != nullptr) {
 			columns_count = stmt_metadata->columns_count;
 			parameter_types_count = stmt_metadata->parameter_types_count;
 		}
-		pthread_rwlock_unlock(&a->rwlock_);
+		a->unlock();
 
 		auto pgs = std::make_unique<PgSQL_PS_global_stats>(a->statement_id,
 			a->dbname, a->username, a->hash, a->query,

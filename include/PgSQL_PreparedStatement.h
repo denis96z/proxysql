@@ -9,10 +9,7 @@
 // it include all metadata associated with it
 
 class PgSQL_STMT_Global_info {
-	private:
-	void compute_hash();
-	public:
-	pthread_rwlock_t rwlock_;
+public:
 	uint64_t digest;
 	PGSQL_QUERY_command PgQueryCmd;
 	char * digest_text;
@@ -27,12 +24,20 @@ class PgSQL_STMT_Global_info {
 	char* first_comment;
 	uint64_t total_mem_usage;
 	PgSQL_Describe_Prepared_Info* stmt_metadata;
-
 	bool is_select_NOT_for_update;
-	PgSQL_STMT_Global_info(uint64_t id, char *u, char *d, char *q, unsigned int ql, char *fc, uint64_t _h);
-	void update_stmt_metadata(PgSQL_Describe_Prepared_Info** new_stmt_metadata);
+
+	PgSQL_STMT_Global_info(uint64_t id, char* u, char* d, char* q, unsigned int ql, char* fc, uint64_t _h);
 	~PgSQL_STMT_Global_info();
+
+	void update_stmt_metadata(PgSQL_Describe_Prepared_Info** new_stmt_metadata);
 	void calculate_mem_usage();
+	void unlock() { pthread_rwlock_unlock(&rwlock_); }
+	void wrlock() { pthread_rwlock_wrlock(&rwlock_); }
+	void rdlock() { pthread_rwlock_rdlock(&rwlock_); }
+
+private:
+	pthread_rwlock_t rwlock_;
+	void compute_hash();
 };
 
 class PgSQL_STMTs_local_v14 {

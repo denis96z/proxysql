@@ -6110,7 +6110,7 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 	
 	// Use cached stmt_metadata only for statements; for portals, forward the describe request to backend.
 	if (extended_query_info.stmt_type == 'S') {
-		pthread_rwlock_rdlock(&stmt_info->rwlock_);
+		stmt_info->rdlock();
 		if (stmt_info->stmt_metadata) {
 			// we have the metadata, so we can send it to the client
 			client_myds->setDSS_STATE_QUERY_SENT_NET();
@@ -6119,7 +6119,7 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 			const char txn_state = (nTxn ? 'T' : 'I');
 			client_myds->myprot.generate_describe_completion_packet(true, send_ready_packet, stmt_info->stmt_metadata, 
 				extended_query_info.stmt_type, txn_state);
-			pthread_rwlock_unlock(&stmt_info->rwlock_);
+			stmt_info->unlock();
 			LogQuery(NULL);
 			client_myds->DSS = STATE_SLEEP;
 			status = WAITING_CLIENT_DATA;
@@ -6127,7 +6127,7 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 			CurrentQuery.end();
 			return 0;
 		}
-		pthread_rwlock_unlock(&stmt_info->rwlock_);
+		stmt_info->unlock();
 	}
 
 	auto describe_pkt = describe_msg->detach(); // detach the packet from the describe message
