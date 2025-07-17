@@ -665,6 +665,7 @@ class ProxySQL_Admin {
 		const bool reset, const bool copy, const SQLite3_result* resultset,
 		const umap_query_digest* digest_umap, const umap_query_digest_text* digest_text_umap
 	);
+	void stats___pgsql_prepared_statements_info();
 
 	void stats___proxysql_servers_checksums();
 	void stats___proxysql_servers_metrics();

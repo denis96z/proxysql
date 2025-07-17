@@ -13,9 +13,8 @@ extern PgSQL_STMT_Manager_v14 *GloPgStmt;
 
 const int PS_GLOBAL_STATUS_FIELD_NUM = 9;
 
-static uint64_t stmt_compute_hash(char *user,
-                                  char *schema, char *query,
-                                  unsigned int query_length) {
+static uint64_t stmt_compute_hash(const char *user,
+	const char *database, const char *query, unsigned int query_length) {
 	// two random seperators
 	static const char DELIM1[] = "-ZiODNjvcNHTFaARXoqqSPDqQe-";
 	static const char DELIM2[] = "-aSfpWDoswfuRsJXqZKfcelzCL-";
@@ -23,13 +22,13 @@ static uint64_t stmt_compute_hash(char *user,
 	// NOSONAR: strlen is safe here 
 	size_t user_length = strlen(user); // NOSONAR
 	// NOSONAR: strlen is safe here 
-	size_t schema_length = strlen(schema); // NOSONAR
+	size_t database_length = strlen(database); // NOSONAR
 	size_t delim1_length = sizeof(DELIM1) - 1;
 	size_t delim2_length = sizeof(DELIM2) - 1;
 
 	size_t l = 0;
 	l += user_length;
-	l += schema_length;
+	l += database_length;
 	l += delim1_length;
 	l += delim2_length;
 	l += query_length;
@@ -38,7 +37,7 @@ static uint64_t stmt_compute_hash(char *user,
 	l = 0;
 	memcpy(buf + l, user, user_length);		l += user_length;		// write user
 	memcpy(buf + l, DELIM1, delim1_length); l += delim1_length; // write delimiter1
-	memcpy(buf + l, schema, schema_length); l += schema_length; // write schema
+	memcpy(buf + l, database, database_length); l += database_length; // write database
 	memcpy(buf + l, DELIM2, delim2_length); l += delim2_length; // write delimiter2
 	memcpy(buf + l, query, query_length);	l += query_length; 	// write query
 	
@@ -48,12 +47,12 @@ static uint64_t stmt_compute_hash(char *user,
 }
 
 void PgSQL_STMT_Global_info::compute_hash() {
-	hash = stmt_compute_hash(username, schemaname, query,
+	hash = stmt_compute_hash(username, dbname, query,
 		query_length);
 }
 
 PgSQL_STMT_Global_info::PgSQL_STMT_Global_info(uint64_t id,
-                                               char *u, char *s, char *q,
+                                               char *u, char *d, char *q,
                                                unsigned int ql,
                                                char *fc,
                                                uint64_t _h) {
@@ -65,7 +64,7 @@ PgSQL_STMT_Global_info::PgSQL_STMT_Global_info(uint64_t id,
 	digest_text = nullptr;
 	stmt_metadata = nullptr;
 	username = strdup(u);
-	schemaname = strdup(s);
+	dbname = strdup(d);
 	query = (char *)malloc(ql + 1);
 	memcpy(query, q, ql);
 	query[ql] = '\0';  // add NULL byte
@@ -159,7 +158,7 @@ void PgSQL_STMT_Global_info::calculate_mem_usage() {
 
 	// NOSONAR: strlen is safe here 
 	if (username) total_mem_usage += strlen(username) + 1; // NOSONAR
-	if (schemaname) total_mem_usage += strlen(schemaname) + 1; // NOSONAR
+	if (dbname) total_mem_usage += strlen(dbname) + 1; // NOSONAR
 	if (first_comment) total_mem_usage += strlen(first_comment) + 1; // NOSONAR
 	if (digest_text) total_mem_usage += strlen(digest_text) + 1; // NOSONAR
 
@@ -230,7 +229,7 @@ void PgSQL_STMT_Global_info::update_stmt_metadata(PgSQL_Describe_Prepared_Info**
 
 PgSQL_STMT_Global_info::~PgSQL_STMT_Global_info() {
 	free(username);
-	free(schemaname);
+	free(dbname);
 	free(query);
 	if (first_comment)
 		free(first_comment);
@@ -260,11 +259,9 @@ void PgSQL_STMTs_local_v14::client_insert(uint64_t global_stmt_id, const std::st
 	GloPgStmt->ref_count_client(global_stmt_id, 1, false); // do not lock!
 }
 
-uint64_t PgSQL_STMTs_local_v14::compute_hash(char *user,
-                                         char *schema, char *query,
-                                         unsigned int query_length) {
-	uint64_t hash;
-	hash = stmt_compute_hash(user, schema, query, query_length);
+uint64_t PgSQL_STMTs_local_v14::compute_hash(const char *user,
+	const char *database, const char *query, unsigned int query_length) {
+	uint64_t hash = stmt_compute_hash(user, database, query, query_length);
 	return hash;
 }
 
@@ -476,11 +473,11 @@ bool PgSQL_STMTs_local_v14::client_close(const std::string& stmt_name) {
 }
 
 PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::add_prepared_statement(
-    char *u, char *s, char *q, unsigned int ql,
+    char *u, char *d, char *q, unsigned int ql,
     char *fc, bool lock) {
 	PgSQL_STMT_Global_info *ret = nullptr;
 	uint64_t hash = stmt_compute_hash(
-		u, s, q, ql);  // this identifies the prepared statement
+		u, d, q, ql);  // this identifies the prepared statement
 	if (lock) {
 		wrlock();
 	}
@@ -498,7 +495,7 @@ PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::add_prepared_statement(
 			next_statement_id++;
 		}
 
-		auto stmt_info = std::make_unique<PgSQL_STMT_Global_info>(next_id, u, s, q, ql, fc, hash);
+		auto stmt_info = std::make_unique<PgSQL_STMT_Global_info>(next_id, u, d, q, ql, fc, hash);
 		// insert it in both maps
 		map_stmt_id_to_info.insert(std::make_pair(stmt_info->statement_id, stmt_info.get()));
 		map_stmt_hash_to_info.insert(std::make_pair(stmt_info->hash, stmt_info.get()));
@@ -586,43 +583,44 @@ void PgSQL_STMT_Manager_v14::get_metrics(uint64_t *c_unique, uint64_t *c_total,
 }
 
 
-class PS_global_stats {
+class PgSQL_PS_global_stats {
 	public:
 	uint64_t statement_id;
 	char *username;
-	char *schemaname;
+	char *dbname;
 	uint64_t digest;
 	unsigned long long ref_count_client;
 	unsigned long long ref_count_server;
 	char *query;
-	uint64_t num_columns;
-	uint64_t num_params;
-	PS_global_stats(uint64_t stmt_id, char *s, char *u, uint64_t d, char *q, unsigned long long ref_c, unsigned long long ref_s, uint64_t columns, uint64_t params) {
+	int num_columns;
+	int num_params;
+	PgSQL_PS_global_stats(uint64_t stmt_id, const char *d, const char *u, uint64_t dig, const char *q,
+		unsigned long long ref_c, unsigned long long ref_s, int columns, int params) {
 		statement_id = stmt_id;
-		digest=d;
-		query=strndup(q, mysql_thread___query_digests_max_digest_length);
-		username=strdup(u);
-		schemaname=strdup(s);
+		digest = dig;
+		query = strndup(q, pgsql_thread___query_digests_max_digest_length);
+		username = strdup(u);
+		dbname = strdup(d);
 		ref_count_client = ref_c;
 		ref_count_server = ref_s;
 		num_columns = columns;
 		num_params = params;
 	}
-	~PS_global_stats() {
+	~PgSQL_PS_global_stats() {
 		if (query) 
 			free(query);
 		if (username)
 			free(username);
-		if (schemaname)
-			free(schemaname);
+		if (dbname)
+			free(dbname);
 	}
 	char **get_row() {
 		char buf[128];
 		char **pta=(char **)malloc(sizeof(char *)*PS_GLOBAL_STATUS_FIELD_NUM);
 		snprintf(buf,sizeof(buf),"%lu",statement_id);
 		pta[0]=strdup(buf);
-		assert(schemaname);
-		pta[1]=strdup(schemaname);
+		assert(dbname);
+		pta[1]=strdup(dbname);
 		assert(username);
 		pta[2]=strdup(username);
 		snprintf(buf,sizeof(buf),"0x%016llX", (long long unsigned int)digest);
@@ -633,9 +631,9 @@ class PS_global_stats {
 		pta[5]=strdup(buf);
 		snprintf(buf,sizeof(buf),"%llu",ref_count_server);
 		pta[6]=strdup(buf);
-		snprintf(buf,sizeof(buf),"%lu",num_columns);
+		snprintf(buf,sizeof(buf),"%d",num_columns);
 		pta[7]=strdup(buf);
-		snprintf(buf,sizeof(buf),"%lu",num_params);
+		snprintf(buf,sizeof(buf),"%d",num_params);
 		pta[8]=strdup(buf);
 
 		return pta;
@@ -656,7 +654,7 @@ SQLite3_result* PgSQL_STMT_Manager_v14::get_prepared_statements_global_infos() {
 	auto result = std::make_unique<SQLite3_result>(PS_GLOBAL_STATUS_FIELD_NUM);
 	rdlock();
 	result->add_column_definition(SQLITE_TEXT,"stmt_id");
-	result->add_column_definition(SQLITE_TEXT,"schemaname");
+	result->add_column_definition(SQLITE_TEXT,"database");
 	result->add_column_definition(SQLITE_TEXT,"username");
 	result->add_column_definition(SQLITE_TEXT,"digest");
 	result->add_column_definition(SQLITE_TEXT,"query");
@@ -664,17 +662,23 @@ SQLite3_result* PgSQL_STMT_Manager_v14::get_prepared_statements_global_infos() {
 	result->add_column_definition(SQLITE_TEXT,"ref_count_server");
 	result->add_column_definition(SQLITE_TEXT,"num_columns");
 	result->add_column_definition(SQLITE_TEXT,"num_params");
-	for (std::map<uint64_t, PgSQL_STMT_Global_info *>::iterator it = map_stmt_id_to_info.begin();
-			it != map_stmt_id_to_info.end(); ++it) {
+	for (auto it = map_stmt_id_to_info.begin(); it != map_stmt_id_to_info.end(); ++it) {
+		int columns_count = -1;
+		int parameter_types_count = -1;
 		PgSQL_STMT_Global_info *a = it->second;
+
 		pthread_rwlock_rdlock(&a->rwlock_);
-		const PgSQL_Describe_Prepared_Info* stmt_metadata = a->stmt_metadata;
-		auto pgs = std::make_unique<PS_global_stats>(a->statement_id,
-			a->schemaname, a->username,
-			a->hash, a->query,
-			a->ref_count_client, a->ref_count_server, 
-			(stmt_metadata ? stmt_metadata->columns_count : 0), (stmt_metadata ? stmt_metadata->parameter_types_count : 0));
+		if (const PgSQL_Describe_Prepared_Info* stmt_metadata = a->stmt_metadata; stmt_metadata != nullptr) {
+			columns_count = stmt_metadata->columns_count;
+			parameter_types_count = stmt_metadata->parameter_types_count;
+		}
 		pthread_rwlock_unlock(&a->rwlock_);
+
+		auto pgs = std::make_unique<PgSQL_PS_global_stats>(a->statement_id,
+			a->dbname, a->username, a->hash, a->query,
+			a->ref_count_client, a->ref_count_server,
+			columns_count,
+			parameter_types_count);
 		char **pta = pgs->get_row();
 		result->add_row(pta);
 		pgs->free_row(pta);

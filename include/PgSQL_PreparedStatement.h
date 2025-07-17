@@ -18,7 +18,7 @@ class PgSQL_STMT_Global_info {
 	char * digest_text;
 	uint64_t hash;
 	char *username;
-	char *schemaname;
+	char *dbname;
 	char *query;
 	unsigned int query_length;
 	int ref_count_client;
@@ -29,7 +29,7 @@ class PgSQL_STMT_Global_info {
 	PgSQL_Describe_Prepared_Info* stmt_metadata;
 
 	bool is_select_NOT_for_update;
-	PgSQL_STMT_Global_info(uint64_t id, char *u, char *s, char *q, unsigned int ql, char *fc, uint64_t _h);
+	PgSQL_STMT_Global_info(uint64_t id, char *u, char *d, char *q, unsigned int ql, char *fc, uint64_t _h);
 	void update_stmt_metadata(PgSQL_Describe_Prepared_Info** new_stmt_metadata);
 	~PgSQL_STMT_Global_info();
 	void calculate_mem_usage();
@@ -69,7 +69,7 @@ public:
 
 	void backend_insert(uint64_t global_stmt_id, uint32_t backend_stmt_id);
 	void client_insert(uint64_t global_stmt_id, const std::string& client_stmt_name);
-	uint64_t compute_hash(char *user, char *schema, char *query, unsigned int query_length);
+	uint64_t compute_hash(const char *user, const char *database, const char *query, unsigned int query_length);
 	uint32_t generate_new_backend_stmt_id();
 	uint64_t find_global_id_from_stmt_name(const std::string& client_stmt_name);
 	uint32_t find_backend_stmt_id_from_global_id(uint64_t global_id);
@@ -105,7 +105,7 @@ public:
 	inline void unlock() { pthread_rwlock_unlock(&rwlock_); }
 	void ref_count_client(uint64_t _stmt, int _v, bool lock=true);
 	void ref_count_server(uint64_t _stmt, int _v, bool lock=true);
-	PgSQL_STMT_Global_info * add_prepared_statement(char *u, char *s, char *q, unsigned int ql, char *fc, bool lock=true);
+	PgSQL_STMT_Global_info * add_prepared_statement(char *user, char *database, char *query, unsigned int query_len, char *fc, bool lock=true);
 	void get_metrics(uint64_t *c_unique, uint64_t *c_total, uint64_t *stmt_max_stmt_id, uint64_t *cached, uint64_t *s_unique, uint64_t *s_total);
 	SQLite3_result* get_prepared_statements_global_infos();
 	void get_memory_usage(uint64_t& prep_stmt_metadata_mem_usage, uint64_t& prep_stmt_backend_mem_usage);

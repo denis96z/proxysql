@@ -5339,7 +5339,7 @@ void PgSQL_Session::RequestEnd(PgSQL_Data_Stream* myds, const unsigned int myerr
 	// check if multiplexing needs to be disabled
 	char* qdt = NULL;
 
-	if (status != PROCESSING_STMT_EXECUTE || 
+	if (status != PROCESSING_STMT_EXECUTE && 
 		status != PROCESSING_STMT_DESCRIBE) {
 		qdt = CurrentQuery.get_digest_text();
 	} else {
@@ -6571,7 +6571,7 @@ bool PgSQL_Session::handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& s
 	GloPgStmt->wrlock();
 	stmt_info = GloPgStmt->add_prepared_statement(
 		(char*)client_myds->myconn->userinfo->username,
-		(char*)client_myds->myconn->userinfo->schemaname,
+		(char*)client_myds->myconn->userinfo->dbname,
 		(char*)CurrentQuery.QueryPointer,
 		CurrentQuery.QueryLength,
 		CurrentQuery.QueryParserArgs.first_comment,

@@ -751,7 +751,7 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 	void* sha1_pass = NULL;
 	int max_connections;
 	int default_hostgroup = -1;
-	enum proxysql_session_type session_type = (*myds)->sess->session_type;
+	//enum proxysql_session_type session_type = (*myds)->sess->session_type;
 	bool using_password = false;
 	bool transaction_persistent = true;
 	bool fast_forward = false;
