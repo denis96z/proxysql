@@ -134,6 +134,7 @@ public:
 };
 
 class PgSQL_STMT_Global_info;
+using Parse_Param_Types = std::vector<uint32_t>; // Vector of parameter types for prepared statements
 
 struct PgSQL_Extended_Query_Info {
 	const char* stmt_client_name;
@@ -143,6 +144,7 @@ struct PgSQL_Extended_Query_Info {
 	uint64_t stmt_global_id;
 	uint32_t stmt_backend_id;
 	uint8_t stmt_type;
+	Parse_Param_Types parse_param_types;
 };
 
 class PgSQL_Query_Info {

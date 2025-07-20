@@ -347,6 +347,7 @@ void PgSQL_Query_Info::reset_extended_query_info() {
 	extended_query_info.stmt_global_id = 0;
 	extended_query_info.stmt_backend_id = 0;
 	extended_query_info.stmt_type = 'S';
+	extended_query_info.parse_param_types.clear();
 }
 
 void PgSQL_Query_Info::init(unsigned char *_p, int len, bool header) {
@@ -2811,7 +2812,7 @@ int PgSQL_Session::RunQuery(PgSQL_Data_Stream* myds, PgSQL_Connection* myconn) {
 			// bind_waiting_for_execute in case the client sends a sequence like
 			// Bind/Describe/Execute/Describe/Sync, so that a subsequent Describe Portal
 			// does not incorrectly assume a pending Bind.
-			if (rc != 1 && type == PGSQL_EXTENDED_QUERY_TYPE_EXECUTE) {
+			if (rc == 0 && type == PGSQL_EXTENDED_QUERY_TYPE_EXECUTE) {
 				bind_waiting_for_execute.reset(nullptr);
 			}
 		}
@@ -3121,6 +3122,9 @@ handler_again:
 							// own copy of 'first_comment' because it will later be free by 'QueryInfo::end'.
 							if (CurrentQuery.extended_query_info.stmt_info->first_comment) {
 								CurrentQuery.QueryParserArgs.first_comment = strdup(CurrentQuery.extended_query_info.stmt_info->first_comment);
+							}
+							if (CurrentQuery.extended_query_info.stmt_info->parse_param_types.empty() == false) {
+								CurrentQuery.extended_query_info.parse_param_types = CurrentQuery.extended_query_info.stmt_info->parse_param_types;
 							}
 							if (CurrentQuery.extended_query_info.stmt_global_id != CurrentQuery.extended_query_info.stmt_info->statement_id) {
 								PROXY_TRACE();
@@ -5902,6 +5906,19 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 			(begint.tv_sec * 1000000000 + begint.tv_nsec);
 	}
 	assert(qpo);	// GloPgQPro->process_mysql_query() should always return a qpo
+	
+	if (parse_data.num_param_types > 0) {
+		Parse_Param_Types parse_param_type;
+		parse_param_type.resize(parse_data.num_param_types);
+		auto param_type_reader = parse_msg->get_param_types_reader(); // get the reader for the param types
+		for (uint16_t i = 0; i < parse_data.num_param_types; ++i) {
+			if (!param_type_reader.next(&parse_param_type[i])) {
+				proxy_error("Failed to read result format at index %u\n", i);
+				return 2;
+			}
+		}
+		CurrentQuery.extended_query_info.parse_param_types = std::move(parse_param_type);
+	}
 
 	auto parse_pkt = parse_msg->detach(); // detach the packet from the parse message
 
@@ -5971,7 +5988,8 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 		client_myds->myconn->userinfo->username,
 		client_myds->myconn->userinfo->dbname,
 		(char*)CurrentQuery.QueryPointer,
-		CurrentQuery.QueryLength
+		CurrentQuery.QueryLength,
+		CurrentQuery.extended_query_info.parse_param_types
 	);
 
 	// Check global statement cache
@@ -6575,6 +6593,7 @@ bool PgSQL_Session::handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& s
 		(char*)CurrentQuery.QueryPointer,
 		CurrentQuery.QueryLength,
 		CurrentQuery.QueryParserArgs.first_comment,
+		std::move(CurrentQuery.extended_query_info.parse_param_types),
 		false);
 	assert(stmt_info); // GloPgStmt->add_prepared_statement() should always return a valid pointer
 	if (CurrentQuery.QueryParserArgs.digest_text) {

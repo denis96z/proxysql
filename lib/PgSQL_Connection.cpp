@@ -1591,7 +1591,9 @@ void PgSQL_Connection::stmt_prepare_start() {
 
 	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
 
-	if (PQsendPrepare(pgsql_conn, query.backend_stmt_name, query.ptr, 0, NULL) == 0) {
+	const Parse_Param_Types& parse_param_types = query.extended_query_info->parse_param_types;
+
+	if (PQsendPrepare(pgsql_conn, query.backend_stmt_name, query.ptr, parse_param_types.size(), parse_param_types.data()) == 0) {
 		set_error_from_PQerrorMessage();
 		proxy_error("Failed to send prepare. %s\n", get_error_code_with_message().c_str());
 		return;
@@ -1702,54 +1704,49 @@ void PgSQL_Connection::stmt_execute_start() {
 	std::vector<int> result_formats;
 
 	if (bind_data.num_param_values > 0) {
-		PgSQL_Bind_Message::IteratorCtx valCtx;
-		bind_msg->init_param_value_iter(&valCtx);
+		auto param_value_reader = bind_msg->get_param_value_reader();
 
 		param_values.resize(bind_data.num_param_values);
 		param_lengths.resize(bind_data.num_param_values);
 
 		for (int i = 0; i < bind_data.num_param_values; ++i) {
-			PgSQL_Bind_Message::ParamValue_t param;
-			if (!bind_msg->next_param_value(&valCtx, &param)) {
+			PgSQL_Param_Value param_val;
+			if (!param_value_reader.next(&param_val)) {
 				proxy_error("Failed to read param value at index %u\n", i);
 				set_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE,
 					"Failed to read param value", false);
 				return;
 			}
 
-			param_values[i] = (reinterpret_cast<const char*>(param.value));
-			param_lengths[i] = param.len;
+			param_values[i] = (reinterpret_cast<const char*>(param_val.value));
+			param_lengths[i] = param_val.len;
 		}
 	}
 
 	if (bind_data.num_param_formats > 0) {
-		PgSQL_Bind_Message::IteratorCtx fmtCtx;
-		bind_msg->init_param_format_iter(&fmtCtx);
+		auto param_fmt_reader = bind_msg->get_param_format_reader();
 
 		param_formats.resize(bind_data.num_param_formats);
 
 		for (int i = 0; i < bind_data.num_param_formats; ++i) {
 			uint16_t format;
-
-			if (!bind_msg->next_format(&fmtCtx, &format)) {
+			if (!param_fmt_reader.next(&format)) {
 				proxy_error("Failed to read param format at index %u\n", i);
 				set_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE,
 					"Failed to read param format", false);
 				return;
 				return;
 			}
-
 			param_formats[i] = format;
 		}
 	}
 
 	if (bind_data.num_result_formats > 0) {
-		PgSQL_Bind_Message::IteratorCtx fmtCtx;
-		bind_msg->init_result_format_iter(&fmtCtx);
+		auto result_fmt_reader = bind_msg->get_result_format_reader();
 		result_formats.resize(bind_data.num_result_formats);
 		for (int i = 0; i < bind_data.num_result_formats; ++i) {
 			uint16_t format;
-			if (!bind_msg->next_format(&fmtCtx, &format)) {
+			if (!result_fmt_reader.next(&format)) {
 				proxy_error("Failed to read result format at index %u\n", i);
 				set_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE,
 					"Failed to read result format", false);

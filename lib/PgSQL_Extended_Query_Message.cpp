@@ -117,7 +117,7 @@ bool PgSQL_Parse_Message::parse(PtrSize_t& pkt) {
 		}
 
 		// Read the parameter types array (each is 4 bytes, big-endian)
-		data.param_types = reinterpret_cast<const uint32_t*>(packet + offset);
+		data.param_types_start_ptr = (packet + offset);
 
 		// Move past the parameter types
 		offset += data.num_param_types * sizeof(uint32_t);
@@ -132,6 +132,11 @@ bool PgSQL_Parse_Message::parse(PtrSize_t& pkt) {
 
 	// If we reach here, the packet is valid and fully parsed
 	return true;
+}
+
+PgSQL_Field_Reader<uint32_t> PgSQL_Parse_Message::get_param_types_reader() const {
+	const PgSQL_Parse_Data& parse_data = data();
+	return PgSQL_Field_Reader<uint32_t>(parse_data.param_types_start_ptr, parse_data.num_param_types);
 }
 
 bool PgSQL_Describe_Message::parse(PtrSize_t& pkt) {
@@ -413,60 +418,19 @@ bool PgSQL_Bind_Message::parse(PtrSize_t& pkt) {
 	return true;
 }
 
-// Initialize param format iterator
-void PgSQL_Bind_Message::init_param_format_iter(IteratorCtx* ctx) const {
+PgSQL_Field_Reader<uint16_t> PgSQL_Bind_Message::get_param_format_reader() const {
 	const PgSQL_Bind_Data& bind_data = data();
-	ctx->current = bind_data.param_formats_start_ptr;
-	ctx->remaining = bind_data.num_param_formats;
+	return PgSQL_Field_Reader<uint16_t>(bind_data.param_formats_start_ptr, bind_data.num_param_formats);
 }
 
-void PgSQL_Bind_Message::init_param_value_iter(IteratorCtx* ctx) const {
+PgSQL_Field_Reader<uint16_t> PgSQL_Bind_Message::get_result_format_reader() const {
 	const PgSQL_Bind_Data& bind_data = data();
-	ctx->current = bind_data.param_values_start_ptr;
-	ctx->remaining = bind_data.num_param_values;
+	return PgSQL_Field_Reader<uint16_t>(bind_data.result_formats_start_ptr, bind_data.num_result_formats);
 }
 
-// Get next parameter value
-bool PgSQL_Bind_Message::next_param_value(IteratorCtx* ctx, ParamValue_t* out) const {
-	if (ctx->remaining == 0) return false;
-
-	// Read length (big-endian)
-	uint32_t len;
-	if (!get_uint32be(ctx->current, &len)) {
-		return false;
-	}
-	ctx->current += sizeof(uint32_t);
-
-	out->len = (len == 0xFFFFFFFF) ? -1 : static_cast<int32_t>(len);
-	out->value = (len == 0xFFFFFFFF) ? nullptr : ctx->current;
-
-	// Advance pointer if not NULL
-	if (out->len > 0) {
-		ctx->current += len;
-	}
-
-	ctx->remaining--;
-	return true;
-}
-
-// Initialize format iterator
-void PgSQL_Bind_Message::init_result_format_iter(IteratorCtx* ctx) const {
+PgSQL_Field_Reader<PgSQL_Param_Value> PgSQL_Bind_Message::get_param_value_reader() const {
 	const PgSQL_Bind_Data& bind_data = data();
-	ctx->current = bind_data.result_formats_start_ptr;
-	ctx->remaining = bind_data.num_result_formats;
-}
-
-// Get next format value
-bool PgSQL_Bind_Message::next_format(IteratorCtx* ctx, uint16_t* out) const {
-	if (ctx->remaining == 0) return false;
-
-	if (!get_uint16be(ctx->current, out)) {
-		return false;
-	}
-
-	ctx->current += sizeof(uint16_t);
-	ctx->remaining--;
-	return true;
+	return PgSQL_Field_Reader<PgSQL_Param_Value>(bind_data.param_values_start_ptr, bind_data.num_param_values);
 }
 
 // implement PgSQL_Execute_Message

@@ -14,10 +14,11 @@ extern PgSQL_STMT_Manager_v14 *GloPgStmt;
 const int PS_GLOBAL_STATUS_FIELD_NUM = 9;
 
 static uint64_t stmt_compute_hash(const char *user,
-	const char *database, const char *query, unsigned int query_length) {
+	const char *database, const char *query, unsigned int query_length, const Parse_Param_Types& param_types) {
 	// two random seperators
 	static const char DELIM1[] = "-ZiODNjvcNHTFaARXoqqSPDqQe-";
 	static const char DELIM2[] = "-aSfpWDoswfuRsJXqZKfcelzCL-";
+	static const char DELIM3[] = "-rQkhRVXdvgVYsmiqZCMikjKmP-";
 
 	// NOSONAR: strlen is safe here 
 	size_t user_length = strlen(user); // NOSONAR
@@ -25,6 +26,7 @@ static uint64_t stmt_compute_hash(const char *user,
 	size_t database_length = strlen(database); // NOSONAR
 	size_t delim1_length = sizeof(DELIM1) - 1;
 	size_t delim2_length = sizeof(DELIM2) - 1;
+	size_t delim3_length = sizeof(DELIM3) - 1;
 
 	size_t l = 0;
 	l += user_length;
@@ -32,6 +34,11 @@ static uint64_t stmt_compute_hash(const char *user,
 	l += delim1_length;
 	l += delim2_length;
 	l += query_length;
+	if (!param_types.empty()) {
+		l += delim3_length; // add length for the third delimiter
+		l += sizeof(uint16_t); // add length for number of parameter types
+		l += (param_types.size() * sizeof(uint32_t)); // add length for parameter types
+	}
 
 	auto buf = (char *)malloc(l);
 	l = 0;
@@ -40,7 +47,12 @@ static uint64_t stmt_compute_hash(const char *user,
 	memcpy(buf + l, database, database_length); l += database_length; // write database
 	memcpy(buf + l, DELIM2, delim2_length); l += delim2_length; // write delimiter2
 	memcpy(buf + l, query, query_length);	l += query_length; 	// write query
-	
+	if (!param_types.empty()) {
+		uint16_t size = param_types.size();
+		memcpy(buf + l, DELIM3, delim3_length); l += delim3_length; // write delimiter3
+		memcpy(buf + l, &size, sizeof(uint16_t)); l += sizeof(uint16_t); // write number of parameter types
+		memcpy(buf + l, param_types.data(), size * sizeof(uint32_t)); l += (size * sizeof(uint32_t)); // write each parameter type
+	}
 	uint64_t hash = SpookyHash::Hash64(buf, l, 0);
 	free(buf);
 	return hash;
@@ -48,13 +60,14 @@ static uint64_t stmt_compute_hash(const char *user,
 
 void PgSQL_STMT_Global_info::compute_hash() {
 	hash = stmt_compute_hash(username, dbname, query,
-		query_length);
+		query_length, parse_param_types);
 }
 
 PgSQL_STMT_Global_info::PgSQL_STMT_Global_info(uint64_t id,
                                                char *u, char *d, char *q,
                                                unsigned int ql,
                                                char *fc,
+											   Parse_Param_Types&& ppt,
                                                uint64_t _h) {
 	pthread_rwlock_init(&rwlock_, NULL);
 	total_mem_usage = 0;
@@ -69,11 +82,8 @@ PgSQL_STMT_Global_info::PgSQL_STMT_Global_info(uint64_t id,
 	memcpy(query, q, ql);
 	query[ql] = '\0';  // add NULL byte
 	query_length = ql;
-	if (fc) {
-		first_comment = strdup(fc);
-	} else {
-		first_comment = nullptr;
-	}
+	first_comment = fc ? strdup(fc) : nullptr;
+	parse_param_types = std::move(ppt);
 	PgQueryCmd = PGSQL_QUERY__UNINITIALIZED;
 	
 	if (_h) {
@@ -235,6 +245,7 @@ PgSQL_STMT_Global_info::~PgSQL_STMT_Global_info() {
 		free(first_comment);
 	if (digest_text)
 		free(digest_text);
+	parse_param_types.clear(); // clear the parameter types vector
 	if (stmt_metadata)
 		delete stmt_metadata;
 	pthread_rwlock_destroy(&rwlock_);
@@ -260,8 +271,8 @@ void PgSQL_STMTs_local_v14::client_insert(uint64_t global_stmt_id, const std::st
 }
 
 uint64_t PgSQL_STMTs_local_v14::compute_hash(const char *user,
-	const char *database, const char *query, unsigned int query_length) {
-	uint64_t hash = stmt_compute_hash(user, database, query, query_length);
+	const char *database, const char *query, unsigned int query_length, const Parse_Param_Types& param_types) {
+	uint64_t hash = stmt_compute_hash(user, database, query, query_length, param_types);
 	return hash;
 }
 
@@ -474,10 +485,10 @@ bool PgSQL_STMTs_local_v14::client_close(const std::string& stmt_name) {
 
 PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::add_prepared_statement(
     char *u, char *d, char *q, unsigned int ql,
-    char *fc, bool lock) {
+    char *fc, Parse_Param_Types&& ppt, bool lock) {
 	PgSQL_STMT_Global_info *ret = nullptr;
 	uint64_t hash = stmt_compute_hash(
-		u, d, q, ql);  // this identifies the prepared statement
+		u, d, q, ql, ppt);  // this identifies the prepared statement
 	if (lock) {
 		wrlock();
 	}
@@ -495,7 +506,7 @@ PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::add_prepared_statement(
 			next_statement_id++;
 		}
 
-		auto stmt_info = std::make_unique<PgSQL_STMT_Global_info>(next_id, u, d, q, ql, fc, hash);
+		auto stmt_info = std::make_unique<PgSQL_STMT_Global_info>(next_id, u, d, q, ql, fc, std::move(ppt), hash);
 		// insert it in both maps
 		map_stmt_id_to_info.insert(std::make_pair(stmt_info->statement_id, stmt_info.get()));
 		map_stmt_hash_to_info.insert(std::make_pair(stmt_info->hash, stmt_info.get()));

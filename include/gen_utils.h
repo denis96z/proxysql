@@ -337,14 +337,10 @@ inline T overflow_safe_multiply(T val) {
  * @param[out] dst_p A pointer where the extracted big endian 32-bit unsigned integer value will be stored.
  */
 inline bool get_uint32be(const unsigned char* pkt, uint32_t* dst_p) {
-	int read_pos = 0;
-	unsigned a, b, c, d;
-
-	a = pkt[read_pos++];
-	b = pkt[read_pos++];
-	c = pkt[read_pos++];
-	d = pkt[read_pos++];
-	*dst_p = (a << 24) | (b << 16) | (c << 8) | d;
+	*dst_p = ((uint32_t)pkt[0] << 24) |
+			 ((uint32_t)pkt[1] << 16) |
+			 ((uint32_t)pkt[2] << 8) |
+			 ((uint32_t)pkt[3]);
 	return true;
 }
 
@@ -366,13 +362,8 @@ inline bool get_uint32be(const unsigned char* pkt, uint32_t* dst_p) {
  *       The function uses post-increment to move the reading position after extracting each byte.
  */
 inline bool get_uint16be(const unsigned char* pkt, uint16_t* dst_p) {
-	int read_pos = 0; ///< Current read position in the buffer.
-	unsigned a, b;
-
-	// Read the two bytes from the buffer
-	a = pkt[read_pos++]; ///< First byte read from the buffer.
-	b = pkt[read_pos++]; ///< Second byte read from the buffer.
-	*dst_p = (a << 8) | b;
+	*dst_p = ((uint16_t)pkt[0] << 8) |
+			 ((uint16_t)pkt[1]);
 	return true;
 }
 

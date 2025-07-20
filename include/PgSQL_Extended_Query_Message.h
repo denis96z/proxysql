@@ -75,15 +75,107 @@ private:
 	PtrSize_t _pkt = {};	///< Packet data pointer.
 };
 
+struct PgSQL_Param_Value {
+	int32_t len;         ///< Length of value (-1 for NULL)
+	const unsigned char* value;  ///< Pointer to value data
+};
+
+
+/**
+ * @brief Reads fields from a PostgreSQL extended query message.
+ *
+ * This template class provides an iterator-like interface for reading a sequence of fields
+ * from a buffer, converting each field from network byte order (big-endian) to host byte order.
+ * It supports reading different field types such as uint32_t, uint16_t, and PgSQL_Param_Value.
+ *
+ * Note: The buffer pointer passed to this reader may be nullptr if count is zero (valid case).
+ * If count is non-zero but the buffer is invalid (malformed packet), this is detected and handled
+ * during parsing before constructing the reader.
+ *
+ * @tparam T The type of field to read (e.g., uint32_t, uint16_t, PgSQL_Param_Value).
+ */
+template<class T>
+class PgSQL_Field_Reader {
+public:
+	/**
+	  * @brief Constructs a field reader.
+	  * @param start Pointer to the start of the field array.
+	  * @param count Number of fields to read.
+	  */
+	PgSQL_Field_Reader(const unsigned char* start, uint16_t count) : current(start), remaining(count) {}
+	~PgSQL_Field_Reader() = default;
+	PgSQL_Field_Reader() = delete;
+	PgSQL_Field_Reader(const PgSQL_Field_Reader&) = default;
+	PgSQL_Field_Reader& operator=(const PgSQL_Field_Reader&) = default;
+	PgSQL_Field_Reader(PgSQL_Field_Reader&&) = default;
+	PgSQL_Field_Reader& operator=(PgSQL_Field_Reader&&) = default;
+
+	/**
+	  * @brief Checks if there are more fields to read.
+	  * @return True if more fields are available, false otherwise.
+	  */
+	bool has_next() const { return remaining > 0; }
+
+	/**
+	  * @brief Reads the next field from the buffer.
+	  * @param out Pointer to the output variable to store the field value.
+	  * @return True if the field was successfully read, false otherwise.
+	  *
+	  * For uint32_t and uint16_t, reads the value in big-endian order.
+	  * For PgSQL_Param_Value, reads the length and value pointer, handling NULL values.
+	  */
+	bool next(T* out) {
+		if (remaining == 0) return false;
+
+		if constexpr (std::is_same_v<T, uint32_t>) {
+			if (!get_uint32be(current, out)) {
+				return false;
+			}
+			current += sizeof(uint32_t);
+		} else if constexpr (std::is_same_v<T, uint16_t>) {
+			if (!get_uint16be(current, out)) {
+				return false;
+			}
+			current += sizeof(uint16_t);
+		} else if constexpr (std::is_same_v<T, PgSQL_Param_Value>) {
+			// Read length (big-endian)
+			uint32_t len;
+			if (!get_uint32be(current, &len)) {
+				return false;
+			}
+			current += sizeof(uint32_t);
+
+			out->len = (len == 0xFFFFFFFF) ? -1 : static_cast<int32_t>(len);
+			out->value = (len == 0xFFFFFFFF) ? nullptr : current;
+
+			// Advance pointer if not NULL
+			if (out->len > 0) {
+				current += len;
+			}
+		}
+		remaining--;
+		return true;
+	}
+private:
+	const unsigned char* current;   ///< Current position in the buffer.
+	uint16_t remaining;				///< Number of fields remaining to read.
+};
+
+
 struct PgSQL_Parse_Data {
 	const char* stmt_name;		// The name of the prepared statement
 	const char* query_string;	// The query string to be prepared
 	uint16_t num_param_types;		// Number of parameter types specified
-	const uint32_t* param_types;	// Array of parameter types (can be nullptr if none)
+
+private:
+	const unsigned char* param_types_start_ptr;	// Array of parameter types (can be nullptr if none)
+
+	friend class PgSQL_Parse_Message;
 };
 
 class PgSQL_Parse_Message : public Base_Extended_Query_Message<PgSQL_Parse_Data,PgSQL_Parse_Message> {
 public:
+
 	/**
 	 * @brief Parses the PgSQL_Parse_Message from the provided packet.
 	 *
@@ -95,6 +187,9 @@ public:
 	 * @return True if parsing was successful, false otherwise.
 	 */
 	bool parse(PtrSize_t& pkt);
+
+	// Initialize param type iterator
+	PgSQL_Field_Reader<uint32_t> get_param_types_reader() const;
 };
 
 struct PgSQL_Describe_Data {
@@ -155,17 +250,6 @@ private:
 
 class PgSQL_Bind_Message : public Base_Extended_Query_Message<PgSQL_Bind_Data,PgSQL_Bind_Message> {
 public:
-	typedef struct {
-		int32_t len;         // Length of value (-1 for NULL)
-		const unsigned char* value;  // Pointer to value data
-	} ParamValue_t;
-
-	// Iterator context for parameter values
-	typedef struct {
-		const unsigned char* current;   // Current position in values
-		uint16_t remaining;            // Parameters remaining
-	} IteratorCtx;
-
 	/**
 	 * @brief Parses the PgSQL_Bind_Message from the provided packet.
 	 *
@@ -179,16 +263,12 @@ public:
 	 */
 	bool parse(PtrSize_t& pkt);
 
-	// Initialize param format iterator
-	void init_param_format_iter(IteratorCtx* ctx) const;
-	// Initialize parameter value iterator
-	void init_param_value_iter(IteratorCtx* ctx) const;
-	// Get next parameter value
-	bool next_param_value(IteratorCtx* ctx, ParamValue_t* out) const;
+	// Initialize param type iterator
+	PgSQL_Field_Reader<uint16_t> get_param_format_reader() const;
 	// Initialize result format iterator
-	void init_result_format_iter(IteratorCtx* ctx) const;
-	// Get next format value
-	bool next_format(IteratorCtx* ctx, uint16_t* out) const;
+	PgSQL_Field_Reader<uint16_t> get_result_format_reader() const;
+	// Initialize parameter value iterator
+	PgSQL_Field_Reader<PgSQL_Param_Value> get_param_value_reader() const;
 };
 
 struct PgSQL_Execute_Data {
