@@ -388,11 +388,18 @@ void PgConnection::sendQuery(const std::string& query) {
 }
 
 // Parse message
-void PgConnection::sendParse(const std::string& query, const std::string& stmtName) {
+void PgConnection::sendParse(const std::string& query, const std::string& stmtName, const std::vector<uint32_t>& paramType) {
     std::vector<uint8_t> packet;
     writeStringToBuffer(packet, stmtName);
     writeStringToBuffer(packet, query);
-    writeInt16ToBuffer(packet, 0);  // No parameter types
+    if (paramType.empty())
+        writeInt16ToBuffer(packet, 0);  // No parameter types
+    else {
+        writeInt16ToBuffer(packet, paramType.size());
+        for (uint32_t type : paramType) {
+            writeInt32ToBuffer(packet, type);  // Write each parameter type
+        }
+	}
     sendMessage('P', packet);
 }
 
@@ -519,8 +526,8 @@ void PgConnection::consumeInputUntilReady() {
 }
 
 // ===== Prepared Statement Interface =====
-void PgConnection::prepareStatement(const std::string& stmtName, const std::string& query, bool send_sync) {
-    sendParse(query, stmtName);
+void PgConnection::prepareStatement(const std::string& stmtName, const std::string& query, bool send_sync, const std::vector<uint32_t>& paramType) {
+    sendParse(query, stmtName, paramType);
     if (send_sync) {
         sendSync();
         waitForMessage(PARSE_COMPLETE, "prepare", send_sync);
@@ -590,7 +597,15 @@ void PgConnection::bindStatement(
             const std::vector<uint8_t>& v = std::get<std::vector<uint8_t>>(param.value);
             writeInt32ToBuffer(packet, v.size());
             packet.insert(packet.end(), v.begin(), v.end());
+        } else if (std::holds_alternative<int32_t>(param.value)) {
+            const int32_t& v = std::get<int32_t>(param.value);
+            writeInt32ToBuffer(packet, sizeof(int32_t));
+            packet.push_back((v >> 24) & 0xFF);
+            packet.push_back((v >> 16) & 0xFF);
+            packet.push_back((v >> 8) & 0xFF);
+            packet.push_back(v & 0xFF);
         }
+        
     }
 
     // Result formats

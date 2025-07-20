@@ -124,7 +124,7 @@ public:
     static const char NOTICE_RESPONSE = 'N';
 
     struct Param {
-        std::variant<std::monostate, std::string, std::vector<uint8_t>> value;
+        std::variant<std::monostate, int32_t, std::string, std::vector<uint8_t>> value;
         int16_t format; // 0 = text, 1 = binary
     };
     
@@ -152,7 +152,7 @@ public:
     );
     
     // Prepared statement interface
-    void prepareStatement(const std::string& stmtName, const std::string& query, bool send_sync);
+    void prepareStatement(const std::string& stmtName, const std::string& query, bool send_sync,const std::vector<uint32_t>& paramType = {});
     void describeStatement(const std::string& stmtName, bool send_sync);
     void describePortal(const std::string& stmtName, bool send_sync);
     void bindStatement(
@@ -193,7 +193,7 @@ private:
     void sendPassword(const std::string& password);
     
     
-    void sendParse(const std::string& query, const std::string& stmtName);
+    void sendParse(const std::string& query, const std::string& stmtName, const std::vector<uint32_t>& paramType);
     void sendDescribeStatement(const std::string& stmtName);
     void sendDescribePortal(const std::string& portalName);
     void sendBind(
