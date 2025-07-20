@@ -543,7 +543,7 @@ bool test_text_binary_mix() {
 	PQclear(res);
 
 	const char* paramValues1[1] = { "42" };
-	res = PQexecPrepared(conn, "stmt1", 1, paramValues1, 0, NULL, NULL);
+	res = PQexecPrepared(conn, "stmt1", 1, paramValues1, 0, NULL, 0);
 	PQclear(res);
 
 	res = PQdescribePrepared(conn, "stmt1");
@@ -595,7 +595,7 @@ bool test_text_binary_mix2() {
 	PQclear(res);
 
 	const char* paramValues1[1] = { "42" };
-	res = PQexecPrepared(conn, "stmt1", 1, paramValues1, 0, NULL, NULL);
+	res = PQexecPrepared(conn, "stmt1", 1, paramValues1, 0, NULL, 0);
 	PQclear(res);
 
 	res = PQdescribePrepared(conn, "stmt1");
@@ -2875,11 +2875,393 @@ void test_multiple_execute_on_single_bind() {
 	}
 }
 
+
+void test_insert_command_complete() {
+	diag("Test %d: Extended Query INSERT and CommandComplete", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	try {
+		// CREATE TEMP TABLE via Extended Query
+		conn->prepareStatement("create_tmp",
+			"CREATE TEMP TABLE tmp_test(id SERIAL PRIMARY KEY, txt TEXT, flg BOOLEAN)",
+			false);
+		conn->bindStatement("create_tmp", "", {}, {}, false);
+		conn->executeStatement(0, false);
+
+		conn->sendSync();
+
+		char type;
+		std::vector<uint8_t> buf;
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::PARSE_COMPLETE,
+			"ParseComplete for CREATE TEMP TABLE");
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for CREATE TEMP TABLE");
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE,
+			"CommandComplete for CREATE TEMP TABLE");
+
+		auto tag = BufferReader(buf).readString();
+		ok(tag.rfind("CREATE TABLE", 0) == 0,
+			"CommandComplete tag is 'CREATE TABLE': %s", tag.c_str());
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery after CREATE TEMP TABLE");
+
+		// INSERT via Extended Query
+		conn->prepareStatement("ins_stmt",
+			"INSERT INTO tmp_test(txt, flg) VALUES('hello', true)",
+			false);
+		conn->bindStatement("ins_stmt", "", {}, {}, false);
+		conn->executeStatement(0, false);
+
+		conn->sendSync();
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete for INSERT");
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for INSERT");
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for INSERT");
+
+		tag = BufferReader(buf).readString();
+		ok(tag.rfind("INSERT 0 1", 0) == 0, "CommandComplete tag is 'INSERT 0 1': %s", tag.c_str());
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery after INSERT");
+	}
+	catch (const PgException& e) {
+		ok(false, "INSERT Extended Query test failed: %s", e.what());
+	}
+}
+
+void test_parse_with_param_type() {
+	diag("Test %d: Parse with Param Types", test_count++);
+	auto conn = create_connection();
+	if (!conn) return;
+
+	try {
+		 
+		conn->prepareStatement("test_param_type", "SELECT $1", false);
+		conn->describeStatement("test_param_type", false);
+		conn->sendSync();
+
+		// Verify response
+		char type;
+		std::vector<uint8_t> buffer;
+
+		{
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARSE_COMPLETE,
+				"Received parse complete for statement with parameter types");
+
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARAMETER_DESCRIPTION,
+				"Received parameter description");
+
+			// Read parameter description
+			BufferReader reader(buffer);
+			int paramCount = reader.readInt16();
+			ok(paramCount == 1, "No parameters in prepared statement (%d/0)", paramCount);
+
+			// Read parameter type OID
+			unsigned int typeOid = reader.readInt32();
+			ok(typeOid == 25, "Parameter type OID is 25 (text)");
+		}
+
+		{
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::ROW_DESCRIPTION,
+				"Received row description");
+
+			BufferReader reader(buffer);
+			// Read row description
+			int fieldCount = reader.readInt16();
+			ok(fieldCount == 1, "Row description has 1 field (%d/1)", fieldCount);
+			// Read field name
+			std::string fieldName = reader.readString();
+			ok(fieldName == "?column?", "Field name is '?column?'");
+
+			// Read field table OID
+			unsigned int tableOid = reader.readInt32();
+			ok(tableOid == 0, "Field table OID is 0 (no table)");
+
+			// Read field attribute number
+			unsigned int attrNum = reader.readInt16();
+			ok(attrNum == 0, "Field attribute number is 0 (no specific column)");
+
+			// Read field type OID
+			unsigned int typeOid = reader.readInt32();
+			ok(typeOid == 25, "Field type OID is 25 (text)");
+
+			// Read field type size
+			unsigned int typeSize = reader.readInt16();
+			ok(typeSize == -1, "Field type size is -1 (text size)");
+
+			// Read field type modifier
+			unsigned int typeModifier = reader.readInt32();
+			ok(typeModifier == -1, "Field type modifier is -1 (default)");
+
+			// Read field format code
+			unsigned int formatCode = reader.readInt16();
+			ok(formatCode == 0, "Field format code is 0 (text format)");
+		}
+		// Read ready for query
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY,
+			"Received ready for query after describe");
+
+		conn->prepareStatement("test_param_type2", "SELECT $1", false, { 23 });
+		conn->describeStatement("test_param_type2", false);
+		conn->sendSync();
+
+		// Verify response
+		{
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARSE_COMPLETE,
+				"Received parse complete for statement with parameter types");
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARAMETER_DESCRIPTION,
+				"Received parameter description");
+			// Read parameter description
+			BufferReader reader(buffer);
+			int paramCount = reader.readInt16();
+			ok(paramCount == 1, "Parameters in prepared statement (%d/1)", paramCount);
+			// Read parameter type OID
+			unsigned int typeOid = reader.readInt32();
+			ok(typeOid == 23, "Parameter type OID is 23 (integer)");
+		}
+
+		{
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::ROW_DESCRIPTION,
+				"Received row description");
+			BufferReader reader(buffer);
+			// Read row description
+			int fieldCount = reader.readInt16();
+			ok(fieldCount == 1, "Row description has 1 field (%d/1)", fieldCount);
+			// Read field name
+			std::string fieldName = reader.readString();
+			ok(fieldName == "?column?", "Field name is '?column?'");
+			// Read field table OID
+			unsigned int tableOid = reader.readInt32();
+			ok(tableOid == 0, "Field table OID is 0 (no table)");
+			// Read field attribute number
+			unsigned int attrNum = reader.readInt16();
+			ok(attrNum == 0, "Field attribute number is 0 (no specific column)");
+			// Read field type OID
+			unsigned int typeOid = reader.readInt32();
+			ok(typeOid == 23, "Field type OID is 23 (integer)");
+			// Read field type size
+			unsigned int typeSize = reader.readInt16();
+			ok(typeSize == 4, "Field type size is 4 (integer size)");
+			// Read field type modifier
+			unsigned int typeModifier = reader.readInt32();
+			ok(typeModifier == -1, "Field type modifier is -1 (default)");
+			// Read field format code
+			unsigned int formatCode = reader.readInt16();
+			ok(formatCode == 0, "Field format code is 0 (text format)");
+		}
+	}
+	catch (const PgException& e) {
+		ok(false, "Parse with sync test failed with error: %s", e.what());
+	}
+}
+
+/*
+void test_update_delete_commands_extended() {
+	diag("Test %d: Extended Query UPDATE and DELETE tags", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	try {
+		// CREATE table
+		conn->parseStatement("ctb",
+			"CREATE TEMP TABLE ud_test(id INT, val INT)",
+			false);
+		char type; std::vector<uint8_t> buf;
+		conn->readMessage(type, buf); ok(type == PgConnection::PARSE_COMPLETE,
+			"ParseComplete for CREATE TEMP TABLE ud_test");
+		conn->bindStatement("ctb", "ctb_portal", {}, {}, false);
+		conn->readMessage(type, buf); ok(type == PgConnection::BIND_COMPLETE,
+			"BindComplete for CREATE TEMP TABLE ud_test");
+		conn->executeStatement(0, false);
+		// consume Ready
+		while (type != PgConnection::READY_FOR_QUERY)
+			conn->readMessage(type, buf);
+
+		// INSERT rows
+		conn->parseStatement("ins2",
+			"INSERT INTO ud_test VALUES(1,10),(2,20),(3,30)",
+			false);
+		conn->readMessage(type, buf); ok(type == PgConnection::PARSE_COMPLETE,
+			"ParseComplete for INSERT ud_test");
+		conn->bindStatement("ins2", "ins2_portal", {}, {}, false);
+		conn->readMessage(type, buf); ok(type == PgConnection::BIND_COMPLETE,
+			"BindComplete for INSERT ud_test");
+		conn->executeStatement(0, false);
+		while (type != PgConnection::READY_FOR_QUERY)
+			conn->readMessage(type, buf);
+
+		// UPDATE
+		conn->parseStatement("upd_stmt",
+			"UPDATE ud_test SET val = val + 1 WHERE id < 3",
+			false);
+		conn->readMessage(type, buf); ok(type == PgConnection::PARSE_COMPLETE,
+			"ParseComplete for UPDATE");
+		conn->bindStatement("upd_stmt", "upd_portal", {}, {}, false);
+		conn->readMessage(type, buf); ok(type == PgConnection::BIND_COMPLETE,
+			"BindComplete for UPDATE");
+		conn->executeStatement(0, false);
+		conn->readMessage(type, buf); ok(type == PgConnection::COMMAND_COMPLETE,
+			"CommandComplete for UPDATE");
+		auto tag = BufferReader(buf).readString();
+		ok(tag.rfind("UPDATE 2", 0) == 0,
+			"UPDATE tag reports 2 rows: %s", tag.c_str());
+		conn->readMessage(type, buf); ok(type == PgConnection::READY_FOR_QUERY,
+			"Ready after UPDATE");
+
+		// DELETE
+		conn->parseStatement("del_stmt",
+			"DELETE FROM ud_test WHERE id = 3",
+			false);
+		conn->readMessage(type, buf); ok(type == PgConnection::PARSE_COMPLETE,
+			"ParseComplete for DELETE");
+		conn->bindStatement("del_stmt", "del_portal", {}, {}, false);
+		conn->readMessage(type, buf); ok(type == PgConnection::BIND_COMPLETE,
+			"BindComplete for DELETE");
+		conn->executeStatement(0, false);
+		conn->readMessage(type, buf); ok(type == PgConnection::COMMAND_COMPLETE,
+			"CommandComplete for DELETE");
+		tag = BufferReader(buf).readString();
+		ok(tag.rfind("DELETE 1", 0) == 0,
+			"DELETE tag reports 1 row: %s", tag.c_str());
+		conn->readMessage(type, buf); ok(type == PgConnection::READY_FOR_QUERY,
+			"Ready after DELETE");
+	}
+	catch (const PgException& e) {
+		ok(false, "UPDATE/DELETE Extended Query test failed: %s", e.what());
+	}
+}
+
+void test_copy_out_extended() {
+	diag("Test %d: Extended Query COPY OUT protocol", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	try {
+		// CREATE & INSERT
+		conn->parseStatement("ctb2",
+			"CREATE TEMP TABLE copy_test(id INT, txt TEXT)",
+			false);
+		char type; std::vector<uint8_t> buf;
+		conn->readMessage(type, buf); ok(type == PgConnection::PARSE_COMPLETE,
+			"ParseComplete for CREATE copy_test");
+		conn->bindStatement("ctb2", "ctb2_portal", {}, {}, false);
+		conn->readMessage(type, buf); ok(type == PgConnection::BIND_COMPLETE,
+			"BindComplete for CREATE copy_test");
+		conn->executeStatement(0, false);
+		while (type != PgConnection::READY_FOR_QUERY)
+			conn->readMessage(type, buf);
+
+		conn->parseStatement("ins3",
+			"INSERT INTO copy_test VALUES(1,'a'),(2,'b')",
+			false);
+		conn->readMessage(type, buf); ok(type == PgConnection::PARSE_COMPLETE,
+			"ParseComplete for INSERT copy_test");
+		conn->bindStatement("ins3", "ins3_portal", {}, {}, false);
+		conn->readMessage(type, buf); ok(type == PgConnection::BIND_COMPLETE,
+			"BindComplete for INSERT copy_test");
+		conn->executeStatement(0, false);
+		while (type != PgConnection::READY_FOR_QUERY)
+			conn->readMessage(type, buf);
+
+		// COPY OUT
+		conn->parseStatement("copy_stmt",
+			"COPY copy_test TO STDOUT",
+			false);
+		conn->readMessage(type, buf); ok(type == PgConnection::PARSE_COMPLETE,
+			"ParseComplete for COPY OUT");
+		conn->bindStatement("copy_stmt", "copy_portal", {}, {}, false);
+		conn->readMessage(type, buf); ok(type == PgConnection::BIND_COMPLETE,
+			"BindComplete for COPY OUT");
+		conn->executeStatement(0, false);
+
+		// Expect COPY_OUT
+		PGresult* res = PQgetResult(conn.get());
+		ok(PQresultStatus(res) == PGRES_COPY_OUT,
+			"COPY OUT started via Extended Query");
+		PQclear(res);
+
+		int rows = 0;
+		bool done = false;
+		while (!done) {
+			conn->readMessage(type, buf);
+			if (type == PgConnection::DATA_ROW) {
+				rows++;
+			}
+			else if (type == PgConnection::COMMAND_COMPLETE) {
+				auto tag2 = BufferReader(buf).readString();
+				ok(tag2.rfind("COPY 2", 0) == 0,
+					"COPY tag reports 2 rows: %s", tag2.c_str());
+			}
+			else if (type == PgConnection::READY_FOR_QUERY) {
+				done = true;
+			}
+		}
+		ok(rows == 2, "Received two DATA_ROW messages for COPY OUT");
+	}
+	catch (const PgException& e) {
+		ok(false, "COPY OUT Extended Query test failed: %s", e.what());
+	}
+}
+
+void test_bind_multiple_types_and_formats_extended() {
+	diag("Test %d: Extended Query Bind multiple types with mixed formats", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	try {
+		// PREPARE
+		conn->parseStatement("mix_bind",
+			"SELECT $1::int AS i, $2::text AS t, $3::bool AS b",
+			false);
+		char type; std::vector<uint8_t> buf;
+		conn->readMessage(type, buf); ok(type == PgConnection::PARSE_COMPLETE,
+			"ParseComplete for mix_bind");
+
+		// BIND with int(binary), text, bool(binary)
+		int32_t bi = htonl(7);
+		PgConnection::Param p1{ std::string(reinterpret_cast<char*>(&bi), sizeof(bi)), 1 };
+		PgConnection::Param p2{ "world", 0 };
+		char truth = 1;
+		PgConnection::Param p3{ std::string(&truth,1), 1 };
+		conn->bindStatement("mix_bind", "mix_portal",
+			std::vector<PgConnection::Param>{p1, p2, p3},
+			std::vector<int>{1, 0, 1},
+			false);
+		conn->readMessage(type, buf); ok(type == PgConnection::BIND_COMPLETE,
+			"BindComplete for mix_bind");
+
+		conn->executeStatement(0, false);
+		conn->readMessage(type, buf); ok(type == PgConnection::ROW_DESCRIPTION,
+			"RowDescription for mix_bind");
+		conn->readMessage(type, buf); ok(type == PgConnection::DATA_ROW,
+			"DataRow for mix_bind");
+		conn->readMessage(type, buf); ok(type == PgConnection::COMMAND_COMPLETE,
+			"CommandComplete for mix_bind");
+		conn->readMessage(type, buf); ok(type == PgConnection::READY_FOR_QUERY,
+			"Ready after mix_bind");
+	}
+	catch (const PgException& e) {
+		ok(false, "Mix bind Extended Query test failed: %s", e.what());
+	}
+}
+*/
+
 int main(int argc, char** argv) {
 	if (cl.getEnv())
 		return exit_status();
 
-	plan(295); // Adjust based on number of tests
+	plan(332); // Adjust based on number of tests
 
 	auto admin_conn = createNewConnection(ConnType::ADMIN, "", false);
 
@@ -2955,6 +3337,9 @@ int main(int argc, char** argv) {
 		// random tests
 		test_libpq_style_execute();       
 		test_multiple_execute_on_single_bind(); 
+
+		test_insert_command_complete();
+		test_parse_with_param_type();
 	}
 	catch (const std::exception& e) {
 		diag("Fatal error: %s",e.what());
