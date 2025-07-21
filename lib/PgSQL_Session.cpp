@@ -2443,7 +2443,14 @@ __get_pkts_from_client:
 									}
 								}
 								if (mirror == false) {
-									handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY___create_mirror_session();
+									if (qpo->mirror_hostgroup >= 0 || qpo->mirror_flagOUT >= 0) {
+										const char* query_text = CurrentQuery.get_digest_text();
+										proxy_warning("ProxySQL does not currently support query mirroring for PostgreSQL. "
+											"The mirror flag(s) will be ignored, but other query rule conditions will still apply. "
+											"(mirror_hostgroup=%d, mirror_flagOUT=%d, query='%s')\n",
+											qpo->mirror_hostgroup, qpo->mirror_flagOUT, query_text ? query_text : "");
+									}
+									//handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY___create_mirror_session();
 								}
 
 								if (autocommit_on_hostgroup >= 0) {
