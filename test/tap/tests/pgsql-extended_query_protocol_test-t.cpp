@@ -209,6 +209,186 @@ void test_parse_with_sync() {
 	}
 }
 
+void test_parse_use_same_stmt_name() {
+	diag("Test %d: Parse using same statement name", test_count++);
+	auto conn = create_connection();
+	if (!conn) return;
+
+	try {
+
+		char type;
+		std::vector<uint8_t> buffer;
+
+		{
+			conn->prepareStatement("test_stmt_multi", "SELECT $1::int", false);
+			conn->describeStatement("test_stmt_multi", false);
+			conn->sendSync();
+
+			// Read the parse complete for the first statement
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARSE_COMPLETE, "Received parse complete for first parse");
+
+			// Read the describe complete for the first statement
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARAMETER_DESCRIPTION, "Received parameter description for first parse");
+
+			// Read parameter description
+			BufferReader reader(buffer);
+			int num_params = reader.readInt16();
+			ok(num_params == 1, "Received 1 parameter description for first parse");
+			// Read parameter type OID
+			unsigned int typeOid = reader.readInt32();
+			ok(typeOid == 23, "Parameter type OID is 23 (int)");
+
+			conn->waitForReady();
+		}
+
+		{
+			conn->prepareStatement("test_stmt_multi", "SELECT $1::text", false);
+			conn->sendSync();
+
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::ERROR_RESPONSE,
+				"Received error response for second parse with same name");
+
+			std::string errormsg;
+			std::string errorcode;
+
+			if (type == PgConnection::ERROR_RESPONSE) {
+				BufferReader reader(buffer);
+				char field;
+				while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+					if (field == 'M') errormsg = reader.readString();
+					else if (field == 'C') errorcode = reader.readString();
+					else reader.readString();
+				}
+			}
+
+			ok(errorcode == "42P05", "Received ERRCODE_DUPLICATE_PSTATEMENT Error:%s", errormsg.c_str());
+			// Now read the ready for query
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query after multiple parse");
+		}
+
+		{
+			conn->describeStatement("test_stmt_multi", false);
+			conn->sendSync();
+
+			// Read the describe complete for the second statement
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARAMETER_DESCRIPTION, "Received parameter description for second parse");
+			// Read parameter description
+			BufferReader reader(buffer);
+			int num_params = reader.readInt16();
+			ok(num_params == 1, "Received 1 parameter description for second parse");
+			// Read parameter type OID
+			unsigned int typeOid = reader.readInt32();
+			ok(typeOid == 23, "Parameter type OID is 23 (int)");
+
+			conn->waitForReady();
+		}
+
+		{
+			conn->closeStatement("test_stmt_multi", false);
+			conn->sendSync();
+
+			// Read the close complete for the statement
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::CLOSE_COMPLETE, "Received close complete for statement");
+			// Now read the ready for query
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query after close statement");
+		}
+
+		{
+			conn->prepareStatement("test_stmt_multi", "SELECT $1::text", false);
+			conn->describeStatement("test_stmt_multi", false);
+			conn->sendSync();
+
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARSE_COMPLETE, "Received parse complete for second parse with same name");
+
+			// Read the describe complete for the second statement
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARAMETER_DESCRIPTION, "Received parameter description for second parse with same name");
+			// Read parameter description
+			BufferReader reader(buffer);
+			int num_params = reader.readInt16();
+			ok(num_params == 1, "Received 1 parameter description for second parse with same name");
+			// Read parameter type OID
+			unsigned int typeOid = reader.readInt32();
+			ok(typeOid == 25, "Parameter type OID is 25 (text)");
+			conn->waitForReady();
+		}
+	}
+	catch (const PgException& e) {
+		ok(false, "Parse using same statement name failed with error: %s", e.what());
+	}
+}
+
+void test_parse_use_unnamed_stmt() {
+	diag("Test %d: Parse using unnamed statement", test_count++);
+	auto conn = create_connection();
+	if (!conn) return;
+
+	try {
+
+		char type;
+		std::vector<uint8_t> buffer;
+
+		{
+			conn->prepareStatement("", "SELECT $1::int", false);
+			conn->describeStatement("", false);
+			conn->sendSync();
+
+			// Read the parse complete for the first statement
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARSE_COMPLETE, "Received parse complete for first parse");
+
+			// Read the describe complete for the first statement
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARAMETER_DESCRIPTION, "Received parameter description for first parse");
+
+			// Read parameter description
+			BufferReader reader(buffer);
+			int num_params = reader.readInt16();
+			ok(num_params == 1, "Received 1 parameter description for first parse");
+			// Read parameter type OID
+			unsigned int typeOid = reader.readInt32();
+			ok(typeOid == 23, "Parameter type OID is 23 (int)");
+
+			conn->waitForReady();
+		}
+
+		{
+			conn->prepareStatement("", "SELECT $1::text", false);
+			conn->describeStatement("", false);
+			conn->sendSync();
+
+			// Read the parse complete for the first statement
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARSE_COMPLETE, "Received parse complete for second parse");
+
+			// Read the describe complete for the first statement
+			conn->readMessage(type, buffer);
+			ok(type == PgConnection::PARAMETER_DESCRIPTION, "Received parameter description for second parse");
+
+			// Read parameter description
+			BufferReader reader(buffer);
+			int num_params = reader.readInt16();
+			ok(num_params == 1, "Received 1 parameter description for first parse");
+			// Read parameter type OID
+			unsigned int typeOid = reader.readInt32();
+			ok(typeOid == 25, "Parameter type OID is 25 (text)");
+
+			conn->waitForReady();
+		}
+	}
+	catch (const PgException& e) {
+		ok(false, "Parse using unnamed statement with error: %s", e.what());
+	}
+}
+
 void test_malformed_packet() {
 	diag("Test %d: Malformed parse packet", test_count++);
 	auto conn = create_connection();
@@ -3261,7 +3441,7 @@ int main(int argc, char** argv) {
 	if (cl.getEnv())
 		return exit_status();
 
-	plan(332); // Adjust based on number of tests
+	plan(356); // Adjust based on number of tests
 
 	auto admin_conn = createNewConnection(ConnType::ADMIN, "", false);
 
@@ -3287,6 +3467,8 @@ int main(int argc, char** argv) {
 		test_empty_stmt();
 		//test_prepare_statment_mix();
 		test_invalid_query_parse_packet();
+		test_parse_use_same_stmt_name();
+		test_parse_use_unnamed_stmt();
 		
 		// Describe Prepared Statement
 		test_describe_existing_statement();
