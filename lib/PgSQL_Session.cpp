@@ -5959,15 +5959,20 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 		}
 	}
 
-	//mybe = find_or_create_backend(current_hostgroup);
-
 	// if the same statement name is used, we drop it
-	//FIXME: Revisit this logic
 	PgSQL_STMTs_local_v14* local_stmts = client_myds->myconn->local_stmts;
 	std::string stmt_name(extended_query_info.stmt_client_name);
 
 	if (auto it = local_stmts->stmt_name_to_global_ids.find(stmt_name);
 		it != local_stmts->stmt_name_to_global_ids.end()) {
+
+		if (!stmt_name.empty()) {
+			const std::string& errmsg = "prepared statement \"" + stmt_name + "\" already exist";
+			handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_DUPLICATE_PSTATEMENT,
+				errmsg.c_str(), false);
+			l_free(parse_pkt.size, parse_pkt.ptr);
+			return 2;
+		}
 
 		uint64_t global_id = it->second;
 		auto range = local_stmts->global_id_to_stmt_names.equal_range(global_id);
