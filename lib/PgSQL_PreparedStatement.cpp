@@ -40,7 +40,8 @@ static uint64_t stmt_compute_hash(const char *user,
 		l += (param_types.size() * sizeof(uint32_t)); // add length for parameter types
 	}
 
-	auto buf = (char *)malloc(l);
+	std::vector<char> storage(l);
+	char* buf = storage.data();
 	l = 0;
 	memcpy(buf + l, user, user_length);		l += user_length;		// write user
 	memcpy(buf + l, DELIM1, delim1_length); l += delim1_length; // write delimiter1
@@ -54,7 +55,6 @@ static uint64_t stmt_compute_hash(const char *user,
 		memcpy(buf + l, param_types.data(), size * sizeof(uint32_t)); l += (size * sizeof(uint32_t)); // write each parameter type
 	}
 	uint64_t hash = SpookyHash::Hash64(buf, l, 0);
-	free(buf);
 	return hash;
 }
 
@@ -297,7 +297,7 @@ PgSQL_STMT_Manager_v14::~PgSQL_STMT_Manager_v14() {
 	}
 }
 
-void PgSQL_STMT_Manager_v14::ref_count_client(uint64_t _stmt_id ,int _v, bool lock) {
+void PgSQL_STMT_Manager_v14::ref_count_client(uint64_t _stmt_id ,int _v, bool lock) noexcept {
 	if (lock)
 		pthread_rwlock_wrlock(&rwlock_);
 	
@@ -312,60 +312,57 @@ void PgSQL_STMT_Manager_v14::ref_count_client(uint64_t _stmt_id ,int _v, bool lo
 			}
 		}
 		stmt_info->ref_count_client += _v;
-			time_t ct = time(NULL);
-			uint64_t num_client_count_zero = __sync_add_and_fetch(&num_stmt_with_ref_client_count_zero, 0);
-			uint64_t num_server_count_zero = __sync_add_and_fetch(&num_stmt_with_ref_server_count_zero, 0);
+		time_t ct = time(NULL);
+		uint64_t num_client_count_zero = __sync_add_and_fetch(&num_stmt_with_ref_client_count_zero, 0);
+		uint64_t num_server_count_zero = __sync_add_and_fetch(&num_stmt_with_ref_server_count_zero, 0);
 
-			size_t map_size = map_stmt_id_to_info.size();
-			if (
-				(ct > last_purge_time+1) &&
-				(map_size > (unsigned)mysql_thread___max_stmts_cache ) &&
-				(num_client_count_zero > map_size/10) &&
-				(num_server_count_zero > map_size/10)
-			) { // purge only if there is at least 10% gain
-				last_purge_time = ct;
-				int max_purge = map_size ;
-				int i = -1;
-				uint64_t *torem =
-				    (uint64_t *)malloc(max_purge * sizeof(uint64_t));
-				for (auto it = map_stmt_id_to_info.begin(); it != map_stmt_id_to_info.end(); ++it) {
-					if ( (i == (max_purge - 1)) || (i == ((int)num_client_count_zero - 1)) ) {
-						break; // nothing left to clean up
-					}
-					PgSQL_STMT_Global_info *a = it->second;
-					if ((__sync_add_and_fetch(&a->ref_count_client, 0) == 0) &&
-						(a->ref_count_server == 0) ) // this to avoid that IDs are incorrectly reused
-					{
-						uint64_t hash = a->hash;
-						if (auto s2 = map_stmt_hash_to_info.find(hash); s2 != map_stmt_hash_to_info.end()) {
-							map_stmt_hash_to_info.erase(s2);
-						}
-						__sync_sub_and_fetch(&num_stmt_with_ref_client_count_zero,1);
-						i++;
-						torem[i] = it->first;
-					}
+		size_t map_size = map_stmt_id_to_info.size();
+		if (
+			(ct > last_purge_time+1) &&
+			(map_size > (unsigned)pgsql_thread___max_stmts_cache) &&
+			(num_client_count_zero > map_size/10) &&
+			(num_server_count_zero > map_size/10)
+		) { // purge only if there is at least 10% gain
+			last_purge_time = ct;
+			int max_purge = map_size ;
+			std::vector<uint64_t> torem;
+			torem.reserve(max_purge);
+
+			for (auto it = map_stmt_id_to_info.begin(); it != map_stmt_id_to_info.end(); ++it) {
+				if (torem.size() >= std::min(static_cast<size_t>(max_purge),
+					static_cast<size_t>(num_client_count_zero))) {
+					break;
 				}
-				while (i >= 0) {
-					uint64_t id = torem[i];
-					auto s3 = map_stmt_id_to_info.find(id);
-					PgSQL_STMT_Global_info *a = s3->second;
-					if (a->ref_count_server == 0) {
-						__sync_sub_and_fetch(&num_stmt_with_ref_server_count_zero,1);
-						free_stmt_ids.push(id);
-					}
-					map_stmt_id_to_info.erase(s3);
-					statuses.s_total -= a->ref_count_server;
-					delete a;
-					i--;
+				PgSQL_STMT_Global_info *a = it->second;
+				if ((__sync_add_and_fetch(&a->ref_count_client, 0) == 0) &&
+					(a->ref_count_server == 0) ) // this to avoid that IDs are incorrectly reused
+				{
+					uint64_t hash = a->hash;
+					map_stmt_hash_to_info.erase(hash);
+					__sync_sub_and_fetch(&num_stmt_with_ref_client_count_zero,1);
+					torem.emplace_back(it->first);
 				}
-				free(torem);
 			}
+			while (!torem.empty()) {
+				uint64_t id = torem.back();
+				torem.pop_back();
+				auto s3 = map_stmt_id_to_info.find(id);
+				PgSQL_STMT_Global_info *a = s3->second;
+				if (a->ref_count_server == 0) {
+					__sync_sub_and_fetch(&num_stmt_with_ref_server_count_zero,1);
+					free_stmt_ids.push(id);
+				}
+				map_stmt_id_to_info.erase(s3);
+				statuses.s_total -= a->ref_count_server;
+				delete a;
+			}
+		}
 	}
 	if (lock)
 		pthread_rwlock_unlock(&rwlock_);
 }
 
-void PgSQL_STMT_Manager_v14::ref_count_server(uint64_t _stmt_id ,int _v, bool lock) {
+void PgSQL_STMT_Manager_v14::ref_count_server(uint64_t _stmt_id ,int _v, bool lock) noexcept {
 	if (lock)
 		pthread_rwlock_wrlock(&rwlock_);
 	std::map<uint64_t, PgSQL_STMT_Global_info *>::iterator s;

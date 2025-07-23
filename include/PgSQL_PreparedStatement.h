@@ -93,8 +93,8 @@ public:
 	inline void rdlock() { pthread_rwlock_rdlock(&rwlock_); }
 	inline void wrlock() { pthread_rwlock_wrlock(&rwlock_); }
 	inline void unlock() { pthread_rwlock_unlock(&rwlock_); }
-	void ref_count_client(uint64_t _stmt, int _v, bool lock=true);
-	void ref_count_server(uint64_t _stmt, int _v, bool lock=true);
+	void ref_count_client(uint64_t _stmt, int _v, bool lock=true) noexcept;
+	void ref_count_server(uint64_t _stmt, int _v, bool lock=true) noexcept;
 	PgSQL_STMT_Global_info* add_prepared_statement(char *user, char *database, char *query, unsigned int query_len, 
 		char *fc, Parse_Param_Types&& ppt, bool lock=true);
 	void get_metrics(uint64_t *c_unique, uint64_t *c_total, uint64_t *stmt_max_stmt_id, uint64_t *cached,
