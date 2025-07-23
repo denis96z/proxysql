@@ -3822,9 +3822,10 @@ void PgSQL_Thread::refresh_variables() {
 	pgsql_thread___query_cache_size_MB = GloPTH->get_variable_int((char*)"query_cache_size_MB");
 	pgsql_thread___query_cache_soft_ttl_pct = GloPTH->get_variable_int((char*)"query_cache_soft_ttl_pct");
 	pgsql_thread___query_cache_handle_warnings = GloPTH->get_variable_int((char*)"query_cache_handle_warnings");
+	pgsql_thread___max_stmts_cache = GloPTH->get_variable_int((char*)"max_stmts_cache");
 	/*
 	mysql_thread___max_stmts_per_connection = GloPTH->get_variable_int((char*)"max_stmts_per_connection");
-	mysql_thread___max_stmts_cache = GloPTH->get_variable_int((char*)"max_stmts_cache");
+	
 
 	if (mysql_thread___monitor_username) free(mysql_thread___monitor_username);
 	mysql_thread___monitor_username = GloPTH->get_variable_string((char*)"monitor_username");

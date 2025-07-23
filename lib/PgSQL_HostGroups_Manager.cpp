@@ -52,7 +52,7 @@ static unsigned long long array_mysrvc_cands = 0;
 
 extern ProxySQL_Admin *GloAdmin;
 
-extern MySQL_Threads_Handler *GloMTH;
+extern PgSQL_Threads_Handler *GloPTH;
 
 extern MySQL_Monitor *GloMyMon;
 
@@ -1222,7 +1222,7 @@ bool PgSQL_HostGroups_Manager::commit(
 	int cols=0;
 	int affected_rows=0;
 	SQLite3_result *resultset=NULL;
-	if (GloMTH->variables.hostgroup_manager_verbose) {
+	if (GloPTH->variables.hostgroup_manager_verbose) {
 		mydb->execute_statement((char *)"SELECT * FROM pgsql_servers_incoming", &error , &cols , &affected_rows , &resultset);
 		if (error) {
 			proxy_error("Error on read from pgsql_servers_incoming : %s\n", error);
@@ -1240,7 +1240,7 @@ bool PgSQL_HostGroups_Manager::commit(
 	if (error) {
 		proxy_error("Error on %s : %s\n", query, error);
 	} else {
-		if (GloMTH->variables.hostgroup_manager_verbose) {
+		if (GloPTH->variables.hostgroup_manager_verbose) {
 			proxy_info("Dumping pgsql_servers LEFT JOIN pgsql_servers_incoming\n");
 			resultset->dump_to_stderr();
 		}
@@ -1274,7 +1274,7 @@ bool PgSQL_HostGroups_Manager::commit(
 		proxy_error("Error on %s : %s\n", query, error);
 	} else {
 
-		if (GloMTH->variables.hostgroup_manager_verbose) {
+		if (GloPTH->variables.hostgroup_manager_verbose) {
 			proxy_info("Dumping pgsql_servers JOIN pgsql_servers_incoming\n");
 			resultset->dump_to_stderr();
 		}
@@ -1298,7 +1298,7 @@ bool PgSQL_HostGroups_Manager::commit(
 			proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 5, "Server %s:%d , weight=%d, status=%d, mem_pointer=%llu, hostgroup=%d, compression=%d\n", r->fields[1], atoi(r->fields[2]), atoi(r->fields[3]), (MySerStatus) atoi(r->fields[4]), ptr, atoi(r->fields[0]), atoi(r->fields[5]));
 			//fprintf(stderr,"%lld\n", ptr);
 			if (ptr==0) {
-				if (GloMTH->variables.hostgroup_manager_verbose) {
+				if (GloPTH->variables.hostgroup_manager_verbose) {
 					proxy_info("Creating new server in HG %d : %s:%d , weight=%d, status=%d\n", atoi(r->fields[0]), r->fields[1], atoi(r->fields[2]), atoi(r->fields[3]), (MySerStatus) atoi(r->fields[4]));
 				}
 				PgSQL_SrvC *mysrvc=new PgSQL_SrvC(r->fields[1], atoi(r->fields[2]), atoi(r->fields[3]), (MySerStatus) atoi(r->fields[4]), atoi(r->fields[5]), atoi(r->fields[6]), atoi(r->fields[7]), atoi(r->fields[8]), atoi(r->fields[9]), r->fields[10]); // add new fields here if adding more columns in pgsql_servers
@@ -1318,12 +1318,12 @@ bool PgSQL_HostGroups_Manager::commit(
 				// carefully increase the 2nd index by 1 for every new column added
 
 				if (atoi(r->fields[3])!=atoi(r->fields[12])) {
-					if (GloMTH->variables.hostgroup_manager_verbose)
+					if (GloPTH->variables.hostgroup_manager_verbose)
 						proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 5, "Changing weight for server %d:%s:%d (%s:%d) from %d (%ld) to %d\n" , mysrvc->myhgc->hid , mysrvc->address, mysrvc->port, r->fields[1], atoi(r->fields[2]), atoi(r->fields[3]) , mysrvc->weight , atoi(r->fields[12]));
 					mysrvc->weight=atoi(r->fields[12]);
 				}
 				if (atoi(r->fields[4])!=atoi(r->fields[13])) {
-					if (GloMTH->variables.hostgroup_manager_verbose)
+					if (GloPTH->variables.hostgroup_manager_verbose)
 						proxy_info("Changing status for server %d:%s:%d (%s:%d) from %d (%d) to %d\n" , mysrvc->myhgc->hid , mysrvc->address, mysrvc->port, r->fields[1], atoi(r->fields[2]), atoi(r->fields[4]) , mysrvc->status , atoi(r->fields[13]));
 					mysrvc->status=(MySerStatus)atoi(r->fields[13]);
 					if (mysrvc->status==MYSQL_SERVER_STATUS_SHUNNED) {
@@ -1331,17 +1331,17 @@ bool PgSQL_HostGroups_Manager::commit(
 					}
 				}
 				if (atoi(r->fields[5])!=atoi(r->fields[14])) {
-					if (GloMTH->variables.hostgroup_manager_verbose)
+					if (GloPTH->variables.hostgroup_manager_verbose)
 						proxy_info("Changing compression for server %d:%s:%d (%s:%d) from %d (%d) to %d\n" , mysrvc->myhgc->hid , mysrvc->address, mysrvc->port, r->fields[1], atoi(r->fields[2]), atoi(r->fields[5]) , mysrvc->compression , atoi(r->fields[14]));
 					mysrvc->compression=atoi(r->fields[14]);
 				}
 				if (atoi(r->fields[6])!=atoi(r->fields[15])) {
-					if (GloMTH->variables.hostgroup_manager_verbose)
+					if (GloPTH->variables.hostgroup_manager_verbose)
 					proxy_info("Changing max_connections for server %d:%s:%d (%s:%d) from %d (%ld) to %d\n" , mysrvc->myhgc->hid , mysrvc->address, mysrvc->port, r->fields[1], atoi(r->fields[2]), atoi(r->fields[6]) , mysrvc->max_connections , atoi(r->fields[15]));
 					mysrvc->max_connections=atoi(r->fields[15]);
 				}
 				if (atoi(r->fields[7])!=atoi(r->fields[16])) {
-					if (GloMTH->variables.hostgroup_manager_verbose)
+					if (GloPTH->variables.hostgroup_manager_verbose)
 						proxy_info("Changing max_replication_lag for server %u:%s:%d (%s:%d) from %d (%d) to %d\n" , mysrvc->myhgc->hid , mysrvc->address, mysrvc->port, r->fields[1], atoi(r->fields[2]), atoi(r->fields[7]) , mysrvc->max_replication_lag , atoi(r->fields[16]));
 					mysrvc->max_replication_lag=atoi(r->fields[16]);
 					if (mysrvc->max_replication_lag == 0) { // we just changed it to 0
@@ -1354,17 +1354,17 @@ bool PgSQL_HostGroups_Manager::commit(
 					}
 				}
 				if (atoi(r->fields[8])!=atoi(r->fields[17])) {
-					if (GloMTH->variables.hostgroup_manager_verbose)
+					if (GloPTH->variables.hostgroup_manager_verbose)
 						proxy_info("Changing use_ssl for server %d:%s:%d (%s:%d) from %d (%d) to %d\n" , mysrvc->myhgc->hid , mysrvc->address, mysrvc->port, r->fields[1], atoi(r->fields[2]), atoi(r->fields[8]) , mysrvc->use_ssl , atoi(r->fields[17]));
 					mysrvc->use_ssl=atoi(r->fields[17]);
 				}
 				if (atoi(r->fields[9])!=atoi(r->fields[18])) {
-					if (GloMTH->variables.hostgroup_manager_verbose)
+					if (GloPTH->variables.hostgroup_manager_verbose)
 						proxy_info("Changing max_latency_ms for server %d:%s:%d (%s:%d) from %d (%d) to %d\n" , mysrvc->myhgc->hid , mysrvc->address, mysrvc->port, r->fields[1], atoi(r->fields[2]), atoi(r->fields[9]) , mysrvc->max_latency_us/1000 , atoi(r->fields[18]));
 					mysrvc->max_latency_us=1000*atoi(r->fields[18]);
 				}
 				if (strcmp(r->fields[10],r->fields[19])) {
-					if (GloMTH->variables.hostgroup_manager_verbose)
+					if (GloPTH->variables.hostgroup_manager_verbose)
 						proxy_info("Changing comment for server %d:%s:%d (%s:%d) from '%s' to '%s'\n" , mysrvc->myhgc->hid , mysrvc->address, mysrvc->port, r->fields[1], atoi(r->fields[2]), r->fields[10], r->fields[19]);
 					free(mysrvc->comment);
 					mysrvc->comment=strdup(r->fields[19]);
@@ -1463,8 +1463,8 @@ bool PgSQL_HostGroups_Manager::commit(
 	curtime2 = curtime2/1000;
 	proxy_info("PgSQL_HostGroups_Manager::commit() locked for %llums\n", curtime2-curtime1);
 
-	if (GloMTH) {
-		GloMTH->signal_all_threads(1);
+	if (GloPTH) {
+		GloPTH->signal_all_threads(1);
 	}
 
 	return true;
@@ -1774,23 +1774,23 @@ void PgSQL_HostGroups_Manager::push_MyConn_to_pool(PgSQL_Connection *c, bool _lo
 	mysrvc=(PgSQL_SrvC *)c->parent;
 	proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 7, "Returning PgSQL_Connection %p, server %s:%d with status %d\n", c, mysrvc->address, mysrvc->port, mysrvc->status);
 	mysrvc->ConnectionsUsed->remove(c);
-	if (GloMTH == NULL) { goto __exit_push_MyConn_to_pool; }
-	if (c->largest_query_length > (unsigned int)GloMTH->variables.threshold_query_length) {
+	if (GloPTH == NULL) { goto __exit_push_MyConn_to_pool; }
+	if (c->largest_query_length > (unsigned int)GloPTH->variables.threshold_query_length) {
 		proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 7, "Destroying PgSQL_Connection %p, server %s:%d with status %d . largest_query_length = %lu\n", c, mysrvc->address, mysrvc->port, mysrvc->status, c->largest_query_length);
 		delete c;
 		goto __exit_push_MyConn_to_pool;
 	}
 	if (mysrvc->status==MYSQL_SERVER_STATUS_ONLINE) {
 		if (c->async_state_machine==ASYNC_IDLE) {
-			if (GloMTH == NULL) { goto __exit_push_MyConn_to_pool; }
-			/*if (c->local_stmts->get_num_backend_stmts() > (unsigned int)GloMTH->variables.max_stmts_per_connection) {
-				proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 7, "Destroying PgSQL_Connection %p, server %s:%d with status %d because has too many prepared statements\n", c, mysrvc->address, mysrvc->port, mysrvc->status);
-//				delete c;
+			if (GloPTH == NULL) { goto __exit_push_MyConn_to_pool; }
+			if (c->local_stmts->get_num_backend_stmts() > (unsigned int)GloPTH->variables.max_stmts_per_connection) {  // Check if the connection has too many prepared statements
+				// Log debug information about destroying the connection due to too many prepared statements
+				proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 7, "Destroying PgSQL_Connection %p, server %s:%d with status %d because has too many prepared statements\n", c, mysrvc->address, mysrvc->port, (int)mysrvc->status);
 				mysrvc->ConnectionsUsed->add(c); // Add the connection back to the list of used connections
 				destroy_MyConn_from_pool(c, false); // Destroy the connection from the pool
-			} else {*/
-				mysrvc->ConnectionsFree->add(c);
-			//}
+			} else {
+				mysrvc->ConnectionsFree->add(c); // Add the connection to the list of free connections
+			}
 		} else {
 			proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 7, "Destroying PgSQL_Connection %p, server %s:%d with status %d\n", c, mysrvc->address, mysrvc->port, mysrvc->status);
 			delete c;
@@ -1899,7 +1899,7 @@ PgSQL_SrvC *PgSQL_HGC::get_random_MySrvC(char * gtid_uuid, uint64_t gtid_trxid, 
 								(mysrvc->shunned_and_kill_all_connections==true && mysrvc->ConnectionsUsed->conns_length()==0 && mysrvc->ConnectionsFree->conns_length()==0) // if shunned_and_kill_all_connections is set, ensure all connections are already dropped
 							) {
 #ifdef DEBUG
-								if (GloMTH->variables.hostgroup_manager_verbose >= 3) {
+								if (GloPTH->variables.hostgroup_manager_verbose >= 3) {
 									proxy_info("Unshunning server %s:%d.\n", mysrvc->address, mysrvc->port);
 								}
 #endif
@@ -2208,7 +2208,7 @@ void PgSQL_SrvConnList::get_random_MyConn_inner_search(unsigned int start, unsig
 				/*if (connection_quality_level == 1) {
 					int rca = pgsql_thread___reset_connection_algorithm;
 					if (rca==1) {
-						int ql = GloMTH->variables.connpoll_reset_queue_length;
+						int ql = GloPTH->variables.connpoll_reset_queue_length;
 						if (ql==0) {
 							// if:
 							// pgsql-reset_connection_algorithm=1 and
@@ -2372,7 +2372,7 @@ PgSQL_Connection * PgSQL_SrvConnList::get_random_MyConn(PgSQL_Session *sess, boo
 void PgSQL_HostGroups_Manager::unshun_server_all_hostgroups(const char * address, uint16_t port, time_t t, int max_wait_sec, unsigned int *skip_hid) {
 	// we scan all hostgroups looking for a specific server to unshun
 	// if skip_hid is not NULL , the specific hostgroup is skipped
-	if (GloMTH->variables.hostgroup_manager_verbose >= 3) {
+	if (GloPTH->variables.hostgroup_manager_verbose >= 3) {
 		char buf[64];
 		if (skip_hid == NULL) {
 			sprintf(buf,"NULL");
@@ -2406,7 +2406,7 @@ void PgSQL_HostGroups_Manager::unshun_server_all_hostgroups(const char * address
 							||
 							(mysrvc->shunned_and_kill_all_connections==true && mysrvc->ConnectionsUsed->conns_length()==0 && mysrvc->ConnectionsFree->conns_length()==0) // if shunned_and_kill_all_connections is set, ensure all connections are already dropped
 						) {
-							if (GloMTH->variables.hostgroup_manager_verbose >= 3) {
+							if (GloPTH->variables.hostgroup_manager_verbose >= 3) {
 								proxy_info("Unshunning server %d:%s:%d . time_last_detected_error=%lu\n", mysrvc->myhgc->hid, address, port, mysrvc->time_last_detected_error);
 							}
 							mysrvc->status=MYSQL_SERVER_STATUS_ONLINE;
@@ -3312,7 +3312,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 			if (num_rows==0) {
 				// the server has read_only=0 , but we can't find any writer, so we perform a swap
 				GloAdmin->mysql_servers_wrlock();
-				if (GloMTH->variables.hostgroup_manager_verbose) {
+				if (GloPTH->variables.hostgroup_manager_verbose) {
 					char *error2=NULL;
 					int cols2=0;
 					int affected_rows2=0;
@@ -3334,7 +3334,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 					free(query2);
 				}
 				GloAdmin->save_proxysql_servers_runtime_to_database(false); // SAVE PgSQL SERVERS FROM RUNTIME
-				if (GloMTH->variables.hostgroup_manager_verbose) {
+				if (GloPTH->variables.hostgroup_manager_verbose) {
 					char *error2=NULL;
 					int cols2=0;
 					int affected_rows2=0;
@@ -3365,7 +3365,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 					sprintf(query,Q3B,hostname,port);
 				}
 				admindb->execute(query);
-				if (GloMTH->variables.hostgroup_manager_verbose) {
+				if (GloPTH->variables.hostgroup_manager_verbose) {
 					char *error2=NULL;
 					int cols2=0;
 					int affected_rows2=0;
@@ -3423,7 +3423,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 				wrunlock();
 				if (act==true) {	// there are servers either missing, or with stats=OFFLINE_HARD
 					GloAdmin->mysql_servers_wrlock();
-					if (GloMTH->variables.hostgroup_manager_verbose) {
+					if (GloPTH->variables.hostgroup_manager_verbose) {
 						char *error2=NULL;
 						int cols2=0;
 						int affected_rows2=0;
@@ -3449,7 +3449,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 					admindb->execute(query);
 					sprintf(query,Q2B,hostname,port);
 					admindb->execute(query);
-					if (GloMTH->variables.hostgroup_manager_verbose) {
+					if (GloPTH->variables.hostgroup_manager_verbose) {
 						char *error2=NULL;
 						int cols2=0;
 						int affected_rows2=0;
@@ -3476,7 +3476,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 						sprintf(query,Q3B,hostname,port);
 					}
 					admindb->execute(query);
-					if (GloMTH->variables.hostgroup_manager_verbose) {
+					if (GloPTH->variables.hostgroup_manager_verbose) {
 						char *error2=NULL;
 						int cols2=0;
 						int affected_rows2=0;
@@ -3506,7 +3506,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 			if (num_rows) {
 				// the server has read_only=1 , but we find it as writer, so we perform a swap
 				GloAdmin->mysql_servers_wrlock();
-				if (GloMTH->variables.hostgroup_manager_verbose) {
+				if (GloPTH->variables.hostgroup_manager_verbose) {
 					char *error2=NULL;
 					int cols2=0;
 					int affected_rows2=0;
@@ -3530,7 +3530,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 				GloAdmin->save_proxysql_servers_runtime_to_database(false); // SAVE PgSQL SERVERS FROM RUNTIME
 				sprintf(query,Q4,hostname,port);
 				admindb->execute(query);
-				if (GloMTH->variables.hostgroup_manager_verbose) {
+				if (GloPTH->variables.hostgroup_manager_verbose) {
 					char *error2=NULL;
 					int cols2=0;
 					int affected_rows2=0;
@@ -3553,7 +3553,7 @@ void PgSQL_HostGroups_Manager::read_only_action(char *hostname, int port, int re
 				}
 				sprintf(query,Q5,hostname,port);
 				admindb->execute(query);
-				if (GloMTH->variables.hostgroup_manager_verbose) {
+				if (GloPTH->variables.hostgroup_manager_verbose) {
 					char *error2=NULL;
 					int cols2=0;
 					int affected_rows2=0;
@@ -4567,7 +4567,7 @@ PgSQL_SrvC* PgSQL_HostGroups_Manager::HostGroup_Server_Mapping::insert_HGM(unsig
 				mysrvc->comment = strdup(srv->comment);
 				mysrvc->status = MYSQL_SERVER_STATUS_ONLINE;
 
-				if (GloMTH->variables.hostgroup_manager_verbose) {
+				if (GloPTH->variables.hostgroup_manager_verbose) {
 					proxy_info(
 						"Found server node in Host Group Container %s:%d as 'OFFLINE_HARD', setting back as 'ONLINE' with:"
 						" hostgroup_id=%d, weight=%ld, compression=%d, max_connections=%ld, use_ssl=%d,"
@@ -4584,7 +4584,7 @@ PgSQL_SrvC* PgSQL_HostGroups_Manager::HostGroup_Server_Mapping::insert_HGM(unsig
 	}
 	
 	if (!ret_srv) {
-		if (GloMTH->variables.hostgroup_manager_verbose) {
+		if (GloPTH->variables.hostgroup_manager_verbose) {
 			proxy_info("Creating new server in HG %d : %s:%d , weight=%ld, status=%d\n", hostgroup_id, srv->address, srv->port, srv->weight, srv->status);
 		}
 
