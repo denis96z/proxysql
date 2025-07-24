@@ -2340,6 +2340,15 @@ unsigned int check_heartbeats(ThreadType* threads, unsigned int num_threads,
 		if (threads[i].worker &&
 			curtime > threads[i].worker->atomic_curtime + poll_timeout) {
 			missing++;
+#ifdef DEBUG
+			// This block is only used for Watchdog unit tests:
+			// Specifically for PROXYSQLTEST cases 55 0 and 55 1.
+			if (i == 0 && threads[i].worker->watchdog_test__simulated_delay_ms) {
+				// [Test-only] Break execution after missed heartbeat on thread 0.
+				threads[i].worker->watchdog_test__missed_heartbeats++;
+				break;  
+			}
+#endif
 		}
 	}
 	return missing;
@@ -2458,6 +2467,39 @@ void watchdog_main_loop() {
 				group.missed_heartbeats++;
 
 				if (group.missed_heartbeats >= static_cast<unsigned int>(GloVars.restart_on_missing_heartbeats)) {
+#ifdef DEBUG
+					// This block is only used for Watchdog unit tests:
+					// Specifically for PROXYSQLTEST cases 55 0 and 55 1.
+					bool is_test_mode = false;
+					switch (group.type) {
+					case ENTITY_TYPE_MYSQL: {
+						MySQL_Threads_Handler* mth = static_cast<MySQL_Threads_Handler*>(group.thread_handler);
+						if (mth && mth->num_threads && mth->mysql_threads[0].worker &&
+							mth->mysql_threads[0].worker->watchdog_test__simulated_delay_ms) {
+							is_test_mode = true;
+						}
+						break;
+					}
+					case ENTITY_TYPE_POSTGRESQL: {
+						PgSQL_Threads_Handler* pth = static_cast<PgSQL_Threads_Handler*>(group.thread_handler);
+						if (pth && pth->num_threads && pth->pgsql_threads[0].worker &&
+							pth->pgsql_threads[0].worker->watchdog_test__simulated_delay_ms) {
+							is_test_mode = true;
+						}
+						break;
+					}
+					default:
+						assert(0);
+					}
+
+					if (is_test_mode) {
+						proxy_error("Watchdog: reached %u missed %s thread heartbeats. Running in Watchdog test mode. Aborting suppressed.\n",
+							group.missed_heartbeats, group.name);
+						group.missed_heartbeats = 0;
+						continue;
+					}
+#endif
+
 #ifndef RUNNING_ON_VALGRIND
 					if (GloVars.restart_on_missing_heartbeats) {
 						proxy_error("Watchdog: reached %u missed %s thread heartbeats. Aborting!\n",

@@ -3197,6 +3197,12 @@ void PgSQL_Thread::run() {
 #ifdef IDLE_THREADS
 		}
 #endif // IDLE_THREADS
+#ifdef DEBUG
+		// This block is only used for Watchdog unit tests:
+		// Specifically for PROXYSQLTEST cases 55 0 and 55 1.
+		if (watchdog_test__simulated_delay_ms)
+			std::this_thread::sleep_for(std::chrono::milliseconds(watchdog_test__simulated_delay_ms));
+#endif
 	}
 }
 // end of ::run()
