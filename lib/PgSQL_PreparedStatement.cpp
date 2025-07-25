@@ -263,7 +263,7 @@ void PgSQL_STMTs_local_v14::client_insert(uint64_t global_stmt_id, const std::st
 #ifdef DEBUG
 	auto range = global_id_to_stmt_names.equal_range(global_stmt_id);
 	for (auto it = range.first; it != range.second; ++it) {
-		assert(it->second == client_stmt_name && "client_stmt_name is already mapped to global_stmt_id in global_id_to_stmt_names"); // Should not happen, as we expect unique client_stmt_name per global_stmt_id
+		assert(it->second != client_stmt_name && "client_stmt_name is already mapped to global_stmt_id in global_id_to_stmt_names"); // Should not happen, as we expect unique client_stmt_name per global_stmt_id
 	}
 #endif
 	global_id_to_stmt_names.emplace(global_stmt_id, client_stmt_name);

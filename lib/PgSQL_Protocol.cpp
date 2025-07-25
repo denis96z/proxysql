@@ -763,7 +763,7 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 		return EXECUTION_STATE::FAILED;
 	}
 
-	assert((hdr.data.size - 1) > 0);
+	assert(hdr.data.size > 0);
 
 	if (hdr.type != (*myds)->auth_next_pkt_type) {
 		return EXECUTION_STATE::FAILED;
