@@ -369,7 +369,6 @@ public:
 	PtrSize_t pkt;
 	std::string untracked_option_parameters;
 	PgSQL_DateStyle_t current_datestyle = {};
-	char* default_session_variables[PGSQL_NAME_LAST_HIGH_WM] = {};
 
 #if 0
 	// uint64_t
@@ -526,22 +525,6 @@ public:
 	void detected_broken_connection(const char* file, unsigned int line, const char* func, const char* action, PgSQL_Connection* myconn, bool verbose = false);
 	void generate_status_one_hostgroup(int hid, std::string& s);
 	void set_previous_status_mode3(bool allow_execute = true);
-
-	void set_default_session_variable(enum pgsql_variable_name idx, const char* value);
-
-	/**
-	 * @brief Retrieves default session variable
-	 *
-	 * This function tries to retrieve value of default session variable if present (provided in connection parameters). 
-	 * If value is not found, it falls back to the thread-specific default variables.
-	 *
-	 * @param idx The index of the session variable to retrieve.
-	 * @return The value of the session variable 
-	 * 
-	 */
-	const char* get_default_session_variable(enum pgsql_variable_name idx);
-	
-	void reset_default_session_variable(enum pgsql_variable_name idx);
 };
 
 #define PgSQL_KILL_QUERY       1

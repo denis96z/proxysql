@@ -617,16 +617,14 @@ void PgSQL_Session::reset() {
 			}
 		}
 	}
-	if (client_myds) {
-		if (client_myds->myconn) {
-			client_myds->myconn->reset();
-		}
+	if (client_myds && client_myds->myconn) {
+		client_myds->myconn->reset();
 	}
 }
 
 PgSQL_Session::~PgSQL_Session() {
 
-	reset(); // we moved this out to allow CHANGE_USER
+	reset();
 
 	if (locked_on_hostgroup >= 0) {
 		thread->status_variables.stvar[st_var_hostgroup_locked]--;
@@ -675,10 +673,6 @@ PgSQL_Session::~PgSQL_Session() {
 	if (proxysql_node_address) {
 		delete proxysql_node_address;
 		proxysql_node_address = NULL;
-	}
-
-	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-		reset_default_session_variable((enum pgsql_variable_name)i);
 	}
 	if (transaction_state_manager)
 		delete transaction_state_manager;
@@ -1161,7 +1155,7 @@ void PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				newsess->thread_session_id = __sync_fetch_and_add(&glovars.thread_id, 1);
 			}
 			newsess->status = WAITING_CLIENT_DATA;
-			PgSQL_Connection* myconn = new PgSQL_Connection;
+			PgSQL_Connection* myconn = new PgSQL_Connection(true);
 			newsess->client_myds->attach_connection(myconn);
 			newsess->client_myds->myprot.init(&newsess->client_myds, newsess->client_myds->myconn->userinfo, newsess);
 			newsess->mirror = true;
@@ -4224,7 +4218,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 						if (idx != PGSQL_NAME_LAST_HIGH_WM) {
 
 							if ((value1.size() == sizeof("DEFAULT") - 1) && strncasecmp(value1.c_str(), (char*)"DEFAULT",sizeof("DEFAULT")-1) == 0) {
-								value1 = get_default_session_variable((enum pgsql_variable_name)idx);
+								std::tie(value1, std::ignore) = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
 							}
 
 							char* transformed_value = nullptr;
@@ -4278,7 +4272,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 									// No need to set send_param_status to true, as the original DateStyle value may have been modified.  
 								    // When send_param_status is true, it always sends the original value provided by the user in the SET statement.  
 									if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {
-										param_status.push_back(std::make_pair(var, value1));
+										param_status.emplace_back(var, value1);
 									}
 								} else {
 									send_param_status = IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx]);
@@ -4461,7 +4455,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 					}
 
 					if (send_param_status)
-						param_status.push_back(std::make_pair(var, *values));
+						param_status.emplace_back(var, *values);
 				}
 
 				if (failed_to_parse_var) {
@@ -4643,16 +4637,16 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				for (int idx = 0; idx < PGSQL_NAME_LAST_LOW_WM; idx++) {
 
 					const char* name = pgsql_tracked_variables[idx].set_variable_name;
-					const char* value = get_default_session_variable((enum pgsql_variable_name)idx);
+					auto [value, hash] = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
 
 					proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
-					uint32_t var_hash_int = SpookyHash::Hash32(value, strlen(value), 10);
+					uint32_t var_hash_int = ((hash != 0) ? hash : SpookyHash::Hash32(value, strlen(value), 10));
 					if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
 						if (!pgsql_variables.client_set_value(this, idx, value, false)) {
 							return false;
 						}
 						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {
-							param_status.push_back(std::make_pair(name, value));
+							param_status.emplace_back(name, value);
 						}
 					}
 				}
@@ -4660,15 +4654,15 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				for (int idx : client_myds->myconn->dynamic_variables_idx) {
 					assert(idx < PGSQL_NAME_LAST_HIGH_WM);
 					const char* name = pgsql_tracked_variables[idx].set_variable_name;
-					const char* value = get_default_session_variable((enum pgsql_variable_name)idx);
+					auto [value, hash] = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
 					proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
-					uint32_t var_hash_int = SpookyHash::Hash32(value, strlen(value), 10);
+					uint32_t var_hash_int = ((hash != 0) ? hash : SpookyHash::Hash32(value, strlen(value), 10));
 					if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
 						if (!pgsql_variables.client_set_value(this, idx, value, false)) {
 							return false;
 						}
 						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {
-							param_status.push_back(std::make_pair(name, value));
+							param_status.emplace_back(name, value);
 						}
 					}
 				}
@@ -4696,16 +4690,16 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 
 				if (idx != PGSQL_NAME_LAST_HIGH_WM) {
 					const char* name = pgsql_tracked_variables[idx].set_variable_name;
-					const char* value = get_default_session_variable((enum pgsql_variable_name)idx);
-
-					uint32_t var_hash_int = SpookyHash::Hash32(value, strlen(value), 10);
+					auto [value, hash] = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
+					
+					uint32_t var_hash_int = ((hash != 0) ? hash : SpookyHash::Hash32(value, strlen(value), 10));
 					if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
 						if (!pgsql_variables.client_set_value(this, idx, value, true)) {
 							return false;
 						}
 						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {
 							proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
-							param_status.emplace_back(std::make_pair(name, value));
+							param_status.emplace_back(name, value);
 						}
 					}
 				} else {
@@ -5967,38 +5961,6 @@ void PgSQL_Session::switch_fast_forward_to_normal_mode() {
 	} else {
 		// cannot switch Permanent Fast Forward to Normal
 		assert(0);
-	}
-}
-
-void PgSQL_Session::set_default_session_variable(enum pgsql_variable_name idx, const char* value) {
-	assert(value);
-	if (idx >= 0 && idx < PGSQL_NAME_LAST_HIGH_WM) {
-		if (default_session_variables[idx]) {
-			free(default_session_variables[idx]);
-		}
-		default_session_variables[idx] = strdup(value);
-	}
-}
-
-const char* PgSQL_Session::get_default_session_variable(enum pgsql_variable_name idx) {
-	// Check if index is within valid range
-	if (idx >= 0 && idx < PGSQL_NAME_LAST_HIGH_WM) {
-		// Attempt to retrieve value from default session variables
-		const char* val = default_session_variables[idx];
-
-		// Return the found value, or fall back to thread-specific default if null
-		return (val) ? val : pgsql_thread___default_variables[idx];
-	}
-
-	return NULL;
-}
-
-void PgSQL_Session::reset_default_session_variable(enum pgsql_variable_name idx) {
-	if (idx >= 0 && idx < PGSQL_NAME_LAST_HIGH_WM) {
-		if (default_session_variables[idx]) {
-			free(default_session_variables[idx]);
-			default_session_variables[idx] = NULL;
-		}
 	}
 }
 

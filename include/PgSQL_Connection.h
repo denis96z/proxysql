@@ -244,7 +244,7 @@ class PgSQL_Connection_userinfo {
 
 class PgSQL_Connection {
 public:
-	PgSQL_Connection();
+	PgSQL_Connection(bool is_client_conn);
 	~PgSQL_Connection();
 
 	PG_ASYNC_ST handler(short event);
@@ -312,7 +312,7 @@ public:
 		if (error_info.severity == PGSQL_ERROR_SEVERITY::ERRSEVERITY_FATAL ||
 			error_info.severity == PGSQL_ERROR_SEVERITY::ERRSEVERITY_ERROR ||
 			error_info.severity == PGSQL_ERROR_SEVERITY::ERRSEVERITY_PANIC) {
-				return true;
+			return true;
 		}
 		return false;
 	}
@@ -442,6 +442,42 @@ public:
 
 	bool IsKeepMultiplexEnabledVariables(char* query_digest_text);
 
+	/**
+	 * @brief Retrieves startup parameter and it's hash
+	 *
+	 * This function tries to retrieve value and hash of startup paramters if present (provided in connection parameters).
+	 * If value is not found, it falls back to the thread-specific default variables.
+	 *
+	 * @param idx The index of startup parameter to retrieve.
+	 * @return The value and hash of startup parameter.
+	 *
+	 */
+	std::pair<const char*, uint32_t> get_startup_parameter_and_hash(enum pgsql_variable_name idx);
+	
+	/**
+	 * @brief Copies tracked PgSQL session variables to startup parameters
+	 *
+	 * This function synchronizes the current tracked session variables (in `variables` and `var_hash`)
+	 * to the startup parameters arrays (`startup_parameters` and `startup_parameters_hash`). If `copy_only_critical_param` 
+	 * is true, only the critical parameters (indices 0 to PGSQL_NAME_LAST_LOW_WM-1) are copied. 
+	 * Otherwise, all tracked variables up to PGSQL_NAME_LAST_HIGH_WM are copied.
+	 *
+	 * @param copy_only_critical_param If true, only critical parameters are copied; otherwise, all tracked variables.
+	 */
+	void copy_pgsql_variables_to_startup_parameters(bool copy_only_critical_param);
+
+	/**
+	 * @brief Copies startup parameters to tracked PgSQL session variables.
+	 *
+	 * This function synchronizes the startup parameters arrays (`startup_parameters` and `startup_parameters_hash`)
+	 * to the tracked session variables (`variables` and `var_hash`). If `copy_only_critical_param` is true,
+	 * only the critical parameters (indices 0 to PGSQL_NAME_LAST_LOW_WM-1) are copied. Otherwise, all tracked
+	 * variables up to PGSQL_NAME_LAST_HIGH_WM are copied.
+	 *
+	 * @param copy_only_critical_param If true, only critical parameters are copied; otherwise, all tracked variables.
+	 */
+	void copy_startup_parameters_to_pgsql_variables(bool copy_only_critical_param);
+
 	struct {
 		unsigned long length;
 		char* ptr;
@@ -471,6 +507,9 @@ public:
 	bool var_absent[PGSQL_NAME_LAST_HIGH_WM] = { false };
 	std::vector<uint32_t> dynamic_variables_idx;
 
+	uint32_t startup_parameters_hash[PGSQL_NAME_LAST_HIGH_WM] = {};
+	char* startup_parameters[PGSQL_NAME_LAST_HIGH_WM] = {};
+
 	/**
 	 * @brief Keeps tracks of the 'server_status'. Do not confuse with the 'server_status' from the
 	 *  'MYSQL' connection itself. This flag keeps track of the configured server status from the
@@ -499,7 +538,7 @@ public:
 	bool reusable;
 	bool processing_multi_statement;
 	bool multiplex_delayed;
-
+	bool is_client_connection; // true if this is a client connection, false if it is a server connection
 
 	PgSQL_SrvC *parent;
 	PgSQL_Connection_userinfo* userinfo;
