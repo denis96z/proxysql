@@ -180,10 +180,10 @@ PgSQL_Connection::PgSQL_Connection(bool is_client_conn) {
 	options.init_connect_sent = false;
 	userinfo = new PgSQL_Connection_userinfo();
 
-	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-		variables[i].value = NULL;
-		var_hash[i] = 0;
-	}
+	//for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
+	//	variables[i].value = NULL;
+	//	var_hash[i] = 0;
+	//}
 
 	new_result = true;
 	is_copy_out = false;
@@ -239,6 +239,7 @@ PgSQL_Connection::~PgSQL_Connection() {
 	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; ++i) {
 		if (startup_parameters[i]) {
 			free(startup_parameters[i]);
+			startup_parameters[i] = nullptr;
 			startup_parameters_hash[i] = 0;
 		}
 	}

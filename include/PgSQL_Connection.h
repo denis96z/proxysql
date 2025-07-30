@@ -216,7 +216,7 @@ private:
 
 class PgSQL_Variable {
 public:
-	char *value = (char*)"";
+	char *value = nullptr;
 	void fill_server_internal_session(nlohmann::json &j, int conn_num, int idx);
 	void fill_client_internal_session(nlohmann::json &j, int idx);
 };
@@ -244,7 +244,7 @@ class PgSQL_Connection_userinfo {
 
 class PgSQL_Connection {
 public:
-	PgSQL_Connection(bool is_client_conn);
+	explicit PgSQL_Connection(bool is_client_conn);
 	~PgSQL_Connection();
 
 	PG_ASYNC_ST handler(short event);
@@ -500,15 +500,15 @@ public:
 		unsigned long long pgconnpoll_put;
 	} statuses;
 
-	PgSQL_Variable variables[PGSQL_NAME_LAST_HIGH_WM];
-	uint32_t var_hash[PGSQL_NAME_LAST_HIGH_WM];
+	std::array<PgSQL_Variable, PGSQL_NAME_LAST_HIGH_WM> variables = {};
+	std::array<uint32_t, PGSQL_NAME_LAST_HIGH_WM> var_hash = {};
 	// for now we store possibly missing variables in the lower range
 	// we may need to fix that, but this will cost performance
-	bool var_absent[PGSQL_NAME_LAST_HIGH_WM] = { false };
+	std::array<bool, PGSQL_NAME_LAST_HIGH_WM> var_absent = {};
 	std::vector<uint32_t> dynamic_variables_idx;
 
-	uint32_t startup_parameters_hash[PGSQL_NAME_LAST_HIGH_WM] = {};
-	char* startup_parameters[PGSQL_NAME_LAST_HIGH_WM] = {};
+	std::array<uint32_t, PGSQL_NAME_LAST_HIGH_WM> startup_parameters_hash = {};
+	std::array<char*, PGSQL_NAME_LAST_HIGH_WM> startup_parameters = {};
 
 	/**
 	 * @brief Keeps tracks of the 'server_status'. Do not confuse with the 'server_status' from the
