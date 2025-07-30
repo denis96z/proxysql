@@ -148,8 +148,9 @@ void print_backtrace(void);
 
 #define NEXT_IMMEDIATE(new_st) do { async_state_machine = new_st; goto handler_again; } while (0)
 
-PgSQL_Connection::PgSQL_Connection() {
+PgSQL_Connection::PgSQL_Connection(bool is_client_conn) {
 	proxy_debug(PROXY_DEBUG_MYSQL_CONNPOOL, 4, "Creating new PgSQL_Connection %p\n", this);
+	is_client_connection = is_client_conn;
 	pgsql_conn = NULL;
 	result_type = 0;
 	pgsql_result = NULL;
@@ -182,10 +183,10 @@ PgSQL_Connection::PgSQL_Connection() {
 	userinfo = new PgSQL_Connection_userinfo();
 	local_stmts = new PgSQL_STMTs_local_v14(false); // false by default, it is a backend
 
-	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-		variables[i].value = NULL;
-		var_hash[i] = 0;
-	}
+	//for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
+	//	variables[i].value = NULL;
+	//	var_hash[i] = 0;
+	//}
 
 	new_result = true;
 	is_copy_out = false;
@@ -228,14 +229,6 @@ PgSQL_Connection::~PgSQL_Connection() {
 		stmt_metadata_result = NULL;
 	}
 
-	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-		if (variables[i].value) {
-			free(variables[i].value);
-			variables[i].value = NULL;
-			var_hash[i] = 0;
-		}
-	}
-
 	if (connected_host_details.hostname) {
 		free(connected_host_details.hostname);
 		connected_host_details.hostname = NULL;
@@ -246,6 +239,22 @@ PgSQL_Connection::~PgSQL_Connection() {
 	}
 
 	if (options.init_connect) free(options.init_connect);
+
+	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; ++i) {
+		if (variables[i].value) {
+			free(variables[i].value);
+			variables[i].value = NULL;
+			var_hash[i] = 0;
+		}
+	}
+
+	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; ++i) {
+		if (startup_parameters[i]) {
+			free(startup_parameters[i]);
+			startup_parameters[i] = nullptr;
+			startup_parameters_hash[i] = 0;
+		}
+	}
 }
 
 void PgSQL_Connection::next_event(PG_ASYNC_ST new_st) {
@@ -907,44 +916,28 @@ void PgSQL_Connection::connect_start() {
 		// charset validation is already done 
 		pgsql_variables.server_set_hash_and_value(myds->sess, PGSQL_CLIENT_ENCODING, client_charset, client_charset_hash);
 
-		std::vector<unsigned int> client_options;
-		client_options.reserve(PGSQL_NAME_LAST_LOW_WM + myds->sess->client_myds->myconn->dynamic_variables_idx.size());
+		// optimized way to set client parameters on backend connection when creating a new connection
+		conninfo << "options='";
+		// excluding client_encoding, which is already set above
+		for (int idx = 1; idx < PGSQL_NAME_LAST_LOW_WM; idx++) {
+			const char* value = pgsql_variables.client_get_value(myds->sess, idx);
+			const char* escaped_str = escape_string_backslash_spaces(value);
+			conninfo << "-c " << pgsql_tracked_variables[idx].set_variable_name << "=" << escaped_str << " ";
+			if (escaped_str != value)
+				free((char*)escaped_str);
 
-		// excluding PGSQL_CLIENT_ENCODING
-		for (unsigned int idx = 1; idx < PGSQL_NAME_LAST_LOW_WM; idx++) {
-			if (pgsql_variables.client_get_hash(myds->sess, idx) == 0) continue;
-			client_options.push_back(idx);
+			const uint32_t hash = pgsql_variables.client_get_hash(myds->sess, idx);
+			pgsql_variables.server_set_hash_and_value(myds->sess, idx, value, hash);
 		}
 
-		for (uint32_t idx : myds->sess->client_myds->myconn->dynamic_variables_idx) {
-			assert(pgsql_variables.client_get_hash(myds->sess, idx));
-			client_options.push_back(idx);
+		myds->sess->mybe->server_myds->myconn->copy_pgsql_variables_to_startup_parameters(true);
+
+		// if there are untracked parameters, the session should lock on the host group
+		if (myds->sess->untracked_option_parameters.empty() == false) {
+			conninfo << myds->sess->untracked_option_parameters;
 		}
-
-		if (client_options.empty() == false ||
-			myds->sess->untracked_option_parameters.empty() == false) {
-
-			// optimized way to set client parameters on backend connection when creating a new connection
-			conninfo << "options='";
-			for (int idx : client_options) {
-				const char* value = pgsql_variables.client_get_value(myds->sess, idx);
-				const char* escaped_str = escape_string_backslash_spaces(value);
-				conninfo << "-c " << pgsql_tracked_variables[idx].set_variable_name << "=" << escaped_str << " ";
-				if (escaped_str != value)
-					free((char*)escaped_str);
-
-				const uint32_t hash = pgsql_variables.client_get_hash(myds->sess, idx);
-				pgsql_variables.server_set_hash_and_value(myds->sess, idx, value, hash);
-			}
-
-			myds->sess->mybe->server_myds->myconn->reorder_dynamic_variables_idx();
-
-			// if there are untracked parameters, the session should lock on the host group
-			if (myds->sess->untracked_option_parameters.empty() == false) {
-				conninfo << myds->sess->untracked_option_parameters;
-			}
-			conninfo << "'";
-		}
+		conninfo << "'";
+		
 	}
 
 	/*conninfo << "postgres://";
@@ -2247,15 +2240,18 @@ void PgSQL_Connection::reset() {
 	delete local_stmts;
 	local_stmts = new PgSQL_STMTs_local_v14(false);
 
-	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
+	for (int i = (is_client_connection ? 0 : PGSQL_NAME_LAST_LOW_WM + 1);
+		i < PGSQL_NAME_LAST_HIGH_WM; 
+		i++) {
 		var_hash[i] = 0;
 		if (variables[i].value) {
 			free(variables[i].value);
 			variables[i].value = NULL;
-			var_hash[i] = 0;
 		}
 	}
 	dynamic_variables_idx.clear();
+
+	if (!is_client_connection) copy_startup_parameters_to_pgsql_variables(/*copy_only_critical_param=*/true); 
 
 	if (options.init_connect) {
 		free(options.init_connect);
@@ -2525,4 +2521,69 @@ void PgSQL_Connection::set_error_from_PQerrorMessage() {
 	// A library-generated error is only set when a server error is not available.
 	const std::string_view& full_msg = !primary_msg.empty() ? primary_msg : lib_errmsg;
 	PgSQL_Error_Helper::fill_error_info(error_info, sqlstate.data(), full_msg.data(), severity.data());
+}
+
+std::pair<const char*, uint32_t> PgSQL_Connection::get_startup_parameter_and_hash(enum pgsql_variable_name idx) {
+	// within valid range?
+	assert(idx >= 0 && idx < PGSQL_NAME_LAST_HIGH_WM);
+
+	// Attempt to retrieve value from default startup parameters
+	if (startup_parameters_hash[idx] != 0) {
+		assert(startup_parameters[idx]);
+		return { startup_parameters[idx], startup_parameters_hash[idx] };
+	}
+	assert(!(idx < PGSQL_NAME_LAST_LOW_WM));
+	return { "", 0};
+}
+
+void PgSQL_Connection::copy_pgsql_variables_to_startup_parameters(bool copy_only_critical_param) {
+
+	//memcpy(startup_parameters_hash, var_hash, sizeof(uint32_t) * PGSQL_NAME_LAST_LOW_WM);
+	for (int i = 0; i < PGSQL_NAME_LAST_LOW_WM; ++i) {
+		assert(var_hash[i]);
+		assert(variables[i].value);
+		startup_parameters_hash[i] = var_hash[i];
+		free(startup_parameters[i]);
+		startup_parameters[i] = strdup(variables[i].value);
+	}
+
+	if (copy_only_critical_param) return;
+
+	for (int i = PGSQL_NAME_LAST_LOW_WM + 1; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
+		if (var_hash[i] != 0) {
+			startup_parameters_hash[i] = var_hash[i];
+			free(startup_parameters[i]);
+			startup_parameters[i] = strdup(variables[i].value);
+		} else {
+			startup_parameters_hash[i] = 0;
+			free(startup_parameters[i]);
+			startup_parameters[i] = nullptr;
+		}
+	}
+}
+
+void PgSQL_Connection::copy_startup_parameters_to_pgsql_variables(bool copy_only_critical_param) {
+
+	//memcpy(var_hash, startup_parameters_hash, sizeof(uint32_t) * PGSQL_NAME_LAST_LOW_WM);
+	for (int i = 0; i < PGSQL_NAME_LAST_LOW_WM; i++) {
+		assert(startup_parameters_hash[i]);
+		assert(startup_parameters[i]);
+		var_hash[i] = startup_parameters_hash[i];
+		free(variables[i].value);
+		variables[i].value = strdup(startup_parameters[i]);
+	}
+
+	if (copy_only_critical_param) return;
+
+	for (int i = PGSQL_NAME_LAST_LOW_WM + 1; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
+		if (startup_parameters_hash[i]) {
+			var_hash[i] = startup_parameters_hash[i];
+			free(variables[i].value);
+			variables[i].value = strdup(startup_parameters[i]);
+		} else {
+			var_hash[i] = 0;
+			free(variables[i].value);
+			variables[i].value = nullptr;
+		}
+	}
 }

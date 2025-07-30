@@ -1199,7 +1199,7 @@ __thread int pgsql_thread___query_cache_soft_ttl_pct;
 __thread int pgsql_thread___query_cache_handle_warnings;
 
 __thread bool pgsql_thread___session_idle_show_processlist;
-__thread char* pgsql_thread___default_variables[PGSQL_NAME_LAST_HIGH_WM];
+__thread char* pgsql_thread___default_variables[PGSQL_NAME_LAST_LOW_WM];
 __thread int pgsql_thread___handle_unknown_charset;
 __thread int pgsql_thread___max_stmts_cache;
 //---------------------------
@@ -1505,7 +1505,7 @@ extern __thread int pgsql_thread___query_cache_soft_ttl_pct;
 extern __thread int pgsql_thread___query_cache_handle_warnings;
 
 extern __thread bool pgsql_thread___session_idle_show_processlist;
-extern __thread char* pgsql_thread___default_variables[PGSQL_NAME_LAST_HIGH_WM];
+extern __thread char* pgsql_thread___default_variables[PGSQL_NAME_LAST_LOW_WM];
 extern __thread int pgsql_thread___handle_unknown_charset;
 extern __thread int pgsql_thread___max_stmts_cache;
 //---------------------------

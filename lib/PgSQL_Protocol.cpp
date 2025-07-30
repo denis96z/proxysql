@@ -1156,11 +1156,9 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 					if (pgsql_variables.client_set_value(sess, PGSQL_DATESTYLE, datestyle.c_str(), false)) {
 						// change current datestyle
 						sess->current_datestyle = PgSQL_DateStyle_Util::parse_datestyle(datestyle);
-						sess->set_default_session_variable(PGSQL_DATESTYLE, datestyle.c_str());
 					}
 				} else {
 					pgsql_variables.client_set_value(sess, idx, value_copy.c_str(), false);
-					sess->set_default_session_variable((enum pgsql_variable_name)idx, value_copy.c_str());
 				}
 			} else {
 				// parameter provided is not part of the tracked variables. Will lock on hostgroup on next query.
@@ -1179,10 +1177,10 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 				continue;
 			const char* val = pgsql_thread___default_variables[i];
 			pgsql_variables.client_set_value(sess, i, val, false);
-			sess->set_default_session_variable((pgsql_variable_name)i, val);
 		}
 
 		sess->client_myds->myconn->reorder_dynamic_variables_idx();
+		sess->client_myds->myconn->copy_pgsql_variables_to_startup_parameters(false);
 	}
 	else {
 		// we always duplicate username and password, or crashes happen

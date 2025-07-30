@@ -2298,7 +2298,7 @@ PgSQL_Connection * PgSQL_SrvConnList::get_random_MyConn(PgSQL_Session *sess, boo
 						}
 
 						// we must create a new connection
-						conn = new PgSQL_Connection();
+						conn = new PgSQL_Connection(false);
 						conn->parent=mysrvc;
 						// if attributes.multiplex == true , STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG is set to false. And vice-versa
 						conn->set_status(!conn->parent->myhgc->attributes.multiplex, STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG);
@@ -2312,7 +2312,7 @@ PgSQL_Connection * PgSQL_SrvConnList::get_random_MyConn(PgSQL_Session *sess, boo
 					unsigned int conns_free = mysrvc->ConnectionsFree->conns_length();
 					unsigned int conns_used = mysrvc->ConnectionsUsed->conns_length();
 					if ((conns_used > conns_free) && (mysrvc->max_connections > (conns_free/2 + conns_used/2)) ) {
-						conn = new PgSQL_Connection();
+						conn = new PgSQL_Connection(false);
 						conn->parent=mysrvc;
 						// if attributes.multiplex == true , STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG is set to false. And vice-versa
 						conn->set_status(!conn->parent->myhgc->attributes.multiplex, STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG);
@@ -2357,7 +2357,7 @@ PgSQL_Connection * PgSQL_SrvConnList::get_random_MyConn(PgSQL_Session *sess, boo
 			__sync_fetch_and_add(&PgHGM->status.server_connections_delayed, 1);
 			return NULL;
 		} else {
-			conn = new PgSQL_Connection();
+			conn = new PgSQL_Connection(false);
 			conn->parent=mysrvc;
 			// if attributes.multiplex == true , STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG is set to false. And vice-versa
 			conn->set_status(!conn->parent->myhgc->attributes.multiplex, STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG);
