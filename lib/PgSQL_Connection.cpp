@@ -2208,8 +2208,8 @@ std::pair<const char*, uint32_t> PgSQL_Connection::get_startup_parameter_and_has
 		assert(startup_parameters[idx]);
 		return { startup_parameters[idx], startup_parameters_hash[idx] };
 	}
-	// fall back to thread-specific default
-	return { pgsql_thread___default_variables[idx], 0 };
+	assert(!(idx < PGSQL_NAME_LAST_LOW_WM));
+	return { "", 0};
 }
 
 void PgSQL_Connection::copy_pgsql_variables_to_startup_parameters(bool copy_only_critical_param) {

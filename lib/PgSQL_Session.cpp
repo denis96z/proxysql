@@ -4210,15 +4210,32 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 
 						int idx = PGSQL_NAME_LAST_HIGH_WM;
 						for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
+							// skip low water mark
+							if (i == PGSQL_NAME_LAST_LOW_WM) continue;
+							
 							if (variable_name_exists(pgsql_tracked_variables[i], var.c_str()) == true) {
 								idx = i;
 								break;
 							}
 						}
 						if (idx != PGSQL_NAME_LAST_HIGH_WM) {
-
+							uint32_t current_hash = pgsql_variables.client_get_hash(this, idx);
 							if ((value1.size() == sizeof("DEFAULT") - 1) && strncasecmp(value1.c_str(), (char*)"DEFAULT",sizeof("DEFAULT")-1) == 0) {
-								std::tie(value1, std::ignore) = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
+								auto [value, hash] = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
+								if (hash == 0)  {
+									if (current_hash != 0) {
+										proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Resetting connection variable %s to DEFAULT\n", var.c_str());
+										pgsql_variables.client_reset_value(this, idx, true);
+									}
+									client_myds->DSS = STATE_QUERY_SENT_NET;
+									unsigned int nTrx = NumActiveTransactions();
+									const char trx_state = (nTrx ? 'T' : 'I');
+									client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, trx_state, NULL, param_status);
+									RequestEnd(NULL);
+									l_free(pkt->size, pkt->ptr);
+									return true;
+								}
+								value1 = value;
 							}
 
 							char* transformed_value = nullptr;
@@ -4259,10 +4276,10 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 									return true;
 								}
 							} 
-								
-							proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", var.c_str(), value1.c_str());
+
 							uint32_t var_hash_int = SpookyHash::Hash32(value1.c_str(), value1.length(), 10);
-							if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
+							if (current_hash != var_hash_int) {
+								proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", var.c_str(), value1.c_str());
 								if (!pgsql_variables.client_set_value(this, idx, value1.c_str(), true)) {
 									return false;
 								}
@@ -4445,8 +4462,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 						std::string value1 = *values;
 						proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Processing SET %s value %s\n", var.c_str(), value1.c_str());
 #endif // DEBUG
-					}
-					else {
+					} else {
 						// At this point the variable is unknown to us, or it's a user variable
 						// prefixed by '@', in both cases, we should fail to parse. We don't
 						// fail inmediately so we can anyway keep track of the other variables
@@ -4638,10 +4654,10 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 
 					const char* name = pgsql_tracked_variables[idx].set_variable_name;
 					auto [value, hash] = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
-
-					proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
-					uint32_t var_hash_int = ((hash != 0) ? hash : SpookyHash::Hash32(value, strlen(value), 10));
-					if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
+					// hash can never be 0 for critical variables
+					uint32_t current_hash = pgsql_variables.client_get_hash(this, idx);
+					if (current_hash != hash) {
+						proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
 						if (!pgsql_variables.client_set_value(this, idx, value, false)) {
 							return false;
 						}
@@ -4652,21 +4668,19 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				}
 
 				for (int idx : client_myds->myconn->dynamic_variables_idx) {
-					assert(idx < PGSQL_NAME_LAST_HIGH_WM);
 					const char* name = pgsql_tracked_variables[idx].set_variable_name;
 					auto [value, hash] = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
-					proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
-					uint32_t var_hash_int = ((hash != 0) ? hash : SpookyHash::Hash32(value, strlen(value), 10));
-					if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
+					uint32_t current_hash = pgsql_variables.client_get_hash(this, idx);
+					if (hash == 0 && current_hash != 0) {
+						proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Resetting connection variable %s to DEFAULT\n", name);
+						pgsql_variables.client_reset_value(this, idx, false);
+					} else if (hash != 0 && current_hash != hash) {
+						proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
 						if (!pgsql_variables.client_set_value(this, idx, value, false)) {
 							return false;
 						}
-						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {
-							param_status.emplace_back(name, value);
-						}
 					}
 				}
-
 				client_myds->myconn->reorder_dynamic_variables_idx();
 
 			} else if (std::find(pgsql_variables.ignore_vars.begin(), pgsql_variables.ignore_vars.end(), nq) != pgsql_variables.ignore_vars.end()) {
@@ -4675,10 +4689,8 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Processing RESET %s\n", nq.c_str());
 #endif // DEBUG
 			} else {
-
 				int idx = PGSQL_NAME_LAST_HIGH_WM;
 				for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
-
 					if (i == PGSQL_NAME_LAST_LOW_WM) 
 						continue;
 
@@ -4687,18 +4699,20 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 						break;
 					}
 				}			
-
 				if (idx != PGSQL_NAME_LAST_HIGH_WM) {
 					const char* name = pgsql_tracked_variables[idx].set_variable_name;
 					auto [value, hash] = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
-					
-					uint32_t var_hash_int = ((hash != 0) ? hash : SpookyHash::Hash32(value, strlen(value), 10));
-					if (pgsql_variables.client_get_hash(this, idx) != var_hash_int) {
+					uint32_t current_hash = pgsql_variables.client_get_hash(this, idx);
+					// Reset to default if hash is zero, means startup parameter is not set
+					if (hash == 0 && current_hash != 0) {
+						proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Resetting connection variable %s to DEFAULT\n", name);
+						pgsql_variables.client_reset_value(this, idx, true);
+					} else if (hash != 0 && current_hash != hash) {
+						proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
 						if (!pgsql_variables.client_set_value(this, idx, value, true)) {
 							return false;
 						}
 						if (IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(pgsql_tracked_variables[idx])) {
-							proxy_debug(PROXY_DEBUG_MYSQL_COM, 8, "Changing connection %s to %s\n", name, value);
 							param_status.emplace_back(name, value);
 						}
 					}
