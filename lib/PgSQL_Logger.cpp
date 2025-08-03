@@ -1042,6 +1042,6 @@ unsigned int PgSQL_Logger::audit_find_next_id() {
 }
 
 void PgSQL_Logger::print_version() {
-  fprintf(stderr,"Standard ProxySQL PgSQL Logger rev. %s -- %s -- %s\n", PROXYSQL_MYSQL_LOGGER_VERSION, __FILE__, __TIMESTAMP__);
-};
+  fprintf(stderr,"Standard ProxySQL PgSQL Logger rev. %s -- %s -- %s\n", PROXYSQL_PGSQL_LOGGER_VERSION, __FILE__, __TIMESTAMP__);
+}
 

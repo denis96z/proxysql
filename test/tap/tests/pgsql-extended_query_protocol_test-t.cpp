@@ -95,6 +95,13 @@ bool executeQueries(PGconn* conn, const std::vector<std::string>& queries) {
 	return true;
 }
 
+std::fstream f_proxysql_log{};
+
+bool check_logs_for_command(const std::string& command_regex) {
+	const auto& [_, cmd_lines] { get_matching_lines(f_proxysql_log, command_regex) };
+	return cmd_lines.empty() ? false : true;
+}
+
 std::shared_ptr<PgConnection> create_connection() {
 	auto conn = std::make_shared<PgConnection>(5000);
 	try {
@@ -3252,6 +3259,59 @@ void test_parse_with_param_type() {
 	}
 }
 
+void test_set_statement_tracked() {
+	diag("Test %d: Extended Query SET Statement Tracked", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	try {
+		conn->prepareStatement("set_tracked_stmt", "SET client_min_messages TO 'error'", false);
+		conn->bindStatement("set_tracked_stmt", "", {}, {}, false);
+		conn->executeStatement(0, false);
+		conn->sendSync();
+
+		char type;
+		std::vector<uint8_t> buf;
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete for SET STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for SET STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for SET EXECUTE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery after SET STATEMENT");
+
+		ok(check_logs_for_command(".*\\[WARNING\\] Unable to parse unknown SET query from client.*") == false, "Should not be locked on a hostgroup");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query SET Statement Tracked test failed: %s", e.what());
+	}
+}
+
+void test_set_statement_untracked() {
+	diag("Test %d: Extended Query SET Statement UnTracked", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	try {
+		conn->prepareStatement("set_untracked_stmt", "SET dummy TO 'dummy'", false);
+		conn->bindStatement("set_untracked_stmt", "", {}, {}, false);
+		conn->executeStatement(0, false);
+		conn->sendSync();
+
+		char type;
+		std::vector<uint8_t> buf;
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete for SET STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for SET STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::ERROR_RESPONSE, "ErrorResponse for SET EXECUTE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery after SET STATEMENT");
+
+		ok(check_logs_for_command(".*\\[WARNING\\] Unable to parse unknown SET query from client.*") == true, "Should be locked on a hostgroup");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query SET Statement UnTracked test failed: %s", e.what());
+	}
+}
 /*
 void test_update_delete_commands_extended() {
 	diag("Test %d: Extended Query UPDATE and DELETE tags", test_count++);
@@ -3441,7 +3501,13 @@ int main(int argc, char** argv) {
 	if (cl.getEnv())
 		return exit_status();
 
-	plan(356); // Adjust based on number of tests
+	std::string f_path{ get_env("REGULAR_INFRA_DATADIR") + "/proxysql.log" };
+	int of_err = open_file_and_seek_end(f_path, f_proxysql_log);
+	if (of_err != EXIT_SUCCESS) {
+		return exit_status();
+	}
+
+	plan(366); // Adjust based on number of tests
 
 	auto admin_conn = createNewConnection(ConnType::ADMIN, "", false);
 
@@ -3522,10 +3588,14 @@ int main(int argc, char** argv) {
 
 		test_insert_command_complete();
 		test_parse_with_param_type();
+
+		// set statements tracking
+		test_set_statement_tracked();
+		test_set_statement_untracked();
 	}
 	catch (const std::exception& e) {
 		diag("Fatal error: %s",e.what());
 	}
-
+	f_proxysql_log.close();
 	return exit_status();
 }
