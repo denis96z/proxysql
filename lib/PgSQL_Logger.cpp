@@ -20,7 +20,7 @@ using json = nlohmann::json;
 #else
 #define DEB ""
 #endif /* DEBUG */
-#define PROXYSQL_MYSQL_LOGGER_VERSION "2.5.0421" DEB
+#define PROXYSQL_PGSQL_LOGGER_VERSION "2.5.0421" DEB
 
 extern PgSQL_Logger *GloPgSQL_Logger;
 
@@ -1042,6 +1042,6 @@ unsigned int PgSQL_Logger::audit_find_next_id() {
 }
 
 void PgSQL_Logger::print_version() {
-  fprintf(stderr,"Standard ProxySQL MySQL Logger rev. %s -- %s -- %s\n", PROXYSQL_MYSQL_LOGGER_VERSION, __FILE__, __TIMESTAMP__);
+  fprintf(stderr,"Standard ProxySQL PgSQL Logger rev. %s -- %s -- %s\n", PROXYSQL_MYSQL_LOGGER_VERSION, __FILE__, __TIMESTAMP__);
 };
 

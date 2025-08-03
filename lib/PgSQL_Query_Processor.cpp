@@ -274,7 +274,7 @@ PgSQL_Query_Processor_Output* PgSQL_Query_Processor::process_query(PgSQL_Session
 	if (qi) {
 		// NOTE: if ptr == NULL , we are calling process_mysql_query() on an STMT_EXECUTE or STMT_DESCRIBE
 		if (ptr) {
-			qp = (SQP_par_t*)&qi->QueryParserArgs;
+			qp = &qi->QueryParserArgs;
 		} else {
 			qp = &stmt_exec_qp;
 			qp->digest = qi->extended_query_info.stmt_info->digest;
@@ -296,10 +296,9 @@ PgSQL_Query_Processor_Output* PgSQL_Query_Processor::process_query(PgSQL_Session
 		}
 		memcpy(query, ptr, len);
 		query[len-1] = 0;
-	}
-	else {
-		//query = qi->stmt_info->query;
-		//len = qi->stmt_info->query_length;
+	} else {
+		query = qi->extended_query_info.stmt_info->query;
+		len = qi->extended_query_info.stmt_info->query_length;
 	}
 
 	Query_Processor::process_query(sess, ptr == NULL, query, len, ret, qp);
