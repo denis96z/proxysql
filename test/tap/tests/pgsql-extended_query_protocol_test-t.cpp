@@ -538,7 +538,7 @@ void test_empty_stmt() {
 	}
 }
 
-void test_prepare_statment_mix() {
+void test_prepare_statement_mix() {
 	diag("Test %d: Prepare statement + Query", test_count++);
 	auto conn = create_connection();
 	if (!conn) return;
@@ -3312,6 +3312,302 @@ void test_set_statement_untracked() {
 		ok(false, "Extended Query SET Statement UnTracked test failed: %s", e.what());
 	}
 }
+
+
+void test_deallocate_having_stmt_name_via_simple_query() {
+	diag("Test %d: Simple Query - DEALLOCATE named statement", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+
+	try {
+		// Prepare a valid statement
+		conn->prepareStatement("deallocate_existing_stmt", "SELECT 1", true);
+
+		// Close the statement
+		conn->execute("DEALLOCATE PREPARE deallocate_existing_stmt");
+
+		// Verify response
+		char type;
+		std::vector<uint8_t> buffer;
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete was received after DEALLOCATE");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery was received after DEALLOCATE");
+
+		// Verify statement is actually closed
+		conn->describeStatement("deallocate_existing_stmt", true);
+		conn->readMessage(type, buffer);  // Should get error
+		ok(type == PgConnection::ERROR_RESPONSE, "Describe failed as expected after DEALLOCATE");
+		std::string errormsg;
+		std::string errorcode;
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+		ok(errorcode == "26000", "Received ERRCODE_INVALID_SQL_STATEMENT_NAME Error:%s", errormsg.c_str());
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+	}
+	catch (const PgException& e) {
+		ok(false, "Simple Query - DEALLOCATE named statement failed with error:%s", e.what());
+	}
+}
+
+void test_deallocate_having_stmt_name_via_prepared() {
+	diag("Test %d: Extended Query - DEALLOCATE named statement via prepared execution", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	if (!conn) return;
+
+	try {
+		// Prepare a valid statement
+		conn->prepareStatement("deallocate_existing_stmt2", "DEALLOCATE deallocate_existing_stmt2", false);
+		conn->sendSync();
+
+		// Verify response
+		char type;
+		std::vector<uint8_t> buffer;
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete was received for DEALLOCATE");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+
+		// should be present in prepared statements
+		conn->describeStatement("deallocate_existing_stmt2", true);
+		conn->readMessage(type, buffer);  
+		ok(type == PgConnection::PARAMETER_DESCRIPTION, "ParameterDescription was received for prepared DEALLOCATE");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::NO_DATA, "Received NoData");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+
+		conn->bindStatement("deallocate_existing_stmt2", "", {}, {}, false);
+		conn->executeStatement(0, false);
+		conn->sendSync();
+
+		// Verify response
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete was received for DEALLOCATE");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete was received after DEALLOCATE execution");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query after deallocate existing statement");
+
+		// Verify statement is actually closed
+		conn->describeStatement("deallocate_existing_stmt2", true);
+		conn->readMessage(type, buffer);  // Should get error
+		ok(type == PgConnection::ERROR_RESPONSE, "Describe failed as expected after DEALLOCATE");
+		std::string errormsg;
+		std::string errorcode;
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+		ok(errorcode == "26000", "Received ERRCODE_INVALID_SQL_STATEMENT_NAME Error:%s", errormsg.c_str());
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query after deallocate existing statement");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query - DEALLOCATE named statement via prepared execution failed with error:%s", e.what());
+	}
+}
+
+void test_deallocate_all_via_simple_query() {
+	diag("Test %d: Simple Query - DEALLOCATE ALL", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	if (!conn) return;
+
+	try {
+		// Prepare a valid statement
+		conn->prepareStatement("deallocate_all_1", "SELECT 1", true);
+		conn->prepareStatement("deallocate_all_2", "SELECT 2", true);
+		conn->prepareStatement("deallocate_all_3", "SELECT 3", true);
+
+		// Close the statement
+		conn->execute("DEALLOCATE PREPARE ALL");
+
+		// Verify response
+		char type;
+		std::vector<uint8_t> buffer;
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete was received after DEALLOCATE ALL");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+
+		// Verify statement is actually closed
+		conn->describeStatement("deallocate_all_1", true);
+		conn->readMessage(type, buffer);  // Should get error
+		ok(type == PgConnection::ERROR_RESPONSE, "Describe failed for deallocate_all_1 as expected");
+		std::string errormsg;
+		std::string errorcode;
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+		ok(errorcode == "26000", "Received ERRCODE_INVALID_SQL_STATEMENT_NAME Error:%s", errormsg.c_str());
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+
+		// Verify statement is actually closed
+		conn->describeStatement("deallocate_all_2", true);
+		conn->readMessage(type, buffer);  // Should get error
+		ok(type == PgConnection::ERROR_RESPONSE, "Describe failed for deallocate_all_2 as expected");
+
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+		ok(errorcode == "26000", "Received ERRCODE_INVALID_SQL_STATEMENT_NAME Error:%s", errormsg.c_str());
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+
+		// Verify statement is actually closed
+		conn->describeStatement("deallocate_all_3", true);
+		conn->readMessage(type, buffer);  // Should get error
+		ok(type == PgConnection::ERROR_RESPONSE, "Describe failed for deallocate_all_3 as expected");
+
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+		ok(errorcode == "26000", "Received ERRCODE_INVALID_SQL_STATEMENT_NAME Error:%s", errormsg.c_str());
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query DEALLOCATE having Statement Name failed with error:%s", e.what());
+	}
+}
+
+void test_deallocate_all_via_prepared() {
+	diag("Test %d: Extended Query - DEALLOCATE ALL via prepared execution", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	if (!conn) return;
+	try {
+		conn->execute("SET dummy TO 'test'"); // intentionally lock on hostgroup. DEALLOCATE should work regardless
+		
+		// Verify response
+		char type;
+		std::vector<uint8_t> buffer;
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::ERROR_RESPONSE, "Session Locked On Hostgroup as expected");
+		std::string errormsg;
+		std::string errorcode;
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+		ok(errorcode == "42704", "Received ERRCODE_UNDEFINED_OBJECT Error:%s", errormsg.c_str());
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query after SET dummy");
+
+		// Prepare a valid statement
+		conn->prepareStatement("deallocate_all_1", "SELECT 1", true);
+		conn->prepareStatement("deallocate_all_2", "SELECT 2", true);
+		conn->prepareStatement("deallocate_all_3", "SELECT 3", true);
+
+		// Bind and execute DEALLOCATE ALL
+		conn->prepareStatement("", "DEALLOCATE ALL", true);
+		conn->bindStatement("", "", {}, {}, false);
+		conn->executeStatement(0, false);
+		conn->sendSync();
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete was received for DEALLOCATE ALL");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete was received for DEALLOCATE ALL");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+
+		// Verify statement is actually closed
+		conn->describeStatement("deallocate_all_1", true);
+		conn->readMessage(type, buffer);  // Should get error
+		ok(type == PgConnection::ERROR_RESPONSE, "Describe failed for deallocate_all_1 as expected");
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+
+		ok(errorcode == "26000", "Received ERRCODE_INVALID_SQL_STATEMENT_NAME Error:%s", errormsg.c_str());
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+
+
+		// Verify statement is actually closed
+		conn->describeStatement("deallocate_all_2", true);
+		conn->readMessage(type, buffer);  // Should get error
+		ok(type == PgConnection::ERROR_RESPONSE, "Describe failed for deallocate_all_2 as expected");
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+		ok(errorcode == "26000", "Received ERRCODE_INVALID_SQL_STATEMENT_NAME Error:%s", errormsg.c_str());
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+
+		// Verify statement is actually closed
+		conn->describeStatement("deallocate_all_3", true);
+		conn->readMessage(type, buffer);  // Should get error
+		ok(type == PgConnection::ERROR_RESPONSE, "Describe failed for deallocate_all_3 as expected");
+
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+		ok(errorcode == "26000", "Received ERRCODE_INVALID_SQL_STATEMENT_NAME Error:%s", errormsg.c_str());
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query DEALLOCATE ALL via Prepared failed with error:%s", e.what());
+	}
+}
 /*
 void test_update_delete_commands_extended() {
 	diag("Test %d: Extended Query UPDATE and DELETE tags", test_count++);
@@ -3507,7 +3803,7 @@ int main(int argc, char** argv) {
 		return exit_status();
 	}
 
-	plan(366); // Adjust based on number of tests
+	plan(408); // Adjust based on number of tests
 
 	auto admin_conn = createNewConnection(ConnType::ADMIN, "", false);
 
@@ -3531,7 +3827,7 @@ int main(int argc, char** argv) {
 		test_multiple_parse();
 		test_only_sync();
 		test_empty_stmt();
-		//test_prepare_statment_mix();
+		//test_prepare_statement_mix();
 		test_invalid_query_parse_packet();
 		test_parse_use_same_stmt_name();
 		test_parse_use_unnamed_stmt();
@@ -3589,9 +3885,15 @@ int main(int argc, char** argv) {
 		test_insert_command_complete();
 		test_parse_with_param_type();
 
-		// set statements tracking
+		// SET statement tracking
 		test_set_statement_tracked();
 		test_set_statement_untracked();
+
+		// DEALLOCATE statements
+		test_deallocate_having_stmt_name_via_simple_query();
+		test_deallocate_having_stmt_name_via_prepared();
+		test_deallocate_all_via_simple_query();
+		test_deallocate_all_via_prepared();
 	}
 	catch (const std::exception& e) {
 		diag("Fatal error: %s",e.what());
