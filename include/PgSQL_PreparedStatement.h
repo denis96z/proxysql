@@ -76,6 +76,7 @@ public:
 	uint64_t find_global_id_from_stmt_name(const std::string& client_stmt_name);
 	uint32_t find_backend_stmt_id_from_global_id(uint64_t global_id);
 	bool client_close(const std::string& stmt_name);
+	void client_close_all();
 
 private:
 	bool is_client_;

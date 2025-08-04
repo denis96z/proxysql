@@ -480,6 +480,14 @@ bool PgSQL_STMTs_local_v14::client_close(const std::string& stmt_name) {
 	return false;  // we don't really remove the prepared statement
 }
 
+void PgSQL_STMTs_local_v14::client_close_all() {
+	for (auto [_, global_stmt_id] : stmt_name_to_global_ids) {
+		GloPgStmt->ref_count_client(global_stmt_id, -1);
+	}
+	stmt_name_to_global_ids.clear();
+	global_id_to_stmt_names.clear();
+}
+
 PgSQL_STMT_Global_info* PgSQL_STMT_Manager_v14::add_prepared_statement(
     char *u, char *d, char *q, unsigned int ql,
     char *fc, Parse_Param_Types&& ppt, bool lock) {
