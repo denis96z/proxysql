@@ -763,7 +763,9 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 		return EXECUTION_STATE::FAILED;
 	}
 
-	assert(hdr.data.size > 0);
+	if (hdr.data.size == 0) {
+		return EXECUTION_STATE::FAILED;
+	}
 
 	if (hdr.type != (*myds)->auth_next_pkt_type) {
 		return EXECUTION_STATE::FAILED;
@@ -1431,13 +1433,18 @@ failed:
 
 char* extract_tag_from_query(const char* query) {
 
-	constexpr size_t crete_table_len = sizeof("CREATE TABLE AS") - 1;
+	constexpr size_t create_table_len = sizeof("CREATE TABLE AS") - 1;
+	constexpr size_t deallocate_all_len = sizeof("DEALLOCATE ALL") - 1;
+	constexpr size_t deallocate_prepare_all_len = sizeof("DEALLOCATE PREPARE ALL") - 1;
 
 	size_t qtlen = strlen(query);
-	if ((qtlen > crete_table_len) && strncasecmp(query, "CREATE TABLE AS", crete_table_len) == 0) {
+	if ((qtlen > create_table_len) && strncasecmp(query, "CREATE TABLE AS", create_table_len) == 0) {
 		return strdup("SELECT");
-	}
-	else {
+	} else if ((qtlen >= deallocate_all_len) &&
+		(strncasecmp(query, "DEALLOCATE ALL", deallocate_all_len) == 0 ||
+			strncasecmp(query, "DEALLOCATE PREPARE ALL", deallocate_prepare_all_len) == 0)) {
+		return strdup("DEALLOCATE ALL");
+	} else {
 		const char* fs = strchr(query, ' ');
 
 		if (fs != NULL) {
@@ -1593,7 +1600,7 @@ bool PgSQL_Protocol::generate_describe_completion_packet(bool send, bool ready, 
 	return true;
 }
 
-//generate close statment completion packet
+//generate close statement completion packet
 bool PgSQL_Protocol::generate_close_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr) {
 	// to avoid memory leak
 	assert(send == true || _ptr);
