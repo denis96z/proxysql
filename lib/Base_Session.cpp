@@ -82,13 +82,9 @@ void Base_Session<S,DS,B,T>::init() {
 	mybes = new PtrArray(4);
 	// Conditional initialization based on derived class
 	if constexpr (std::is_same_v<S, MySQL_Session>) {
-		sess_STMTs_meta = new MySQL_STMTs_meta();
-		SLDH = new StmtLongDataHandler();
-	} else if constexpr (std::is_same_v<S, PgSQL_Session>) {
-		sess_STMTs_meta = NULL;
-		SLDH = NULL;
-	} else {
-		assert(0);
+		MySQL_Session* mysession = static_cast<S*>(this);
+		mysession->sess_STMTs_meta = new MySQL_STMTs_meta();
+		mysession->SLDH = new StmtLongDataHandler();
 	}
 };
 

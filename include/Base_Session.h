@@ -99,8 +99,8 @@ class Base_Session {
 	SESSION_FORWARD_TYPE session_fast_forward;
 	//bool started_sending_data_to_client; // this status variable tracks if some result set was sent to the client, or if proxysql is still buffering everything
 	bool use_ssl;
-	MySQL_STMTs_meta *sess_STMTs_meta;
-	StmtLongDataHandler *SLDH;
+	//MySQL_STMTs_meta *sess_STMTs_meta;
+	//StmtLongDataHandler *SLDH;
 
 
 

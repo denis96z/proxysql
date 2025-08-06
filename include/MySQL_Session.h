@@ -371,8 +371,8 @@ class MySQL_Session: public Base_Session<MySQL_Session, MySQL_Data_Stream, MySQL
 	//uint64_t gtid_trxid;
 	int gtid_hid;
 
-//	MySQL_STMTs_meta *sess_STMTs_meta;
-//	StmtLongDataHandler *SLDH;
+	MySQL_STMTs_meta *sess_STMTs_meta;
+	StmtLongDataHandler *SLDH;
 
 	Session_Regex **match_regexes;
 
