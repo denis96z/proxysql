@@ -181,10 +181,10 @@ enum pgsql_sslstatus PgSQL_Data_Stream::do_ssl_handshake() {
 			}
 		}
 	}
-	status = get_sslstatus(ssl, n);
+	ssl_status = get_sslstatus(ssl, n);
 	//proxy_info("SSL status = %d\n", status);
 	/* Did SSL request to write bytes? */
-	if (status == PGSQL_SSLSTATUS_WANT_IO) {
+	if (ssl_status == PGSQL_SSLSTATUS_WANT_IO) {
 		//proxy_info("SSL status is WANT_IO %d\n", status);
 		do {
 			n = BIO_read(wbio_ssl, buf, sizeof(buf));
@@ -276,6 +276,7 @@ PgSQL_Data_Stream::PgSQL_Data_Stream() {
 
 	com_field_wild = NULL;
 	scram_state = nullptr;
+	ssl_status = -1;
 }
 
 // Destructor
@@ -404,7 +405,7 @@ void PgSQL_Data_Stream::reinit_queues() {
 }
 
 // this function initializes a PgSQL_Data_Stream with arguments
-void PgSQL_Data_Stream::init(enum MySQL_DS_type _type, PgSQL_Session* _sess, int _fd) {
+void PgSQL_Data_Stream::init(PgSQL_DS_type _type, PgSQL_Session* _sess, int _fd) {
 	myds_type = _type;
 	sess = _sess;
 	init();
@@ -446,7 +447,7 @@ void PgSQL_Data_Stream::shut_hard() {
 void PgSQL_Data_Stream::check_data_flow() {
 	if ((PSarrayIN->len || queue_data(queueIN)) && (PSarrayOUT->len || queue_data(queueOUT))) {
 		// there is data at both sides of the data stream: this is considered a fatal error
-		proxy_error("Session=%p, DataStream=%p -- Data at both ends of a MySQL data stream: IN <%d bytes %d packets> , OUT <%d bytes %d packets>\n", sess, this, PSarrayIN->len, queue_data(queueIN), PSarrayOUT->len, queue_data(queueOUT));
+		proxy_error("Session=%p, DataStream=%p -- Data at both ends of a PgSQL data stream: IN <%d bytes %d packets> , OUT <%d bytes %d packets>\n", sess, this, PSarrayIN->len, queue_data(queueIN), PSarrayOUT->len, queue_data(queueOUT));
 		shut_soft();
 		generate_coredump();
 	}
@@ -596,9 +597,9 @@ int PgSQL_Data_Stream::read_from_net() {
 							}
 						} while (n > 0);
 			*/
-			status = get_sslstatus(ssl, n2);
+			ssl_status = get_sslstatus(ssl, n2);
 			//proxy_info("SSL status = %d\n", status);
-			if (status == PGSQL_SSLSTATUS_WANT_IO) {
+			if (ssl_status == PGSQL_SSLSTATUS_WANT_IO) {
 				do {
 					n2 = BIO_read(wbio_ssl, buf2, sizeof(buf2));
 					//proxy_info("BIO_read with %d bytes\n", n2);
@@ -611,7 +612,7 @@ int PgSQL_Data_Stream::read_from_net() {
 					}
 				} while (n2 > 0);
 			}
-			if (status == PGSQL_SSLSTATUS_FAIL) {
+			if (ssl_status == PGSQL_SSLSTATUS_FAIL) {
 				shut_soft();
 				return -1;
 			}
@@ -974,7 +975,7 @@ int PgSQL_Data_Stream::array2buffer() {
 
 					//explicitly disable compression
 					//myconn->options.compression_min_length = 0;
-					myconn->set_status(false, STATUS_MYSQL_CONNECTION_COMPRESSION);
+					myconn->set_status(false, STATUS_PGSQL_CONNECTION_COMPRESSION);
 				}
 				
 #ifdef DEBUG

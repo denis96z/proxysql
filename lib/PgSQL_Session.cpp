@@ -780,14 +780,8 @@ void PgSQL_Session::generate_proxysql_internal_session_json(json& j) {
 				it_c != client_conn->dynamic_variables_idx.end(); it_c++) {
 				client_conn->variables[*it_c].fill_client_internal_session(j["client"], *it_c);
 			}
-			//j["conn"]["autocommit"] = (client_myds->myconn->options.autocommit ? "ON" : "OFF");
-			//j["conn"]["client_flag"]["value"] = client_myds->myconn->options.client_flag;
-			//j["conn"]["client_flag"]["client_found_rows"] = (client_myds->myconn->options.client_flag & CLIENT_FOUND_ROWS ? 1 : 0);
-			//j["conn"]["client_flag"]["client_multi_statements"] = (client_myds->myconn->options.client_flag & CLIENT_MULTI_STATEMENTS ? 1 : 0);
-			//j["conn"]["client_flag"]["client_multi_results"] = (client_myds->myconn->options.client_flag & CLIENT_MULTI_RESULTS ? 1 : 0);
-			//j["conn"]["client_flag"]["client_deprecate_eof"] = (client_myds->myconn->options.client_flag & CLIENT_DEPRECATE_EOF ? 1 : 0);
 			//j["conn"]["no_backslash_escapes"] = client_myds->myconn->options.no_backslash_escapes;
-			//j["conn"]["status"]["compression"] = client_myds->myconn->get_status(STATUS_MYSQL_CONNECTION_COMPRESSION);
+			//j["conn"]["status"]["compression"] = client_myds->myconn->get_status(STATUS_PGSQL_CONNECTION_COMPRESSION);
 			//j["conn"]["ps"]["client_stmt_to_global_ids"] = client_myds->myconn->local_stmts->client_stmt_to_global_ids;
 			
 			const PgSQL_Conn_Param& conn_params = client_myds->myconn->conn_params;
@@ -836,16 +830,15 @@ void PgSQL_Session::generate_proxysql_internal_session_json(json& j) {
 				j["backends"][i]["conn"]["init_connect"] = (_myconn->options.init_connect ? _myconn->options.init_connect : "");
 				j["backends"][i]["conn"]["init_connect_sent"] = _myds->myconn->options.init_connect_sent;
 				//j["backends"][i]["conn"]["standard_conforming_strings"] = _myconn->options.no_backslash_escapes;
-				//j["backends"][i]["conn"]["status"]["get_lock"] = _myconn->get_status(STATUS_MYSQL_CONNECTION_GET_LOCK);
-				//j["backends"][i]["conn"]["status"]["lock_tables"] = _myconn->get_status(STATUS_MYSQL_CONNECTION_LOCK_TABLES);
-				j["backends"][i]["conn"]["status"]["has_savepoint"] = _myconn->get_status(STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
-				j["backends"][i]["conn"]["status"]["temporary_table"] = _myconn->get_status(STATUS_MYSQL_CONNECTION_TEMPORARY_TABLE);
-				j["backends"][i]["conn"]["status"]["user_variable"] = _myconn->get_status(STATUS_MYSQL_CONNECTION_USER_VARIABLE);
-				//j["backends"][i]["conn"]["status"]["found_rows"] = _myconn->get_status(STATUS_MYSQL_CONNECTION_FOUND_ROWS);
-				j["backends"][i]["conn"]["status"]["no_multiplex"] = _myconn->get_status(STATUS_MYSQL_CONNECTION_NO_MULTIPLEX);
-				j["backends"][i]["conn"]["status"]["no_multiplex_HG"] = _myconn->get_status(STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG);
-				//j["backends"][i]["conn"]["status"]["compression"] = _myconn->get_status(STATUS_MYSQL_CONNECTION_COMPRESSION);
-				//j["backends"][i]["conn"]["status"]["prepared_statement"] = _myconn->get_status(STATUS_MYSQL_CONNECTION_PREPARED_STATEMENT);
+				j["backends"][i]["conn"]["status"]["get_lock"] = _myconn->get_status(STATUS_PGSQL_CONNECTION_GET_LOCK);
+				j["backends"][i]["conn"]["status"]["lock_tables"] = _myconn->get_status(STATUS_PGSQL_CONNECTION_LOCK_TABLES);
+				j["backends"][i]["conn"]["status"]["has_savepoint"] = _myconn->get_status(STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT);
+				j["backends"][i]["conn"]["status"]["temporary_table"] = _myconn->get_status(STATUS_PGSQL_CONNECTION_TEMPORARY_TABLE);
+				j["backends"][i]["conn"]["status"]["user_variable"] = _myconn->get_status(STATUS_PGSQL_CONNECTION_USER_VARIABLE);
+				j["backends"][i]["conn"]["status"]["no_multiplex"] = _myconn->get_status(STATUS_PGSQL_CONNECTION_NO_MULTIPLEX);
+				j["backends"][i]["conn"]["status"]["no_multiplex_HG"] = _myconn->get_status(STATUS_PGSQL_CONNECTION_NO_MULTIPLEX_HG);
+				//j["backends"][i]["conn"]["status"]["compression"] = _myconn->get_status(STATUS_PGSQL_CONNECTION_COMPRESSION);
+				j["backends"][i]["conn"]["status"]["prepared_statement"] = _myconn->get_status(STATUS_PGSQL_CONNECTION_PREPARED_STATEMENT);
 				{
 					// MultiplexDisabled : status returned by PgSQL_Connection::MultiplexDisabled();
 					// MultiplexDisabled_ext : status returned by PgSQL_Connection::MultiplexDisabled() || PgSQL_Connection::isActiveTransaction()
@@ -1604,7 +1597,7 @@ bool PgSQL_Session::handler_again___status_CONNECTING_SERVER(int* _rc) {
 		if (default_hostgroup < 0) {
 			// we are connected to a Admin module backend
 			// we pretend to set a user variable to disable multiplexing
-			myconn->set_status(true, STATUS_MYSQL_CONNECTION_USER_VARIABLE);
+			myconn->set_status(true, STATUS_PGSQL_CONNECTION_USER_VARIABLE);
 		}
 		enum session_status st = status;
 		if (mybe->server_myds->myconn->async_state_machine == ASYNC_IDLE) {
@@ -1665,7 +1658,7 @@ bool PgSQL_Session::handler_again___status_CONNECTING_SERVER(int* _rc) {
 				//   the backend is already compressed, so we are only required to forward the data to the client.
 				// In both cases, we do not require to perform any specials actions for the received data,
 				// so we completely disable the compression flag for the client connection.
-				client_myds->myconn->set_status(false, STATUS_MYSQL_CONNECTION_COMPRESSION);
+				client_myds->myconn->set_status(false, STATUS_PGSQL_CONNECTION_COMPRESSION);
 			}
 			NEXT_IMMEDIATE_NEW(st);
 			break;
@@ -1910,7 +1903,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 	}
 	return false;
 }
-
+#if 0
 // this function was inline inside PgSQL_Session::get_pkts_from_client
 // where:
 // status = WAITING_CLIENT_DATA
@@ -1949,7 +1942,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP_MULTI_PAC
 	return false;
 }
 
-#if 0
+
 // this function was inline inside PgSQL_Session::get_pkts_from_client
 // where:
 // status = WAITING_CLIENT_DATA
@@ -2002,6 +1995,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 // for example while it is supposed to be sending resultset to client
 void PgSQL_Session::handler___status_NONE_or_default(PtrSize_t& pkt) {
 	char buf[INET6_ADDRSTRLEN];
+
 	switch (client_myds->client_addr->sa_family) {
 	case AF_INET: {
 		struct sockaddr_in* ipv4 = (struct sockaddr_in*)client_myds->client_addr;
@@ -2061,8 +2055,8 @@ void PgSQL_Session::handler___status_WAITING_CLIENT_DATA___default() {
 		}
 		// PMC-10001: A unexpected packet has been received from client. This error has two potential causes:
 		//  * Bug: ProxySQL state machine wasn't in the correct state when a legitimate client packet was received.
-		//  * Client error: The client incorrectly sent a packet breaking MySQL protocol.
-		proxy_error2(10001, "Unexpected packet from client %s . Session_status: %d , client_status: %d Disconnecting it\n", buf, status, client_myds->status);
+		//  * Client error: The client incorrectly sent a packet breaking PgSQL protocol.
+		proxy_error2(10001, "Unexpected packet from client %s . Session_status: %d , client_ssl_status: %d Disconnecting it\n", buf, status, client_myds->ssl_status);
 	}
 }
 
@@ -2070,13 +2064,14 @@ int PgSQL_Session::get_pkts_from_client(bool& wrong_pass, PtrSize_t& pkt) {
 	int handler_ret = 0;
 	unsigned char c;
 
-__get_pkts_from_client:
+//__get_pkts_from_client:
 
 	// implement a more complex logic to run even in case of mirror
 	// if client_myds , this is a regular client
 	// if client_myds == NULL , it is a mirror
 	//     process mirror only status==WAITING_CLIENT_DATA
 	for (unsigned int j = 0; j < (client_myds->PSarrayIN ? client_myds->PSarrayIN->len : 0) || (mirror == true && status == WAITING_CLIENT_DATA);) {
+		
 		if (mirror == false) {
 			client_myds->PSarrayIN->remove_index(0, &pkt);
 		}
@@ -2097,7 +2092,7 @@ __get_pkts_from_client:
 			break;
 
 		case WAITING_CLIENT_DATA:
-			// this is handled only for real traffic, not mirror
+/*			// this is handled only for real traffic, not mirror
 			if (pkt.size == (0xFFFFFF + sizeof(mysql_hdr))) {
 				// we are handling a multi-packet
 				switch (client_myds->DSS) { // real traffic only
@@ -2113,8 +2108,9 @@ __get_pkts_from_client:
 					// LCOV_EXCL_STOP
 				}
 			}
+*/
 			switch (client_myds->DSS) {
-			case STATE_SLEEP_MULTI_PACKET:
+/*			case STATE_SLEEP_MULTI_PACKET:
 				if (handler___status_WAITING_CLIENT_DATA___STATE_SLEEP_MULTI_PACKET(pkt)) {
 					// if handler___status_WAITING_CLIENT_DATA___STATE_SLEEP_MULTI_PACKET
 					// returns true it meansa we need to reiterate
@@ -2124,6 +2120,7 @@ __get_pkts_from_client:
 				// in that case we don't break from the witch but continue
 				if (client_myds->DSS != STATE_SLEEP) // if DSS==STATE_SLEEP , we continue
 					break;
+*/
 			case STATE_SLEEP:	// only this section can be executed ALSO by mirror
 				command_counters->incr(thread->curtime / 1000000);
 				if (transaction_persistent_hostgroup == -1) {
@@ -5240,7 +5237,7 @@ void PgSQL_Session::finishQuery(PgSQL_Data_Stream* myds, PgSQL_Connection* mycon
 	myds->myconn->reduce_auto_increment_delay_token();
 	if (locked_on_hostgroup >= 0) {
 		if (qpo->multiplex == -1) {
-			myds->myconn->set_status(true, STATUS_MYSQL_CONNECTION_NO_MULTIPLEX);
+			myds->myconn->set_status(true, STATUS_PGSQL_CONNECTION_NO_MULTIPLEX);
 		}
 	}
 

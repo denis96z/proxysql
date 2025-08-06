@@ -2022,17 +2022,17 @@ void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text, in
 			if (myds->sess->qpo) {
 				mul = myds->sess->qpo->multiplex;
 				if (mul == 0) {
-					set_status(true, STATUS_MYSQL_CONNECTION_NO_MULTIPLEX);
+					set_status(true, STATUS_PGSQL_CONNECTION_NO_MULTIPLEX);
 				} else {
 					if (mul == 1) {
-						set_status(false, STATUS_MYSQL_CONNECTION_NO_MULTIPLEX);
+						set_status(false, STATUS_PGSQL_CONNECTION_NO_MULTIPLEX);
 					}
 				}
 			}
 		}
 	}
 
-	if (get_status(STATUS_MYSQL_CONNECTION_USER_VARIABLE) == false) { // we search for variables only if not already set
+	if (get_status(STATUS_PGSQL_CONNECTION_USER_VARIABLE) == false) { // we search for variables only if not already set
 		if (strncasecmp(query_digest_text, "SET ", 4) == 0) {
 			// For issue #555 , multiplexing is disabled if --safe-updates is used (see session_vars definition)
 			int sqloh = pgsql_thread___set_query_lock_on_hostgroup;
@@ -2041,7 +2041,7 @@ void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text, in
 				if (mul != 2) {
 					if (index(query_digest_text, '.')) { // mul = 2 has a special meaning : do not disable multiplex for variables in THIS QUERY ONLY
 						if (!IsKeepMultiplexEnabledVariables(query_digest_text)) {
-							set_status(true, STATUS_MYSQL_CONNECTION_USER_VARIABLE);
+							set_status(true, STATUS_PGSQL_CONNECTION_USER_VARIABLE);
 						}
 					}
 				}
@@ -2049,7 +2049,7 @@ void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text, in
 			case 1: // new algorithm
 				if (myds->sess->locked_on_hostgroup > -1) {
 					// locked_on_hostgroup was set, so some variable wasn't parsed
-					set_status(true, STATUS_MYSQL_CONNECTION_USER_VARIABLE);
+					set_status(true, STATUS_PGSQL_CONNECTION_USER_VARIABLE);
 				}
 				break;
 			default:
@@ -2058,66 +2058,61 @@ void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text, in
 		} else {
 			if (mul != 2 && index(query_digest_text, '.')) { // mul = 2 has a special meaning : do not disable multiplex for variables in THIS QUERY ONLY
 				if (!IsKeepMultiplexEnabledVariables(query_digest_text)) {
-					set_status(true, STATUS_MYSQL_CONNECTION_USER_VARIABLE);
+					set_status(true, STATUS_PGSQL_CONNECTION_USER_VARIABLE);
 				}
 			}
 		}
 	}
-	if (get_status(STATUS_MYSQL_CONNECTION_PREPARED_STATEMENT) == false) { // we search if prepared was already executed
+	if (get_status(STATUS_PGSQL_CONNECTION_PREPARED_STATEMENT) == false) { // we search if prepared was already executed
 		if (!strncasecmp(query_digest_text, "PREPARE ", strlen("PREPARE "))) {
-			set_status(true, STATUS_MYSQL_CONNECTION_PREPARED_STATEMENT);
+			set_status(true, STATUS_PGSQL_CONNECTION_PREPARED_STATEMENT);
 		}
 	}
-	if (get_status(STATUS_MYSQL_CONNECTION_TEMPORARY_TABLE) == false) { // we search for temporary if not already set
+	if (get_status(STATUS_PGSQL_CONNECTION_TEMPORARY_TABLE) == false) { // we search for temporary if not already set
 		if (!strncasecmp(query_digest_text, "CREATE TEMPORARY TABLE ", strlen("CREATE TEMPORARY TABLE ")) || 
 			!strncasecmp(query_digest_text, "CREATE TEMP TABLE ", strlen("CREATE TEMP TABLE "))) {
-			set_status(true, STATUS_MYSQL_CONNECTION_TEMPORARY_TABLE);
+			set_status(true, STATUS_PGSQL_CONNECTION_TEMPORARY_TABLE);
 		}
 	}
-	if (get_status(STATUS_MYSQL_CONNECTION_LOCK_TABLES) == false) { // we search for lock tables only if not already set
+	if (get_status(STATUS_PGSQL_CONNECTION_LOCK_TABLES) == false) { // we search for lock tables only if not already set
 		if (!strncasecmp(query_digest_text, "LOCK TABLE", strlen("LOCK TABLE"))) {
-			set_status(true, STATUS_MYSQL_CONNECTION_LOCK_TABLES);
+			set_status(true, STATUS_PGSQL_CONNECTION_LOCK_TABLES);
 		}
 	}
-	if (get_status(STATUS_MYSQL_CONNECTION_LOCK_TABLES) == false) { // we search for lock tables only if not already set
+	if (get_status(STATUS_PGSQL_CONNECTION_LOCK_TABLES) == false) { // we search for lock tables only if not already set
 		if (!strncasecmp(query_digest_text, "FLUSH TABLES WITH READ LOCK", strlen("FLUSH TABLES WITH READ LOCK"))) { // issue 613
-			set_status(true, STATUS_MYSQL_CONNECTION_LOCK_TABLES);
+			set_status(true, STATUS_PGSQL_CONNECTION_LOCK_TABLES);
 		}
 	}
-	if (get_status(STATUS_MYSQL_CONNECTION_LOCK_TABLES) == true) {
+	if (get_status(STATUS_PGSQL_CONNECTION_LOCK_TABLES) == true) {
 		if (!strncasecmp(query_digest_text, "UNLOCK TABLES", strlen("UNLOCK TABLES"))) {
-			set_status(false, STATUS_MYSQL_CONNECTION_LOCK_TABLES);
+			set_status(false, STATUS_PGSQL_CONNECTION_LOCK_TABLES);
 		}
 	}
-	if (get_status(STATUS_MYSQL_CONNECTION_GET_LOCK) == false) { // we search for pg_advisory_xact_lock* if not already set
+	if (get_status(STATUS_PGSQL_CONNECTION_GET_LOCK) == false) { // we search for pg_advisory_xact_lock* if not already set
 		if (strcasestr(query_digest_text, "SELECT pg_advisory_xact_lock")) {
-			set_status(true, STATUS_MYSQL_CONNECTION_GET_LOCK);
+			set_status(true, STATUS_PGSQL_CONNECTION_GET_LOCK);
 		}
 	}
-	/*if (get_status(STATUS_MYSQL_CONNECTION_FOUND_ROWS) == false) { // we search for SQL_CALC_FOUND_ROWS if not already set
-		if (strcasestr(query_digest_text, "SQL_CALC_FOUND_ROWS")) {
-			set_status(true, STATUS_MYSQL_CONNECTION_FOUND_ROWS);
-		}
-	}*/
-	if (get_status(STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT) == false) {
+	if (get_status(STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT) == false) {
 		if (savepoint_count > 0) {
-			set_status(true, STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
+			set_status(true, STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT);
 		} else if (savepoint_count == -1) {
 			if (IsKnownActiveTransaction()) {
 				if (!strncasecmp(query_digest_text, "SAVEPOINT ", strlen("SAVEPOINT "))) {
-					set_status(true, STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
+					set_status(true, STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT);
 				}
 			}
 		} 
 	} else {
 		if (savepoint_count == 0) {
-			set_status(false, STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
+			set_status(false, STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT);
 		} else if (savepoint_count == -1) {
 			if ((IsKnownActiveTransaction() == false) ||
 				(strncasecmp(query_digest_text, "COMMIT", strlen("COMMIT")) == 0) ||
 				(strncasecmp(query_digest_text, "ROLLBACK", strlen("ROLLBACK")) == 0) ||
 				(strncasecmp(query_digest_text, "ABORT", strlen("ABORT")) == 0)) {
-				set_status(false, STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT);
+				set_status(false, STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT);
 			}
 		} 
 	}
@@ -2228,13 +2223,13 @@ unsigned int PgSQL_Connection::number_of_matching_session_variables(const PgSQL_
 }
 
 void PgSQL_Connection::reset() {
-	bool old_no_multiplex_hg = get_status(STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG);
-	bool old_compress = get_status(STATUS_MYSQL_CONNECTION_COMPRESSION);
+	bool old_no_multiplex_hg = get_status(STATUS_PGSQL_CONNECTION_NO_MULTIPLEX_HG);
+	bool old_compress = get_status(STATUS_PGSQL_CONNECTION_COMPRESSION);
 	status_flags = 0;
-	// reconfigure STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG
-	set_status(old_no_multiplex_hg, STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG);
-	// reconfigure STATUS_MYSQL_CONNECTION_COMPRESSION
-	set_status(old_compress, STATUS_MYSQL_CONNECTION_COMPRESSION);
+	// reconfigure STATUS_PGSQL_CONNECTION_NO_MULTIPLEX_HG
+	set_status(old_no_multiplex_hg, STATUS_PGSQL_CONNECTION_NO_MULTIPLEX_HG);
+	// reconfigure STATUS_PGSQL_CONNECTION_COMPRESSION
+	set_status(old_compress, STATUS_PGSQL_CONNECTION_COMPRESSION);
 	reusable = true;
 	creation_time = monotonic_time();
 	delete local_stmts;
@@ -2278,10 +2273,10 @@ bool PgSQL_Connection::MultiplexDisabled(bool check_delay_token) {
 	// status_flags stores information about the status of the connection
 	// can be used to determine if multiplexing can be enabled or not
 	bool ret = false;
-	if (status_flags & (STATUS_MYSQL_CONNECTION_USER_VARIABLE | STATUS_MYSQL_CONNECTION_PREPARED_STATEMENT |
-		STATUS_MYSQL_CONNECTION_LOCK_TABLES | STATUS_MYSQL_CONNECTION_TEMPORARY_TABLE | STATUS_MYSQL_CONNECTION_GET_LOCK | STATUS_MYSQL_CONNECTION_NO_MULTIPLEX |
-		STATUS_MYSQL_CONNECTION_SQL_LOG_BIN0 | STATUS_MYSQL_CONNECTION_FOUND_ROWS | STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG |
-		STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT /*| STATUS_MYSQL_CONNECTION_HAS_WARNINGS*/ )) {
+	if (status_flags & (STATUS_PGSQL_CONNECTION_USER_VARIABLE | STATUS_PGSQL_CONNECTION_PREPARED_STATEMENT |
+		STATUS_PGSQL_CONNECTION_LOCK_TABLES | STATUS_PGSQL_CONNECTION_TEMPORARY_TABLE | STATUS_PGSQL_CONNECTION_GET_LOCK | STATUS_PGSQL_CONNECTION_NO_MULTIPLEX |
+		STATUS_PGSQL_CONNECTION_SQL_LOG_BIN0 | STATUS_PGSQL_CONNECTION_FOUND_ROWS | STATUS_PGSQL_CONNECTION_NO_MULTIPLEX_HG |
+		STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT /*| STATUS_PGSQL_CONNECTION_HAS_WARNINGS*/ )) {
 		ret = true;
 	}
 	if (check_delay_token && auto_increment_delay_token) return true;

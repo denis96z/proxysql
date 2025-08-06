@@ -182,6 +182,8 @@ enum MySQL_DS_type {
 	MYDS_FRONTEND,
 };
 
+using PgSQL_DS_type = MySQL_DS_type;
+
 /* NOTE:
 	make special ATTENTION that the order in mysql_variable_name
 	and mysql_tracked_variables[] is THE SAME

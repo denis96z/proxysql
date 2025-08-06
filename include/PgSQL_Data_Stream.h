@@ -148,7 +148,7 @@ public:
 	int query_retries_on_failure;
 	int connect_retries_on_failure;
 	enum mysql_data_stream_status DSS;
-	enum MySQL_DS_type myds_type;
+	PgSQL_DS_type myds_type;
 
 	socklen_t client_addrlen;
 
@@ -158,7 +158,7 @@ public:
 
 	int active_transaction; // 1 if there is an active transaction
 	int active; // data stream is active. If not, shutdown+close needs to be called
-	int status; // status . FIXME: make it a ORable variable
+	int ssl_status; // status . FIXME: make it a ORable variable
 
 	int switching_auth_stage;
 	int switching_auth_type;
@@ -180,7 +180,7 @@ public:
 	virtual ~PgSQL_Data_Stream();
 	int array2buffer_full();
 	void init();	// initialize the data stream
-	void init(enum MySQL_DS_type, PgSQL_Session*, int); // initialize with arguments
+	void init(PgSQL_DS_type, PgSQL_Session*, int); // initialize with arguments
 	void shut_soft();
 	void shut_hard();
 	int read_from_net();
@@ -198,7 +198,6 @@ public:
 	}
 
 	int read_pkts();
-	int write_pkts();
 
 	void unplug_backend();
 
