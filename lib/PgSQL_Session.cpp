@@ -2011,24 +2011,26 @@ void PgSQL_Session::handler___status_NONE_or_default(PtrSize_t& pkt) {
 		sprintf(buf, "localhost");
 		break;
 	}
-	if (pkt.size == 5) {
-		unsigned char c = *((unsigned char*)pkt.ptr + sizeof(mysql_hdr));
-		if (c == _MYSQL_COM_QUIT) {
-			proxy_error("Unexpected COM_QUIT from client %s . Session_status: %d , client_status: %d Disconnecting it\n", buf, status, client_myds->status);
-			if (GloPgSQL_Logger) { GloPgSQL_Logger->log_audit_entry(PROXYSQL_MYSQL_AUTH_QUIT, this, NULL); }
-			proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Got COM_QUIT packet\n");
-			l_free(pkt.size, pkt.ptr);
-			if (thread) {
-				thread->status_variables.stvar[st_var_unexpected_com_quit]++;
-			}
-			return;
+
+	const char cmd = (pkt.ptr && pkt.size > 0) ? *((unsigned char*)pkt.ptr) : '?'; // unknown command
+	proxy_error("Unexpected packet '%c' from client %s. Session_status: %d, client_ssl_status: %d. Disconnecting it\n",
+		cmd, buf, status, client_myds->ssl_status);
+
+	if (pkt.size == 5 && cmd == 'X') {
+		if (GloPgSQL_Logger) {
+			GloPgSQL_Logger->log_audit_entry(PROXYSQL_MYSQL_AUTH_QUIT, this, NULL);
+		}
+		proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Got QUIT packet\n");
+		if (thread) {
+			thread->status_variables.stvar[st_var_unexpected_com_quit]++;
+		}
+	} else {
+		if (thread) {
+			thread->status_variables.stvar[st_var_unexpected_packet]++;
 		}
 	}
-	proxy_error2(10001, "Unexpected packet from client %s . Session_status: %d , client_status: %d Disconnecting it\n", buf, status, client_myds->status);
-	if (thread) {
-		thread->status_variables.stvar[st_var_unexpected_packet]++;
-	}
-	return;
+
+	l_free(pkt.size, pkt.ptr);
 }
 
 // this function was inline inside PgSQL_Session::get_pkts_from_client
