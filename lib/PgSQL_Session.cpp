@@ -586,7 +586,7 @@ void PgSQL_Session::reset() {
 
 PgSQL_Session::~PgSQL_Session() {
 
-	reset();
+	//reset();
 
 	if (locked_on_hostgroup >= 0) {
 		thread->status_variables.stvar[st_var_hostgroup_locked]--;
@@ -2014,8 +2014,8 @@ void PgSQL_Session::handler___status_NONE_or_default(PtrSize_t& pkt) {
 	}
 
 	const char cmd = (pkt.ptr && pkt.size > 0) ? *((unsigned char*)pkt.ptr) : '?'; // unknown command
-	proxy_error("Unexpected packet '%c' from client %s. Session_status: %d, client_ssl_status: %d. Disconnecting it\n",
-		cmd, buf, status, client_myds->ssl_status);
+	proxy_error("Unexpected packet '%c' from client %s. Session_status: %d . Disconnecting it\n",
+		cmd, buf, status);
 
 	if (pkt.size == 5 && cmd == 'X') {
 		if (GloPgSQL_Logger) {
@@ -2059,7 +2059,7 @@ void PgSQL_Session::handler___status_WAITING_CLIENT_DATA___default() {
 		// PMC-10001: A unexpected packet has been received from client. This error has two potential causes:
 		//  * Bug: ProxySQL state machine wasn't in the correct state when a legitimate client packet was received.
 		//  * Client error: The client incorrectly sent a packet breaking PgSQL protocol.
-		proxy_error2(10001, "Unexpected packet from client %s . Session_status: %d , client_ssl_status: %d Disconnecting it\n", buf, status, client_myds->ssl_status);
+		proxy_error2(10001, "Unexpected packet from client %s . Session_status: %d . Disconnecting it\n", buf, status);
 	}
 }
 

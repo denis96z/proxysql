@@ -158,7 +158,6 @@ public:
 
 	int active_transaction; // 1 if there is an active transaction
 	int active; // data stream is active. If not, shutdown+close needs to be called
-	int ssl_status; // status . FIXME: make it a ORable variable
 
 	int switching_auth_stage;
 	int switching_auth_type;

@@ -181,10 +181,10 @@ enum pgsql_sslstatus PgSQL_Data_Stream::do_ssl_handshake() {
 			}
 		}
 	}
-	ssl_status = get_sslstatus(ssl, n);
+	status = get_sslstatus(ssl, n);
 	//proxy_info("SSL status = %d\n", status);
 	/* Did SSL request to write bytes? */
-	if (ssl_status == PGSQL_SSLSTATUS_WANT_IO) {
+	if (status == PGSQL_SSLSTATUS_WANT_IO) {
 		//proxy_info("SSL status is WANT_IO %d\n", status);
 		do {
 			n = BIO_read(wbio_ssl, buf, sizeof(buf));
@@ -276,7 +276,6 @@ PgSQL_Data_Stream::PgSQL_Data_Stream() {
 
 	com_field_wild = NULL;
 	scram_state = nullptr;
-	ssl_status = -1;
 }
 
 // Destructor
@@ -551,7 +550,7 @@ int PgSQL_Data_Stream::read_from_net() {
 		proxy_debug(PROXY_DEBUG_NET, 7, "Session=%p: recv() read %d bytes. num_write: %lu ,  num_read: %lu\n", sess, n, BIO_number_written(rbio_ssl), BIO_number_read(rbio_ssl));
 		if (n > 0 || BIO_number_written(rbio_ssl) > BIO_number_read(rbio_ssl)) {
 			//on_read_cb(buf, (size_t)n);
-
+			enum pgsql_sslstatus status;
 			char buf2[MY_SSL_BUFFER];
 			int n2;
 			//enum pgsql_sslstatus pgsql_status;
@@ -597,9 +596,9 @@ int PgSQL_Data_Stream::read_from_net() {
 							}
 						} while (n > 0);
 			*/
-			ssl_status = get_sslstatus(ssl, n2);
+			status = get_sslstatus(ssl, n2);
 			//proxy_info("SSL status = %d\n", status);
-			if (ssl_status == PGSQL_SSLSTATUS_WANT_IO) {
+			if (status == PGSQL_SSLSTATUS_WANT_IO) {
 				do {
 					n2 = BIO_read(wbio_ssl, buf2, sizeof(buf2));
 					//proxy_info("BIO_read with %d bytes\n", n2);
@@ -612,7 +611,7 @@ int PgSQL_Data_Stream::read_from_net() {
 					}
 				} while (n2 > 0);
 			}
-			if (ssl_status == PGSQL_SSLSTATUS_FAIL) {
+			if (status == PGSQL_SSLSTATUS_FAIL) {
 				shut_soft();
 				return -1;
 			}
