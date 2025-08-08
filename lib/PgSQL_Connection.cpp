@@ -2068,50 +2068,103 @@ void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text, in
 			set_status(true, STATUS_PGSQL_CONNECTION_PREPARED_STATEMENT);
 		}
 	}
+
+	// CREATE TEMP TABLE creates a session-scoped temporary table.
+	// It exists only for the duration of the session and is automatically dropped when the session ends.
+	// Since we are not tracking individual temp tables, the status will be reset only on DISCARD TEMP.
 	if (get_status(STATUS_PGSQL_CONNECTION_TEMPORARY_TABLE) == false) { // we search for temporary if not already set
 		if (!strncasecmp(query_digest_text, "CREATE TEMPORARY TABLE ", strlen("CREATE TEMPORARY TABLE ")) || 
 			!strncasecmp(query_digest_text, "CREATE TEMP TABLE ", strlen("CREATE TEMP TABLE "))) {
 			set_status(true, STATUS_PGSQL_CONNECTION_TEMPORARY_TABLE);
 		}
-	}
-	if (get_status(STATUS_PGSQL_CONNECTION_LOCK_TABLES) == false) { // we search for lock tables only if not already set
-		if (!strncasecmp(query_digest_text, "LOCK TABLE", strlen("LOCK TABLE"))) {
-			set_status(true, STATUS_PGSQL_CONNECTION_LOCK_TABLES);
+	} else { // we search for temporary if not already set
+		if (!strncasecmp(query_digest_text, "DISCARD TEMP", strlen("DISCARD TEMP"))) {
+			set_status(false, STATUS_PGSQL_CONNECTION_TEMPORARY_TABLE);
 		}
 	}
+
+	// LOCK TABLE is transaction-scoped:
+	// The lock is released automatically when the transaction ends
+	// (either COMMIT or ROLLBACK). It cannot persist beyond the transaction.
 	if (get_status(STATUS_PGSQL_CONNECTION_LOCK_TABLES) == false) { // we search for lock tables only if not already set
-		if (!strncasecmp(query_digest_text, "FLUSH TABLES WITH READ LOCK", strlen("FLUSH TABLES WITH READ LOCK"))) { // issue 613
+		if (IsKnownActiveTransaction() == true && 
+			!strncasecmp(query_digest_text, "LOCK TABLE", strlen("LOCK TABLE"))) {
 			set_status(true, STATUS_PGSQL_CONNECTION_LOCK_TABLES);
 		}
-	}
-	if (get_status(STATUS_PGSQL_CONNECTION_LOCK_TABLES) == true) {
-		if (!strncasecmp(query_digest_text, "UNLOCK TABLES", strlen("UNLOCK TABLES"))) {
+	} else {
+		if (IsKnownActiveTransaction() == false) {
 			set_status(false, STATUS_PGSQL_CONNECTION_LOCK_TABLES);
 		}
 	}
-	if (get_status(STATUS_PGSQL_CONNECTION_GET_LOCK) == false) { // we search for pg_advisory_xact_lock* if not already set
-		if (strcasestr(query_digest_text, "SELECT pg_advisory_xact_lock")) {
-			set_status(true, STATUS_PGSQL_CONNECTION_GET_LOCK);
+
+	// pg_advisory_xact_lock is transaction-scoped:
+	// The advisory lock is automatically released at the end of the current transaction
+	// (either COMMIT or ROLLBACK). It does not persist beyond the transaction.
+	if (get_status(STATUS_PGSQL_CONNECTION_ADVISORY_XACT_LOCK) == false) {
+		if (IsKnownActiveTransaction() == true && 
+			!strncasecmp(query_digest_text, "SELECT pg_advisory_xact_lock", sizeof("SELECT pg_advisory_xact_lock") - 1)) {
+			set_status(true, STATUS_PGSQL_CONNECTION_ADVISORY_XACT_LOCK);
+		}
+	} else {
+		if (IsKnownActiveTransaction() == false) {
+			set_status(false, STATUS_PGSQL_CONNECTION_ADVISORY_XACT_LOCK);
 		}
 	}
+
+	// pg_advisory_lock is session-level:
+	// In ProxySQL, as we are not tracking individual Advisory Locks, we will reset the status only 
+	// when we see pg_advisory_unlock_all, which releases all session-level advisory locks.
+	if (get_status(STATUS_PGSQL_CONNECTION_ADVISORY_LOCK) == false) { // we search for pg_advisory_lock* if not already set
+		if (!strncasecmp(query_digest_text, "SELECT pg_advisory_lock", sizeof("SELECT pg_advisory_lock")-1)) {
+			set_status(true, STATUS_PGSQL_CONNECTION_ADVISORY_LOCK);
+		}
+	} else { 
+		if (!strncasecmp(query_digest_text, "SELECT pg_advisory_unlock_all", sizeof("SELECT pg_advisory_unlock_all") - 1)) {
+			set_status(false, STATUS_PGSQL_CONNECTION_ADVISORY_LOCK);
+		}
+	}
+
+	// CREATE SEQUENCE vs CREATE TEMP SEQUENCE:
+	/// - CREATE SEQUENCE: Persistent; survives across sessions until explicitly dropped.
+	// - CREATE TEMP SEQUENCE: Session-scoped; automatically dropped when the session ends.
+	// Since we are not tracking individual sequences, the status will not be reset on DROP SEQUENCE.
+	// Instead, it will be reset on DISCARD SEQUENCES, which removes all session-scoped sequences.
+	if (get_status(STATUS_PGSQL_CONNECTION_HAS_SEQUENCES) == false) { // we search for sequences only if not already set
+		if (!strncasecmp(query_digest_text, "CREATE ", sizeof("CREATE ") - 1) &&
+				(strncasecmp(query_digest_text + sizeof("CREATE ") - 1, "SEQUENCE", sizeof("SEQUENCE")-1) ||
+				 strncasecmp(query_digest_text + sizeof("CREATE ") - 1, "TEMP SEQUENCE", sizeof("TEMP SEQUENCE")-1) ||
+				 strncasecmp(query_digest_text + sizeof("CREATE ") - 1, "TEMPORARY SEQUENCE", sizeof("TEMPORARY SEQUENCE")-1))) {
+			set_status(true, STATUS_PGSQL_CONNECTION_HAS_SEQUENCES);
+		}
+	} else { // we search for sequences only if not already set
+		if (!strncasecmp(query_digest_text, "DISCARD SEQUENCES", sizeof("DISCARD SEQUENCES")-1)) {
+			set_status(false, STATUS_PGSQL_CONNECTION_HAS_SEQUENCES);
+		}
+	}
+
+	// SAVEPOINT is transaction-scoped:
+	// The savepoint is automatically released at the end of the current transaction
+	// (either COMMIT or ROLLBACK). It does not persist beyond the transaction.
+	// If the savepoint count is -1, it means we are not sure if we are in a transaction or not.
+	// If the savepoint count is > 0, it means we are in a transaction and have savepoints.
+	// If the savepoint count is 0, it means we are not in a transaction and have no savepoints.
 	if (get_status(STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT) == false) {
 		if (savepoint_count > 0) {
 			set_status(true, STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT);
 		} else if (savepoint_count == -1) {
-			if (IsKnownActiveTransaction()) {
-				if (!strncasecmp(query_digest_text, "SAVEPOINT ", strlen("SAVEPOINT "))) {
+			if (IsKnownActiveTransaction() == true && 
+				!strncasecmp(query_digest_text, "SAVEPOINT ", sizeof("SAVEPOINT ")-1)) {
 					set_status(true, STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT);
-				}
 			}
-		} 
+		}
 	} else {
 		if (savepoint_count == 0) {
 			set_status(false, STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT);
 		} else if (savepoint_count == -1) {
-			if ((IsKnownActiveTransaction() == false) ||
+			if ((IsKnownActiveTransaction() == false) /* ||
 				(strncasecmp(query_digest_text, "COMMIT", strlen("COMMIT")) == 0) ||
 				(strncasecmp(query_digest_text, "ROLLBACK", strlen("ROLLBACK")) == 0) ||
-				(strncasecmp(query_digest_text, "ABORT", strlen("ABORT")) == 0)) {
+				(strncasecmp(query_digest_text, "ABORT", strlen("ABORT")) == 0)*/) {
 				set_status(false, STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT);
 			}
 		} 
@@ -2276,9 +2329,10 @@ bool PgSQL_Connection::MultiplexDisabled(bool check_delay_token) {
 	// can be used to determine if multiplexing can be enabled or not
 	bool ret = false;
 	if (status_flags & (STATUS_PGSQL_CONNECTION_USER_VARIABLE | STATUS_PGSQL_CONNECTION_PREPARED_STATEMENT |
-		STATUS_PGSQL_CONNECTION_LOCK_TABLES | STATUS_PGSQL_CONNECTION_TEMPORARY_TABLE | STATUS_PGSQL_CONNECTION_GET_LOCK | STATUS_PGSQL_CONNECTION_NO_MULTIPLEX |
-		STATUS_PGSQL_CONNECTION_SQL_LOG_BIN0 | STATUS_PGSQL_CONNECTION_FOUND_ROWS | STATUS_PGSQL_CONNECTION_NO_MULTIPLEX_HG |
-		STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT /*| STATUS_PGSQL_CONNECTION_HAS_WARNINGS*/ )) {
+		STATUS_PGSQL_CONNECTION_LOCK_TABLES | STATUS_PGSQL_CONNECTION_TEMPORARY_TABLE | STATUS_PGSQL_CONNECTION_ADVISORY_LOCK | 
+		STATUS_PGSQL_CONNECTION_NO_MULTIPLEX | STATUS_PGSQL_CONNECTION_HAS_SEQUENCES | STATUS_PGSQL_CONNECTION_ADVISORY_XACT_LOCK | 
+		STATUS_PGSQL_CONNECTION_NO_MULTIPLEX_HG | STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT 
+		/*| STATUS_PGSQL_CONNECTION_HAS_WARNINGS*/ )) {
 		ret = true;
 	}
 	if (check_delay_token && auto_increment_delay_token) return true;
