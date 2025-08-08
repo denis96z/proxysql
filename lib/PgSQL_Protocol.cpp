@@ -1436,6 +1436,7 @@ char* extract_tag_from_query(const char* query) {
 	constexpr size_t create_table_len = sizeof("CREATE TABLE AS") - 1;
 	constexpr size_t deallocate_all_len = sizeof("DEALLOCATE ALL") - 1;
 	constexpr size_t deallocate_prepare_all_len = sizeof("DEALLOCATE PREPARE ALL") - 1;
+	constexpr size_t discard_all_len = sizeof("DISCARD ALL") - 1;
 
 	size_t qtlen = strlen(query);
 	if ((qtlen > create_table_len) && strncasecmp(query, "CREATE TABLE AS", create_table_len) == 0) {
@@ -1444,6 +1445,8 @@ char* extract_tag_from_query(const char* query) {
 		(strncasecmp(query, "DEALLOCATE ALL", deallocate_all_len) == 0 ||
 			strncasecmp(query, "DEALLOCATE PREPARE ALL", deallocate_prepare_all_len) == 0)) {
 		return strdup("DEALLOCATE ALL");
+	} else if ((qtlen >= discard_all_len) && (strncasecmp(query, "DISCARD ALL", discard_all_len) == 0)) {
+		return strdup("DISCARD ALL");
 	} else {
 		const char* fs = strchr(query, ' ');
 
