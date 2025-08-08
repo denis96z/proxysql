@@ -4239,6 +4239,73 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_Q
 			}
 			l_free(pkt->size, pkt->ptr);
 			return true;
+		} else if (strncasecmp(dig, "DISCARD ", 8) == 0) {
+#ifdef DEBUG
+			{
+				std::string nqn = string((char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength);
+				proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 5, "Parsing DISCARD command = %s\n", nqn.c_str());
+			}
+#endif
+			if (index(dig, ';') && (index(dig, ';') != dig + strlen(dig) - 1)) {
+				string nqn;
+				if (pgsql_thread___parse_failure_logs_digest)
+					nqn = string(CurrentQuery.get_digest_text());
+				else
+					nqn = string((char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength);
+				proxy_warning(
+					"Unable to parse multi-statements command with DISCARD statement from client"
+					" %s:%d: setting lock hostgroup. Command: %s\n", client_myds->addr.addr,
+					client_myds->addr.port, nqn.c_str()
+				);
+				*lock_hostgroup = true;
+				return false;
+			}
+
+			std::string nq = string((char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength);
+
+			RE2::GlobalReplace(&nq, "(?U)/\\*.*\\*/", "");
+			RE2::GlobalReplace(&nq, "(?i)\\bDISCARD\\b", "");
+			RE2::GlobalReplace(&nq, "[^\\w]*", "");
+
+			proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Parsing DISCARD command %s\n", nq.c_str());
+			proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 5, "Parsing DISCARD command = %s\n", nq.c_str());
+			bool handled = false;
+			const char* discard_value = nq.c_str();
+			if (strncasecmp(discard_value, "ALL", 3) == 0) {
+				// Backup the current relevant session values
+				int default_hostgroup = this->default_hostgroup;
+				bool transaction_persistent = this->transaction_persistent;
+
+				// Re-initialize the session
+				reset();
+				init();
+
+				// Recover the relevant session values
+				this->default_hostgroup = default_hostgroup;
+				this->transaction_persistent = transaction_persistent;
+				handled = true;
+			} else if (strncasecmp(discard_value, "PLANS", 5) == 0) {
+				// ignore
+				handled = true;
+			}
+
+			if (handled) {
+				client_myds->DSS = STATE_QUERY_SENT_NET;
+				unsigned int nTrx = NumActiveTransactions();
+				const char txn_state = (nTrx ? 'T' : 'I');
+				client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, txn_state, NULL, {});
+
+				if (mirror == false) {
+					RequestEnd(NULL);
+				}
+				else {
+					client_myds->DSS = STATE_SLEEP;
+					status = WAITING_CLIENT_DATA;
+				}
+				l_free(pkt->size, pkt->ptr);
+				return true;
+			} 
+			// send other DISCARD variants to Backend
 		} else if (strncasecmp(dig, "DEALLOCATE ", 11) == 0) {
 #ifdef DEBUG
 			{
@@ -4297,7 +4364,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_Q
 		return false;
 	}
 
-#if 0
+#if 0	
 	// handle case #1797
 	// handle case #2564
 	if ((pkt->size == SELECT_CONNECTION_ID_LEN + 5 && *((char*)(pkt->ptr) + 4) == (char)0x03 && strncasecmp((char*)SELECT_CONNECTION_ID, (char*)pkt->ptr + 5, pkt->size - 5) == 0)) {
@@ -4343,7 +4410,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_Q
 		free(l);
 		return true;
 	}
-#endif
+
 	// handle case #1421 , about LAST_INSERT_ID
 	if (CurrentQuery.QueryParserArgs.digest_text) {
 		char* dig = CurrentQuery.QueryParserArgs.digest_text;
@@ -4365,7 +4432,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_Q
 					}
 				}
 			}
-#if 0 // TODO: fix this
+
 			// if we reached here, we don't know the right backend
 			// we try to determine if it is a simple "SELECT LAST_INSERT_ID()" or "SELECT @@IDENTITY" and we return pgsql->last_insert_id
 
@@ -4426,7 +4493,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_Q
 				free(l);
 				return true;
 			}
-#endif
+
 			// if we reached here, we don't know the right backend and we cannot answer the query directly
 			// We continue the normal way
 
@@ -4434,6 +4501,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_Q
 			qpo->cache_ttl = 0;
 		}
 	}
+#endif
 
 	// handle command KILL #860
 	//if (prepared == false) {

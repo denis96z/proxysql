@@ -2235,9 +2235,8 @@ void PgSQL_Connection::reset() {
 	delete local_stmts;
 	local_stmts = new PgSQL_STMTs_local_v14(false);
 
-	for (int i = (is_client_connection ? 0 : PGSQL_NAME_LAST_LOW_WM + 1);
-		i < PGSQL_NAME_LAST_HIGH_WM; 
-		i++) {
+	// reset all variables
+	for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
 		var_hash[i] = 0;
 		if (variables[i].value) {
 			free(variables[i].value);
@@ -2246,7 +2245,10 @@ void PgSQL_Connection::reset() {
 	}
 	dynamic_variables_idx.clear();
 
-	if (!is_client_connection) copy_startup_parameters_to_pgsql_variables(/*copy_only_critical_param=*/true); 
+	// We need to copy the startup parameters:
+	// For client connections, we copy all startup parameters
+	// For server connections, we copy only copy critical parameters
+	copy_startup_parameters_to_pgsql_variables(/*copy_only_critical_param=*/!is_client_connection);
 
 	if (options.init_connect) {
 		free(options.init_connect);
