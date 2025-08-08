@@ -80,7 +80,6 @@ class Base_Session {
 	int to_process;
 	int pending_connect;
 	enum proxysql_session_type session_type;
-	int warning_in_hg;
 
 	// bool
 	bool autocommit;

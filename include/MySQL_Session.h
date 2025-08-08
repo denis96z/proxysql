@@ -333,7 +333,6 @@ class MySQL_Session: public Base_Session<MySQL_Session, MySQL_Data_Stream, MySQL
 	int to_process;
 	int pending_connect;
 	enum proxysql_session_type session_type;
-	int warning_in_hg;
 
 	// bool
 	bool autocommit;
@@ -353,6 +352,7 @@ class MySQL_Session: public Base_Session<MySQL_Session, MySQL_Data_Stream, MySQL
 	//bool started_sending_data_to_client; // this status variable tracks if some result set was sent to the client, or if proxysql is still buffering everything
 	bool use_ssl;
 #endif // 0
+	int warning_in_hg;
 	int autocommit_on_hostgroup;
 	/**
 	 * @brief This status variable tracks whether the session is performing an

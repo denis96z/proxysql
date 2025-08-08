@@ -525,7 +525,6 @@ PgSQL_Session::PgSQL_Session() {
 	mirrorPkt.ptr = NULL;
 	mirrorPkt.size = 0;
 	set_status(session_status___NONE);
-	warning_in_hg = -1;
 
 	idle_since = 0;
 	transaction_started_at = 0;
@@ -560,7 +559,6 @@ void PgSQL_Session::reset() {
 	autocommit = true;
 	autocommit_handled = false;
 	sending_set_autocommit = false;
-	warning_in_hg = -1;
 	current_hostgroup = -1;
 	default_hostgroup = -1;
 	locked_on_hostgroup = -1;
