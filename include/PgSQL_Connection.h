@@ -664,4 +664,21 @@ private:
 	static std::map<std::string, std::vector<std::string>> parse_pq_error_message(const std::string& error_str);
 };
 
+class PgSQL_CancelQueryArgs {
+public:
+	PGconn* conn;
+	PgSQL_Thread* mt;
+	char* username;
+	char* hostname;
+	unsigned int port;
+	int backend_pid;
+	unsigned int hid;
+
+	PgSQL_CancelQueryArgs(PGconn* _conn, const char* user, const char* host,
+		unsigned int _port, unsigned int _hid, int _backend_pid, PgSQL_Thread* _mt);
+	~PgSQL_CancelQueryArgs();
+};
+
+void* PgSQL_cancel_query_thread(void* arg);
+
 #endif /* __CLASS_PGSQL_CONNECTION_H */

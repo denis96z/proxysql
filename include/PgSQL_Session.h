@@ -294,7 +294,16 @@ private:
 	void handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY___create_mirror_session();
 	int handler_again___status_PINGING_SERVER();
 	int handler_again___status_RESETTING_CONNECTION();
-	void handler_again___new_thread_to_kill_connection();
+
+
+	/**
+	 * @brief Initiates a new thread to kill current running query.
+	 *
+	 * The handler_again___new_thread_to_cancel_query() method creates a new thread to initiate 
+	 * the cancellation of the current running query.
+	 *
+	 */
+	void handler_again___new_thread_to_cancel_query();
 
 	bool handler_again___verify_init_connect();
 #if 0
@@ -554,31 +563,7 @@ public:
 	void set_previous_status_mode3(bool allow_execute = true);
 };
 
-#define PgSQL_KILL_QUERY       1
-#define PgSQL_KILL_CONNECTION  2
 
-class PgSQL_KillArgs {
-public:
-	PgSQL_Thread* mt;
-	char* username;
-	char* password;
-	char* hostname;
-	unsigned int port;
-	int id;
-	int kill_type;
-	unsigned int hid;
-	int use_ssl;
-
-	PgSQL_KillArgs(char* u, char* p, char* h, unsigned int P, unsigned int _hid, int i, int kt, int _use_ssl, PgSQL_Thread* _mt);
-	PgSQL_KillArgs(char* u, char* p, char* h, unsigned int P, unsigned int _hid, int i, int kt, int _use_ssl, PgSQL_Thread* _mt, char* ip);
-	~PgSQL_KillArgs();
-	const char* get_host_address() const;
-
-private:
-	char* ip_addr;
-};
-
-void* PgSQL_kill_query_thread(void* arg);
 
 #endif /* __CLASS_PGSQL_SESSION_H */
 #endif // CLASS_BASE_SESSION_H

@@ -2638,3 +2638,48 @@ void PgSQL_Connection::copy_startup_parameters_to_pgsql_variables(bool copy_only
 		}
 	}
 }
+
+PgSQL_CancelQueryArgs::PgSQL_CancelQueryArgs(PGconn* _conn, const char* user, const char* host,
+	unsigned int _port, unsigned int _hid, int _backend_pid, PgSQL_Thread* _mt) {
+	conn = _conn;
+	username = strdup(user);
+	hostname = strdup(host);
+	port = _port;
+	hid = _hid;
+	backend_pid = _backend_pid;
+	mt = _mt;
+}
+
+PgSQL_CancelQueryArgs::~PgSQL_CancelQueryArgs() {
+	free(username);
+	free(hostname);
+}
+
+void* PgSQL_cancel_query_thread(void* arg) {
+	assert(arg);
+	PgSQL_CancelQueryArgs* ka = static_cast<PgSQL_CancelQueryArgs*>(arg);
+
+	PGcancel* cancel = PQgetCancel(ka->conn);
+
+	if (!cancel) {
+		proxy_error("Failed to cancel query on %s:%d with backend PID %d\n", ka->hostname, ka->port, ka->backend_pid);
+		PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::pgsql, ka->hid, ka->hostname, ka->port, 999);
+		goto __exit_cancel_query_thread;
+	}
+
+	if (ka->mt) ka->mt->status_variables.stvar[st_var_killed_queries]++;
+
+	char errbuf[256];
+	if (!PQcancel(cancel, errbuf, sizeof(errbuf))) {
+		proxy_error("Failed to cancel query on %s:%d with backend PID %d: %s\n", ka->hostname, ka->port,
+			ka->backend_pid, errbuf);
+		PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::pgsql, ka->hid, ka->hostname, ka->port, 999);
+	} else {
+		proxy_warning("Canceled query on %s:%d with backend PID %d successfully\n", ka->hostname, ka->port, ka->backend_pid);
+	}
+
+__exit_cancel_query_thread:
+	if (cancel) PQfreeCancel(cancel);
+	delete ka;
+	return NULL;
+}
