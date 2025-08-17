@@ -31,8 +31,8 @@ PGConnPtr createNewConnection(ConnType conn_type, const std::string& options = "
     
     const char* host = (conn_type == BACKEND) ? cl.pgsql_host : cl.pgsql_admin_host;
     int port = (conn_type == BACKEND) ? cl.pgsql_port : cl.pgsql_admin_port;
-    const char* username = (conn_type == BACKEND) ? cl.pgsql_root_username : cl.admin_username;
-    const char* password = (conn_type == BACKEND) ? cl.pgsql_root_password : cl.admin_password;
+    const char* username = (conn_type == BACKEND) ? cl.pgsql_username : cl.admin_username;
+    const char* password = (conn_type == BACKEND) ? cl.pgsql_password : cl.admin_password;
 
     std::stringstream ss;
 
