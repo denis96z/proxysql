@@ -35,8 +35,8 @@ PGConnPtr createNewConnection(ConnType conn_type, const std::string& options = "
 	
 	const char* host = (conn_type == BACKEND) ? cl.pgsql_host : cl.pgsql_admin_host;
 	int port = (conn_type == BACKEND) ? cl.pgsql_port : cl.pgsql_admin_port;
-	const char* username = (conn_type == BACKEND) ? cl.pgsql_root_username : cl.admin_username;
-	const char* password = (conn_type == BACKEND) ? cl.pgsql_root_password : cl.admin_password;
+	const char* username = (conn_type == BACKEND) ? cl.pgsql_username : cl.admin_username;
+	const char* password = (conn_type == BACKEND) ? cl.pgsql_password : cl.admin_password;
 
 	std::stringstream ss;
 
@@ -3608,6 +3608,38 @@ void test_deallocate_all_via_prepared() {
 		ok(false, "Extended Query DEALLOCATE ALL via Prepared failed with error:%s", e.what());
 	}
 }
+
+void test_deallocate_non_existent_stmt() {
+	diag("Test %d: Extended Query - DEALLOCATE non-existent statement", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	if (!conn) return;
+	try {
+		// Attempt to deallocate a non-existent statement
+		conn->execute("DEALLOCATE PREPARE non_existent_stmt");
+		char type;
+		std::vector<uint8_t> buffer;
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::ERROR_RESPONSE, "ErrorResponse was received for DEALLOCATE non-existent statement");
+		std::string errormsg;
+		std::string errorcode;
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+		ok(errorcode == "26000", "Received ERRCODE_INVALID_SQL_STATEMENT_NAME Error:%s", errormsg.c_str());
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query after DEALLOCATE non-existent statement");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query DEALLOCATE non-existent statement failed with error:%s", e.what());
+	}
+}
+
 /*
 void test_update_delete_commands_extended() {
 	diag("Test %d: Extended Query UPDATE and DELETE tags", test_count++);
@@ -3803,7 +3835,7 @@ int main(int argc, char** argv) {
 		return exit_status();
 	}
 
-	plan(408); // Adjust based on number of tests
+	plan(411); // Adjust based on number of tests
 
 	auto admin_conn = createNewConnection(ConnType::ADMIN, "", false);
 
@@ -3894,6 +3926,7 @@ int main(int argc, char** argv) {
 		test_deallocate_having_stmt_name_via_prepared();
 		test_deallocate_all_via_simple_query();
 		test_deallocate_all_via_prepared();
+		test_deallocate_non_existent_stmt();
 	}
 	catch (const std::exception& e) {
 		diag("Fatal error: %s",e.what());
