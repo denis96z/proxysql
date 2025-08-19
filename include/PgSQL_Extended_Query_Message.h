@@ -50,6 +50,19 @@ public:
 		return _data;
 	}
 
+	/**
+	 * @brief Returns a reference to the internal packet data.
+	 *
+	 * @return Reference to the PtrSize_t structure containing packet data.
+	 */
+	inline const PtrSize_t& get_raw_pkt() const noexcept {
+		return _pkt;
+	}
+
+	inline PtrSize_t& get_raw_pkt() noexcept {
+		return _pkt;
+	}
+
 protected:
 	/**
 	 * @brief Provides mutable access to the internal data.
@@ -161,7 +174,6 @@ private:
 	uint16_t remaining;				///< Number of fields remaining to read.
 };
 
-
 struct PgSQL_Parse_Data {
 	const char* stmt_name;		// The name of the prepared statement
 	const char* query_string;	// The query string to be prepared
@@ -171,6 +183,7 @@ private:
 	const unsigned char* param_types_start_ptr;	// Array of parameter types (can be nullptr if none)
 
 	friend class PgSQL_Parse_Message;
+	friend class PgSQL_Session; // need it for void PgSQL_Session::handler_WCD_SS_MCQ_qpo_QueryRewrite(PtrSize_t* pkt);
 };
 
 class PgSQL_Parse_Message : public Base_Extended_Query_Message<PgSQL_Parse_Data,PgSQL_Parse_Message> {

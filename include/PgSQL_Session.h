@@ -34,6 +34,8 @@ enum PgSQL_Extended_Query_Type : uint8_t {
 	PGSQL_EXTENDED_QUERY_TYPE_PARSE				 = 0x01,
 	PGSQL_EXTENDED_QUERY_TYPE_DESCRIBE			 = 0x02,
 	PGSQL_EXTENDED_QUERY_TYPE_EXECUTE			 = 0x04,
+	PGSQL_EXTENDED_QUERY_TYPE_BIND				 = 0x08,
+	PGSQL_EXTENDED_QUERY_TYPE_CLOSE				 = 0x10,
 };
 
 /* Enumerated types for output format and date order */
@@ -188,6 +190,7 @@ private:
 	using PktType = std::variant<std::unique_ptr<PgSQL_Parse_Message>,std::unique_ptr<PgSQL_Describe_Message>,
 		std::unique_ptr<PgSQL_Close_Message>, std::unique_ptr<PgSQL_Bind_Message>, std::unique_ptr<PgSQL_Execute_Message>>;
 
+	bool extended_query_exec_qp = false;
 	std::queue<PktType> extended_query_frame;
 	std::unique_ptr<const PgSQL_Bind_Message> bind_waiting_for_execute;
 
@@ -236,6 +239,13 @@ private:
 #endif
 
 	void handler___client_DSS_QUERY_SENT___server_DSS_NOT_INITIALIZED__get_connection();
+
+	bool is_multi_statement_command(const char* cmd);
+	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_SET_command(const char* dig, bool* lock_hostgroup);
+	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_RESET_command(const char* dig, bool* lock_hostgroup);
+	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_DISCARD_command(const char* dig);
+	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_DEALLOCATE_command(const char* dig);
+	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_special_commands(const char* dig, bool* lock_hostgroup);
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_QUERY_qpo(PtrSize_t*, bool* lock_hostgroup, 
 		PgSQL_Extended_Query_Type stmt_type = PGSQL_EXTENDED_QUERY_TYPE_NOT_SET);
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_PARSE(PtrSize_t& pkt);

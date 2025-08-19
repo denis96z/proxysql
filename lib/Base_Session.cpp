@@ -683,7 +683,7 @@ int Base_Session<S,DS,B,T>::FindOneActiveTransaction(bool check_savepoint) {
 	return ret;
 }
 
-Session_Regex::Session_Regex(char* p) {
+Session_Regex::Session_Regex(const char* p) {
 	s = strdup(p);
 	re2::RE2::Options* opt2 = new re2::RE2::Options(RE2::Quiet);
 	opt2->set_case_sensitive(false);
@@ -697,7 +697,7 @@ Session_Regex::~Session_Regex() {
 	delete (re2::RE2::Options*)opt;
 }
 
-bool Session_Regex::match(char* m) {
+bool Session_Regex::match(const char* m) {
 	bool rc = false;
 	rc = RE2::PartialMatch(m, *(RE2*)re);
 	return rc;

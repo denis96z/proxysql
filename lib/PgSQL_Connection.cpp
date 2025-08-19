@@ -702,6 +702,9 @@ handler_again:
 		break;
 	case ASYNC_STMT_PREPARE_START:
 		stmt_prepare_start();
+		__sync_fetch_and_add(&parent->queries_sent, 1);
+		update_bytes_sent(query.length + 5);
+		statuses.questions++;
 		if (async_exit_status) {
 			next_event(ASYNC_STMT_PREPARE_CONT);
 		}

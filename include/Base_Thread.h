@@ -28,9 +28,9 @@ private:
 	void* re;
 	char* s;
 public:
-	Session_Regex(char* p);
+	Session_Regex(const char* p);
 	~Session_Regex();
-	bool match(char* m);
+	bool match(const char* m);
 };
 
 class MySQL_Thread;

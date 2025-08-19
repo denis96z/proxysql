@@ -1480,27 +1480,34 @@ bool PgSQL_Protocol::generate_ok_packet(bool send, bool ready, const char* msg, 
 		pgpkt.set_multi_pkt_mode(true);
 	}
 
-	char* tag = extract_tag_from_query(query);
-	assert(tag);
+	if (query) {
+		char* tag = extract_tag_from_query(query);
+		assert(tag);
 
-	char tmpbuf[128];
-	if (strcmp(tag, "INSERT") == 0) {
-		sprintf(tmpbuf, "%s 0 %d", tag, rows);
-		pgpkt.write_CommandComplete(tmpbuf);
-	} else if (strcmp(tag, "UPDATE") == 0 ||
-		strcmp(tag, "DELETE") == 0 ||
-		strcmp(tag, "MERGE") == 0 ||
-		strcmp(tag, "MOVE") == 0 ||
-		strcmp(tag, "FETCH") == 0 ||
-		strcmp(tag, "COPY") == 0 ||
-		strcmp(tag, "SELECT") == 0) {
-		sprintf(tmpbuf, "%s %d", tag, rows);
-		pgpkt.write_CommandComplete(tmpbuf);
-	} else {
-		pgpkt.write_CommandComplete(tag);
+		char tmpbuf[128];
+		if (strcmp(tag, "INSERT") == 0) {
+			sprintf(tmpbuf, "%s 0 %d", tag, rows);
+			pgpkt.write_CommandComplete(tmpbuf);
+		}
+		else if (strcmp(tag, "UPDATE") == 0 ||
+			strcmp(tag, "DELETE") == 0 ||
+			strcmp(tag, "MERGE") == 0 ||
+			strcmp(tag, "MOVE") == 0 ||
+			strcmp(tag, "FETCH") == 0 ||
+			strcmp(tag, "COPY") == 0 ||
+			strcmp(tag, "SELECT") == 0) {
+			sprintf(tmpbuf, "%s %d", tag, rows);
+			pgpkt.write_CommandComplete(tmpbuf);
+		}
+		else {
+			pgpkt.write_CommandComplete(tag);
+		}
+		free(tag);
+	} else if (msg) {
+		// if no query, but message is provided, use it as tag
+		pgpkt.write_CommandComplete(msg);
 	}
-	free(tag);
-	
+
 	for (auto& [param_name, param_value] : param_status) {
 		pgpkt.write_ParameterStatus(param_name.c_str(), param_value.c_str());
 	}
