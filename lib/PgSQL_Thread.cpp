@@ -21,7 +21,7 @@ using json = nlohmann::json;
 #include "PgSQL_Data_Stream.h"
 #include "PgSQL_Query_Processor.h"
 #include "StatCounters.h"
-#include "MySQL_PreparedStatement.h"
+#include "PgSQL_PreparedStatement.h"
 #include "PgSQL_Logger.hpp"
 #include "PgSQL_Variables_Validator.h"
 #include <fcntl.h>
@@ -406,7 +406,6 @@ static char* pgsql_thread_variables_names[] = {
 	(char*)"default_schema",
 	(char*)"poll_timeout",
 	(char*)"poll_timeout_on_failure",
-	(char*)"server_capabilities",
 	(char*)"server_version",
 	(char*)"server_encoding",
 	(char*)"keep_multiplexing_variables",
@@ -1035,9 +1034,6 @@ PgSQL_Threads_Handler::PgSQL_Threads_Handler() {
 	variables.eventslog_format = 1;
 	variables.auditlog_filename = strdup((char*)"");
 	variables.auditlog_filesize = 100 * 1024 * 1024;
-	//variables.server_capabilities=CLIENT_FOUND_ROWS | CLIENT_PROTOCOL_41 | CLIENT_IGNORE_SIGPIPE | CLIENT_TRANSACTIONS | CLIENT_SECURE_CONNECTION | CLIENT_CONNECT_WITH_DB;
-	// major upgrade in 2.0.0
-	variables.server_capabilities = CLIENT_MYSQL | CLIENT_FOUND_ROWS | CLIENT_PROTOCOL_41 | CLIENT_IGNORE_SIGPIPE | CLIENT_TRANSACTIONS | CLIENT_SECURE_CONNECTION | CLIENT_CONNECT_WITH_DB | CLIENT_PLUGIN_AUTH;;
 	variables.poll_timeout = 2000;
 	variables.poll_timeout_on_failure = 100;
 	variables.have_compress = true;
@@ -1312,14 +1308,6 @@ char* PgSQL_Threads_Handler::get_variable_string(char* name) {
 	// LCOV_EXCL_STOP
 }
 
-uint16_t PgSQL_Threads_Handler::get_variable_uint16(char* name) {
-	if (!strcasecmp(name, "server_capabilities")) return variables.server_capabilities;
-	// LCOV_EXCL_START
-	proxy_error("Not existing variable: %s\n", name); assert(0);
-	return 0;
-	// LCOV_EXCL_STOP
-}
-
 int PgSQL_Threads_Handler::get_variable_int(const char* name) {
 	// convert name to string, and lowercase
 	std::string nameS = string(name);
@@ -1438,11 +1426,6 @@ char* PgSQL_Threads_Handler::get_variable(char* name) {	// this is the public fu
 	if (!strcasecmp(name, "default_schema")) return strdup(variables.default_schema);
 	if (!strcasecmp(name, "keep_multiplexing_variables")) return strdup(variables.keep_multiplexing_variables);
 	if (!strcasecmp(name, "interfaces")) return strdup(variables.interfaces);
-	if (!strcasecmp(name, "server_capabilities")) {
-		// FIXME : make it human readable
-		sprintf(intbuf, "%d", variables.server_capabilities);
-		return strdup(intbuf);
-	}
 	// SSL variables
 	if (!strncasecmp(name, "ssl_", 4)) {
 		if (!strcasecmp(name, "ssl_p2s_ca")) {
@@ -1963,20 +1946,7 @@ bool PgSQL_Threads_Handler::set_variable(char* name, const char* value) {	// thi
 			return true;
 		}
 	}
-	if (!strcasecmp(name, "server_capabilities")) {
-		// replaced atoi() with strtoul() to have a 32 bit result
-		uint32_t intv = strtoul(value, NULL, 10);
-		if (intv > 10) {
-			// Note that:
-			// - some capabilities are changed at runtime while performing the handshake with the client
-			// - even if we support 32 bits capabilities, many of them do not have any real meaning for proxysql (not supported)
-			variables.server_capabilities = intv;
-			return true;
-		}
-		else {
-			return false;
-		}
-	}
+
 	if (!strcasecmp(name, "stacksize")) {
 		int intv = atoi(value);
 		if (intv >= 256 * 1024 && intv <= 4 * 1024 * 1024) {
@@ -2001,12 +1971,10 @@ bool PgSQL_Threads_Handler::set_variable(char* name, const char* value) {	// thi
 	if (!strcasecmp(name, "have_compress")) {
 		if (strcasecmp(value, "true") == 0 || strcasecmp(value, "1") == 0) {
 			variables.have_compress = true;
-			variables.server_capabilities |= CLIENT_COMPRESS;
 			return true;
 		}
 		if (strcasecmp(value, "false") == 0 || strcasecmp(value, "0") == 0) {
 			variables.have_compress = false;
-			variables.server_capabilities &= ~CLIENT_COMPRESS;
 			return true;
 		}
 		return false;
@@ -2014,12 +1982,10 @@ bool PgSQL_Threads_Handler::set_variable(char* name, const char* value) {	// thi
 	if (!strcasecmp(name, "have_ssl")) {
 		if (strcasecmp(value, "true") == 0 || strcasecmp(value, "1") == 0) {
 			variables.have_ssl = true;
-			variables.server_capabilities |= CLIENT_SSL;
 			return true;
 		}
 		if (strcasecmp(value, "false") == 0 || strcasecmp(value, "0") == 0) {
 			variables.have_ssl = false;
-			variables.server_capabilities &= ~CLIENT_SSL;
 			return true;
 		}
 		return false;
@@ -2923,7 +2889,7 @@ void PgSQL_Thread::run___get_multiple_idle_connections(int& num_idles) {
 
 		myds = sess->mybe->server_myds;
 		myds->attach_connection(mc);
-		myds->assign_fd_from_mysql_conn();
+		myds->assign_fd_from_pgsql_conn();
 		myds->myds_type = MYDS_BACKEND;
 
 		sess->to_process = 1;
@@ -3213,6 +3179,12 @@ void PgSQL_Thread::run() {
 #ifdef IDLE_THREADS
 		}
 #endif // IDLE_THREADS
+#ifdef DEBUG
+		// This block is only used for Watchdog unit tests:
+		// Specifically for PROXYSQLTEST cases 55 0 and 55 1.
+		if (watchdog_test__simulated_delay_ms)
+			std::this_thread::sleep_for(std::chrono::milliseconds(watchdog_test__simulated_delay_ms));
+#endif
 	}
 }
 // end of ::run()
@@ -3838,9 +3810,10 @@ void PgSQL_Thread::refresh_variables() {
 	pgsql_thread___query_cache_size_MB = GloPTH->get_variable_int((char*)"query_cache_size_MB");
 	pgsql_thread___query_cache_soft_ttl_pct = GloPTH->get_variable_int((char*)"query_cache_soft_ttl_pct");
 	pgsql_thread___query_cache_handle_warnings = GloPTH->get_variable_int((char*)"query_cache_handle_warnings");
+	pgsql_thread___max_stmts_cache = GloPTH->get_variable_int((char*)"max_stmts_cache");
 	/*
 	mysql_thread___max_stmts_per_connection = GloPTH->get_variable_int((char*)"max_stmts_per_connection");
-	mysql_thread___max_stmts_cache = GloPTH->get_variable_int((char*)"max_stmts_cache");
+	
 
 	if (mysql_thread___monitor_username) free(mysql_thread___monitor_username);
 	mysql_thread___monitor_username = GloPTH->get_variable_string((char*)"monitor_username");
@@ -3964,8 +3937,7 @@ void PgSQL_Thread::refresh_variables() {
 	pgsql_thread___handle_unknown_charset = GloPTH->get_variable_int((char*)"handle_unknown_charset");
 
 	/*
-	mysql_thread___server_capabilities = GloPTH->get_variable_uint16((char*)"server_capabilities");
-	
+
 	mysql_thread___have_compress = (bool)GloPTH->get_variable_int((char*)"have_compress");
 	
 	mysql_thread___enforce_autocommit_on_reads = (bool)GloPTH->get_variable_int((char*)"enforce_autocommit_on_reads");
@@ -4705,7 +4677,7 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 					pta[9] = strdup(buf);
 					sprintf(buf, "%d", mc->parent->port);
 					pta[10] = strdup(buf);
-					if (sess->CurrentQuery.stmt_info == NULL) { // text protocol
+					if (sess->CurrentQuery.extended_query_info.stmt_info == NULL) { // text protocol
 						if (mc->query.length) {
 							pta[13] = (char*)malloc(mc->query.length + 1);
 							strncpy(pta[13], mc->query.ptr, mc->query.length);
@@ -4716,7 +4688,7 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 						}
 					}
 					else { // prepared statement
-						MySQL_STMT_Global_info* si = sess->CurrentQuery.stmt_info;
+						const PgSQL_STMT_Global_info* si = sess->CurrentQuery.extended_query_info.stmt_info;
 						if (si->query_length) {
 							pta[13] = (char*)malloc(si->query_length + 1);
 							strncpy(pta[13], si->query, si->query_length);
@@ -4769,6 +4741,9 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 				//	break;
 				case PROCESSING_STMT_EXECUTE:
 					pta[11] = strdup("Execute");
+					break;
+				case PROCESSING_STMT_DESCRIBE:
+					pta[11] = strdup("Describe");
 					break;
 				case PROCESSING_STMT_PREPARE:
 					pta[11] = strdup("Prepare");

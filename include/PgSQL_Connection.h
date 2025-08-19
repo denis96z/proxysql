@@ -12,19 +12,22 @@
 
 class PgSQL_SrvC;
 class PgSQL_Query_Result;
-//#define STATUS_MYSQL_CONNECTION_TRANSACTION          0x00000001 // DEPRECATED
-#define STATUS_MYSQL_CONNECTION_COMPRESSION          0x00000002
-#define STATUS_MYSQL_CONNECTION_USER_VARIABLE        0x00000004
-#define STATUS_MYSQL_CONNECTION_PREPARED_STATEMENT   0x00000008
-#define STATUS_MYSQL_CONNECTION_LOCK_TABLES          0x00000010
-#define STATUS_MYSQL_CONNECTION_TEMPORARY_TABLE      0x00000020
-#define STATUS_MYSQL_CONNECTION_GET_LOCK             0x00000040
-#define STATUS_MYSQL_CONNECTION_NO_MULTIPLEX         0x00000080
-#define STATUS_MYSQL_CONNECTION_SQL_LOG_BIN0         0x00000100
-#define STATUS_MYSQL_CONNECTION_FOUND_ROWS           0x00000200
-#define STATUS_MYSQL_CONNECTION_NO_MULTIPLEX_HG      0x00000400
-#define STATUS_MYSQL_CONNECTION_HAS_SAVEPOINT        0x00000800
-#define STATUS_MYSQL_CONNECTION_HAS_WARNINGS         0x00001000
+class PgSQL_STMTs_local_v14;
+class PgSQL_Describe_Prepared_Info;
+class PgSQL_Bind_Info;
+//#define STATUS_PGSQL_CONNECTION_SEQUENCE			 0x00000001
+#define STATUS_PGSQL_CONNECTION_COMPRESSION          0x00000002
+#define STATUS_PGSQL_CONNECTION_USER_VARIABLE        0x00000004
+#define STATUS_PGSQL_CONNECTION_PREPARED_STATEMENT   0x00000008
+#define STATUS_PGSQL_CONNECTION_LOCK_TABLES          0x00000010
+#define STATUS_PGSQL_CONNECTION_TEMPORARY_TABLE      0x00000020
+#define STATUS_PGSQL_CONNECTION_ADVISORY_LOCK        0x00000040
+#define STATUS_PGSQL_CONNECTION_NO_MULTIPLEX         0x00000080
+#define STATUS_PGSQL_CONNECTION_HAS_SEQUENCES		 0x00000100
+#define STATUS_PGSQL_CONNECTION_ADVISORY_XACT_LOCK   0x00000200
+#define STATUS_PGSQL_CONNECTION_NO_MULTIPLEX_HG      0x00000400
+#define STATUS_PGSQL_CONNECTION_HAS_SAVEPOINT        0x00000800
+//#define STATUS_PGSQL_CONNECTION_HAS_WARNINGS         0x00001000
 
 
 enum PgSQL_Param_Name {
@@ -254,18 +257,77 @@ public:
 	void query_cont(short event);
 	void fetch_result_start();
 	void fetch_result_cont(short event);
+
+    /**
+     * @brief Initiates the asynchronous preparation of a SQL statement.
+     *
+     * This method starts the process of preparing a SQL statement on the PostgreSQL backend.
+     *
+     * The actual continuation and completion of the statement preparation is handled
+     * by stmt_prepare_cont(short event).
+     */
+    void stmt_prepare_start();
+
+    /**
+     * @brief Continues the asynchronous preparation of a SQL statement.
+     *
+     * This method is called after stmt_prepare_start() to handle the next step in the
+     * asynchronous state machine for preparing a SQL statement on the PostgreSQL backend.
+     *
+     * @param event The event flag indicating the current I/O event.
+     */
+    void stmt_prepare_cont(short event);
+
+    /**
+     * @brief Initiates the asynchronous description of a prepared SQL statement.
+     *
+     * This method starts the process of describing a previously prepared SQL statement
+     * on the PostgreSQL backend.
+	 * 
+     */
+    void stmt_describe_start();
+
+    /**
+     * @brief Continues the asynchronous description of a prepared SQL statement.
+     *
+     * This method is called after stmt_describe_start() to handle the next step in the
+     * asynchronous state machine for describing a prepared SQL statement on the PostgreSQL backend.
+     *
+     * @param event The event flag indicating the current I/O event.
+     */
+    void stmt_describe_cont(short event);
+
+    /**
+     * @brief Initiates the asynchronous execution of a prepared SQL statement.
+     *
+     * This method starts the process of executing a previously prepared SQL statement
+     * on the PostgreSQL backend. It sends Bind and Execute messages to the server
+     * and transitions the connection's state machine to handle the subsequent response.
+	 * 
+     */
+    void stmt_execute_start();
+
+    /**
+     * @brief Continues the asynchronous execution of a prepared SQL statement.
+     *
+     * This method is called after stmt_execute_start() to handle the next step in the
+     * asynchronous state machine for executing a prepared SQL statement on the PostgreSQL backend.
+     *
+     * @param returned The event flag indicating the current I/O event.
+     */
+    void stmt_execute_cont(short event);
+
 	void reset_session_start();
 	void reset_session_cont(short event);
 	
-	int  async_connect(short event);
-
-	int  async_query(short event, char* stmt, unsigned long length);
-	int  async_ping(short event);
-	int  async_reset_session(short event);
-	int	 async_send_simple_command(short event, char* stmt, unsigned long length); // no result set expected
+	int async_connect(short event);
+	int async_query(short event, const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr, 
+		PgSQL_Extended_Query_Type type = PGSQL_EXTENDED_QUERY_TYPE_NOT_SET, const PgSQL_Extended_Query_Info* extended_query_info = nullptr);
+	int async_ping(short event);
+	int async_reset_session(short event);
+	int async_send_simple_command(short event, char* stmt, unsigned long length); // no result set expected
 
 	void next_event(PG_ASYNC_ST new_st);
-	bool IsAutoCommit();
 	bool is_connected() const;
 	void compute_unknown_transaction_status();
 	void async_free_result();
@@ -273,7 +335,7 @@ public:
 	bool IsActiveTransaction();
 	bool IsKnownActiveTransaction();
 	bool IsServerOffline();
-	
+	void set_is_client(); // used for local_stmts
 	bool is_connection_in_reusable_state() const;
 
 	bool requires_RESETTING_CONNECTION(const PgSQL_Connection* client_conn);
@@ -410,6 +472,7 @@ public:
 	const char* get_pg_connection_status_str();
 	const char* get_pg_transaction_status_str();
 	unsigned int get_memory_usage() const;
+	char get_transaction_status_char();
 
 	inline
 	int get_backend_pid() { return (pgsql_conn) ? get_pg_backend_pid() : -1; }
@@ -433,11 +496,9 @@ public:
 	bool get_status(uint32_t status_flag);
 	bool MultiplexDisabled(bool check_delay_token = true);
 
-	bool AutocommitFalse_AndSavepoint();
-
 	unsigned int reorder_dynamic_variables_idx();
 	unsigned int number_of_matching_session_variables(const PgSQL_Connection* client_conn, unsigned int& not_matching);
-	void set_query(char* stmt, unsigned long length);
+	void set_query(const char* stmt, unsigned long length, const char* _backend_stmt_name = nullptr, const PgSQL_Extended_Query_Info* extended_query_info = nullptr);
 	void reset();
 
 	bool IsKeepMultiplexEnabledVariables(char* query_digest_text);
@@ -480,7 +541,9 @@ public:
 
 	struct {
 		unsigned long length;
-		char* ptr;
+		const char* ptr;
+		const char* backend_stmt_name;
+		const PgSQL_Extended_Query_Info* extended_query_info;
 	} query;
 
 	struct {
@@ -525,6 +588,7 @@ public:
 	PSresult  ps_result;
 	PgSQL_Query_Result* query_result;
 	PgSQL_Query_Result* query_result_reuse;
+	PgSQL_Describe_Prepared_Info* stmt_metadata_result;
 	unsigned long long creation_time;
 	unsigned long long last_time_used;
 	unsigned long long timeout;
@@ -540,6 +604,7 @@ public:
 	bool multiplex_delayed;
 	bool is_client_connection; // true if this is a client connection, false if it is a server connection
 
+	PgSQL_STMTs_local_v14* local_stmts;
 	PgSQL_SrvC *parent;
 	PgSQL_Connection_userinfo* userinfo;
 	PgSQL_Data_Stream* myds;
@@ -555,6 +620,12 @@ public:
 	bool unknown_transaction_status;
 
 private:
+	// Set end state for the fetch result to indicate that it originates from a simple query or statement execution.
+	ASYNC_ST fetch_result_end_st = ASYNC_QUERY_END;
+	inline void set_fetch_result_end_state(ASYNC_ST st) {
+		assert(st == ASYNC_QUERY_END || st == ASYNC_STMT_EXECUTE_END);
+		fetch_result_end_st = st;
+	}
 	// Handles the COPY OUT response from the server.
 	// Returns true if it consumes all buffer data, or false if the threshold for result size is reached
 	bool handle_copy_out(const PGresult* result, uint64_t* processed_bytes);
@@ -592,5 +663,22 @@ private:
 	 */
 	static std::map<std::string, std::vector<std::string>> parse_pq_error_message(const std::string& error_str);
 };
+
+class PgSQL_CancelQueryArgs {
+public:
+	PGconn* conn;
+	PgSQL_Thread* mt;
+	char* username;
+	char* hostname;
+	unsigned int port;
+	int backend_pid;
+	unsigned int hid;
+
+	PgSQL_CancelQueryArgs(PGconn* _conn, const char* user, const char* host,
+		unsigned int _port, unsigned int _hid, int _backend_pid, PgSQL_Thread* _mt);
+	~PgSQL_CancelQueryArgs();
+};
+
+void* PgSQL_cancel_query_thread(void* arg);
 
 #endif /* __CLASS_PGSQL_CONNECTION_H */
