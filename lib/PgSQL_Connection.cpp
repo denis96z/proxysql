@@ -479,6 +479,17 @@ handler_again:
 				switch (exec_status_type) {
 				case PGRES_COMMAND_OK:
 					{
+						// PQsendQueryPrepared sends the sequence BIND -> DESCRIBE(PORTAL) -> EXECUTE -> SYNC
+						// Since libpq does not indicate whether the DESCRIBE PORTAL step produced a
+						// NoData packet for commands such as INSERT, DELETE, or UPDATE.
+						// In these cases, libpq returns PGRES_COMMAND_OK (whereas SELECT statements
+						// yield PGRES_SINGLE_TUPLE or PGRES_TUPLES_OK). Therefore, it is safe to
+						// explicitly append a NoData packet to the result.
+						if (fetch_result_end_st == ASYNC_STMT_EXECUTE_END) {
+							const unsigned int bytes_recv = query_result->add_no_data();
+							update_bytes_recv(bytes_recv);
+						}
+
 						const unsigned int bytes_recv = query_result->add_command_completion(result.get());
 						update_bytes_recv(bytes_recv);
 					}

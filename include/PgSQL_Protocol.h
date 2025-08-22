@@ -502,7 +502,31 @@ public:
      */
     unsigned int add_copy_out_response_end();
 
-	unsigned int add_notice(const PGresult* result);
+    /**
+    * @brief Adds a notice message to the query result.
+    *
+    * This method adds a notice message, to the query result.
+    *
+    * The notice is copied to the internal buffer or to the `PSarrayOUT` if the buffer is full.
+    *
+    * @param result A pointer to a `PGresult` object containing the notice message to add.
+    * @return The number of bytes added to the query result.
+    *
+    */
+    unsigned int add_notice(const PGresult* result);
+
+    /**
+    * @brief Adds a "No Data" message to the query result.
+    *
+    * This method adds a "No Data" message to the query result, indicating that
+    * the executed statement does not return any rows.
+    *
+    * @return The number of bytes added to the query result.
+    *
+    * @note This method is typically used in response to DESCRIBE command that do not return data rows.
+	* 
+    */
+    unsigned int add_no_data();
 
 	/**
 	 * @brief Retrieves the query result set and copies it to a PtrSizeArray.
@@ -987,6 +1011,23 @@ public:
      * @return The number of bytes copied.
      */
     unsigned int copy_out_response_end_to_PgSQL_Query_Result(bool send, PgSQL_Query_Result* pg_query_result);
+
+    /**
+     * @brief Adds a "No Data" message to the query result.
+     *
+     * This method adds a "No Data" message to the query result, indicating that
+     * the executed statement does not return any rows.
+     *
+     * @param send A boolean flag indicating whether to send the generated packet
+     *            immediately or just generate it. (Currently not supported).
+     * @param pg_query_result A pointer to the `PgSQL_Query_Result` object where the
+     *                       "No Data" message will be added.
+     *
+     * @return The number of bytes added to the query result.
+     *
+     * @note This method is typically used in response to DESCRIBE commands that do not return data rows.
+     */
+    unsigned int copy_no_data_to_PgSQL_Query_Result(bool send, PgSQL_Query_Result* pg_query_result);
 
 private:
 

@@ -2240,6 +2240,33 @@ unsigned int PgSQL_Protocol::copy_out_response_end_to_PgSQL_Query_Result(bool se
 	return size;
 }
 
+unsigned int PgSQL_Protocol::copy_no_data_to_PgSQL_Query_Result(bool send, PgSQL_Query_Result* pg_query_result) {
+	assert(pg_query_result);
+	const unsigned int size = 1 + 4; // 'n', length
+	bool alloced_new_buffer = false;
+	unsigned char* _ptr = pg_query_result->buffer_reserve_space(size);
+	// buffer is not enough to store the new row. Remember we have already pushed data to PSarrayOUT
+	if (_ptr == NULL) {
+		_ptr = (unsigned char*)l_alloc(size);
+		alloced_new_buffer = true;
+	}
+	PG_pkt pgpkt(_ptr, size);
+	pgpkt.put_char('n');
+	pgpkt.put_uint32(size - 1); // length
+	if (send == true) {
+		// not supported
+		//(*myds)->PSarrayOUT->add((void*)_ptr, size); 
+	}
+	pg_query_result->resultset_size += size;
+	if (alloced_new_buffer) {
+		// we created new buffer
+		//pg_query_result->buffer_to_PSarrayOut();
+		pg_query_result->PSarrayOUT.add(_ptr, size);
+	}
+	pg_query_result->pkt_count++;
+	return size;
+}
+
 PgSQL_Describe_Prepared_Info::PgSQL_Describe_Prepared_Info() {
 	parameter_types = NULL;
 	parameter_types_count = 0;
@@ -2519,6 +2546,12 @@ unsigned int PgSQL_Query_Result::add_command_completion(const PGresult* result, 
 		myds->sess->CurrentQuery.affected_rows = affected_rows;
 		myds->sess->CurrentQuery.last_insert_id = 0; // not supported
 	}*/
+	return bytes;
+}
+
+unsigned int PgSQL_Query_Result::add_no_data() {
+	const unsigned int bytes = proto->copy_no_data_to_PgSQL_Query_Result(false, this);
+	//result_packet_type |= PGSQL_QUERY_RESULT_COMMAND;
 	return bytes;
 }
 
