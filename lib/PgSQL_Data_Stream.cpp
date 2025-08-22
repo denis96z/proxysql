@@ -267,8 +267,8 @@ PgSQL_Data_Stream::PgSQL_Data_Stream() {
 	CompPktOUT.pkt.ptr = NULL;
 	CompPktOUT.pkt.size = 0;
 	CompPktOUT.partial = 0;
-	multi_pkt.ptr = NULL;
-	multi_pkt.size = 0;
+	//multi_pkt.ptr = NULL;
+	//multi_pkt.size = 0;
 
 	statuses.questions = 0;
 	statuses.pgconnpoll_get = 0;
@@ -353,11 +353,11 @@ PgSQL_Data_Stream::~PgSQL_Data_Stream() {
 		}
 		if (ssl) SSL_free(ssl);
 	}
-	if (multi_pkt.ptr) {
-		l_free(multi_pkt.size, multi_pkt.ptr);
-		multi_pkt.ptr = NULL;
-		multi_pkt.size = 0;
-	}
+	//if (multi_pkt.ptr) {
+	//	l_free(multi_pkt.size, multi_pkt.ptr);
+	//	multi_pkt.ptr = NULL;
+	//	multi_pkt.size = 0;
+	//}
 	if (CompPktIN.pkt.ptr) {
 		l_free(CompPktIN.pkt.size, CompPktIN.pkt.ptr);
 		CompPktIN.pkt.ptr = NULL;

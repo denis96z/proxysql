@@ -95,7 +95,7 @@ public:
 	PgSQL_MyDS_real_query pgsql_real_query;
 	bytes_stats_t bytes_info; // bytes statistics
 
-	PtrSize_t multi_pkt;
+	//PtrSize_t multi_pkt;
 
 	unsigned long long pause_until;
 	unsigned long long wait_until;
