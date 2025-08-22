@@ -633,8 +633,19 @@ handler_again:
 			query_result->add_error(NULL);
 		}
 
+		// Normally, ReadyForQuery is not sent immediately if we are in extended query mode
+		// and there are pending messages in the queue, as it will be sent once the entire
+		// extended query frame has been processed.
+		//
+		// Edge case: if a message fails with an error while the queue still contains pending
+		// messages, the queue will be cleared later in the session. In this situation,
+		// ReadyForQuery would never be sent because the pending messages are discarded.
+		//
+		// Fix: if the result indicates an error, explicitly send ReadyForQuery immediately.
+		// The extended query flag will still be reset later in the session.
 		if (fetch_result_end_st == ASYNC_STMT_EXECUTE_END &&
-			!myds->sess->is_extended_query_frame_empty()) {
+			!myds->sess->is_extended_query_frame_empty() &&
+			((query_result->get_result_packet_type() & PGSQL_QUERY_RESULT_ERROR) == 0)) {
 			// Skip sending ReadyForQuery if there are still extended query messages pending in the queue
 			NEXT_IMMEDIATE(fetch_result_end_st);
 		}
