@@ -3085,7 +3085,9 @@ void test_insert_command_complete() {
 
 		conn->readMessage(type, buf);
 		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for CREATE TEMP TABLE");
-
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::NO_DATA, "NoData for CREATE TEMP TABLE");
+		
 		conn->readMessage(type, buf);
 		ok(type == PgConnection::COMMAND_COMPLETE,
 			"CommandComplete for CREATE TEMP TABLE");
@@ -3111,6 +3113,9 @@ void test_insert_command_complete() {
 
 		conn->readMessage(type, buf);
 		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for INSERT");
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::NO_DATA, "NoData for INSERT");
 
 		conn->readMessage(type, buf);
 		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for INSERT");
@@ -3640,6 +3645,96 @@ void test_deallocate_non_existent_stmt() {
 	}
 }
 
+void test_describe_portal_returns_no_data() {
+	diag("Test %d: Extended Query - Describe Returns No Data", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	if (!conn) return;
+	try {
+		conn->execute("CREATE TEMP TABLE test_describe (id integer)");
+		conn->waitForReady();
+
+		conn->prepareStatement("describe_no_data_stmt", "INSERT INTO test_describe VALUES (42)", false);
+		conn->bindStatement("describe_no_data_stmt", "", {}, {}, false);
+		conn->describePortal("", false);
+		conn->executeStatement(0, false);
+		conn->sendSync();
+
+		char type;
+		std::vector<uint8_t> buffer;
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete was received for describe no data statement");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete was received for describe no data statement");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::NO_DATA, "NoData was received for describe no data statement");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete was received for describe no data statement");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query after describe no data statement");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query Describe Returns No Data failed with error:%s", e.what());
+	}
+}
+
+void test_multiple_parse_bind_describe_execute_fail() {
+	diag("Test %d: Extended Query - Multiple Parse/Bind/Describe/Execute Fail", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	if (!conn) return;
+	try {
+		// Prepare a valid statement
+		conn->prepareStatement("multi_stmt", "SELECT 1", false);
+		conn->bindStatement("multi_stmt", "", {}, {}, false);
+		conn->describePortal("", false);
+		conn->executeStatement(0, false);
+		conn->prepareStatement("multi_stmt2", "SELECT 1/0", false);
+		conn->bindStatement("multi_stmt2", "", {}, {}, false);
+		conn->describePortal("", false);
+		conn->executeStatement(0, false);
+		conn->prepareStatement("multi_stmt3", "SELECT 2", false);
+		conn->bindStatement("multi_stmt3", "", {}, {}, false);
+		conn->describePortal("", false);
+		conn->executeStatement(0, false);
+		conn->sendSync();
+		char type;
+		std::vector<uint8_t> buffer;
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete was received for multi_stmt");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete was received for multi_stmt");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::ROW_DESCRIPTION, "RowDescription was received for multi_stmt");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::DATA_ROW, "DataRow was received for multi_stmt");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete was received for multi_stmt");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete was received for multi_stmt2");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete was received for multi_stmt2");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::ERROR_RESPONSE, "ErrorResponse was received for multi_stmt2");
+		std::string errormsg;
+		std::string errorcode;
+		if (type == PgConnection::ERROR_RESPONSE) {
+			BufferReader reader(buffer);
+			char field;
+			while (reader.remaining() > 0 && (field = reader.readByte()) != 0) {
+				if (field == 'M') errormsg = reader.readString();
+				else if (field == 'C') errorcode = reader.readString();
+				else reader.readString();
+			}
+		}
+		ok(errorcode == "22012", "Received ERRCODE_DIVISION_BY_ZERO Error:%s", errormsg.c_str());
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query after multi_stmt2 error");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query Multiple Parse/Bind/Describe/Execute Fail failed with error:%s", e.what());
+	}
+}
+
 /*
 void test_update_delete_commands_extended() {
 	diag("Test %d: Extended Query UPDATE and DELETE tags", test_count++);
@@ -3835,7 +3930,7 @@ int main(int argc, char** argv) {
 		return exit_status();
 	}
 
-	plan(411); // Adjust based on number of tests
+	plan(428); // Adjust based on number of tests
 
 	auto admin_conn = createNewConnection(ConnType::ADMIN, "", false);
 
@@ -3909,11 +4004,12 @@ int main(int argc, char** argv) {
 		test_close_portal();   
 		test_portal_lifecycle(); 
 		test_describe_closed_portal();    
+		test_describe_portal_returns_no_data();
 
 		// random tests
 		test_libpq_style_execute();       
 		test_multiple_execute_on_single_bind(); 
-
+		test_multiple_parse_bind_describe_execute_fail();
 		test_insert_command_complete();
 		test_parse_with_param_type();
 
