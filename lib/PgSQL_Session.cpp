@@ -1938,6 +1938,29 @@ int PgSQL_Session::get_pkts_from_client(bool& wrong_pass, PtrSize_t& pkt) {
 	//     process mirror only status==WAITING_CLIENT_DATA
 	for (unsigned int j = 0; j < (client_myds->PSarrayIN ? client_myds->PSarrayIN->len : 0) || (mirror == true && status == WAITING_CLIENT_DATA);) {
 		
+		if (session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
+			// If the client sends a new packet while a query is still executing,
+			// we no longer treat this as an error. Previously, such packets were
+			// considered unexpected and the session was terminated.
+			// This often occurs with pgJDBC, which may pipeline commands
+			// (e.g., sending "BEGIN" immediately followed by another statement).
+			// Now the new packet is kept in the queue (FIFO) and processed only
+			// after the current query finishes and its response is sent.
+			// This preserves correct ordering and ensures only one query is
+			// active at a time, with no client-side changes required.
+			switch (status) {
+			case WAITING_CLIENT_DATA:
+			case CONNECTING_CLIENT:
+				break; // allowed states
+			default:
+				proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5,
+					"Session=%p , client_myds=%p . Deferring packet from client while session is in status %d\n",
+					this, client_myds, status);
+				handler_ret = 0;
+				return handler_ret;
+			}
+		}
+
 		if (mirror == false) {
 			client_myds->PSarrayIN->remove_index(0, &pkt);
 		}
@@ -2660,6 +2683,7 @@ int PgSQL_Session::handler() {
 	if (!hgs_expired_conns.empty())
 		housekeeping_before_pkts();
 
+__handler_again_get_pkts_from_client:
 	handler_ret = get_pkts_from_client(wrong_pass, pkt);
 	if (handler_ret != 0) {
 		return handler_ret;
@@ -2678,7 +2702,7 @@ handler_again:
 		}
 
 		// Extended query synchronization complete; clean up and prepare for next command
-		if (rc == 0){
+		if (rc == 0) {
 			if (extended_query_frame.empty() == false) {
 				writeout();
 				NEXT_IMMEDIATE(PROCESSING_EXTENDED_QUERY_SYNC);
@@ -2700,6 +2724,7 @@ handler_again:
 				}
 			}
 		}
+
 		goto handler_again;
 	}
 		break;
@@ -3135,7 +3160,6 @@ handler_again:
 
 __exit_DSS__STATE_NOT_INITIALIZED:
 
-
 	if (mybe && mybe->server_myds) {
 		if (mybe->server_myds->DSS > STATE_MARIADB_BEGIN && mybe->server_myds->DSS < STATE_MARIADB_END) {
 #ifdef DEBUG
@@ -3154,6 +3178,18 @@ __exit_DSS__STATE_NOT_INITIALIZED:
 		handler_ret = -1;
 		return handler_ret;
 	}
+
+	// previously active query has been fully processed and its response has been sent to the client.
+	// At this point, check whether deferred packets from the client exist in PSarrayIN.
+	// If so, control is redirected to get_pkts_from_client() to process them.
+	if (status == WAITING_CLIENT_DATA) {
+		if (client_myds->PSarrayIN && client_myds->PSarrayIN->len) {
+			proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5, "Session %p client_myds %p . Client PSarrayIN has '%d' deferred packets, redirecting to get_pkts_from_client()\n",
+				client_myds, this, client_myds->PSarrayIN->len);
+			goto __handler_again_get_pkts_from_client;
+		}
+	}
+
 	handler_ret = 0;
 	return handler_ret;
 }
