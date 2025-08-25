@@ -218,6 +218,7 @@ void PgSQL_Query_Info::reset_extended_query_info() {
 	extended_query_info.stmt_global_id = 0;
 	extended_query_info.stmt_backend_id = 0;
 	extended_query_info.stmt_type = 'S';
+	extended_query_info.flags = PGSQL_EXTENDED_QUERY_FLAG_NONE;
 	extended_query_info.parse_param_types.clear();
 }
 
@@ -5634,11 +5635,17 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 		}
 
 		if (extended_query_frame.empty() == false) {
-			// Peeking next message in the extended query frame
-			// Assuming the client follows correct Bind/Describe/Execute order,
-			// we can skip this Describe message, as libpq's PQsendQueryPrepared already sends it.
-			if (std::holds_alternative<std::unique_ptr<PgSQL_Execute_Message>>(extended_query_frame.front())) {
-				return 0; 
+			// Peek at the next message in the extended query frame.
+			// If the client explicitly sent a Describe followed by Execute,
+			// we can skip re-executing Describe (to avoid redundancy, since libpq’s
+			// PQsendQueryPrepared always emits Bind/Describe Portal/Execute in order) and
+			// include its RowDescription once in the result set.
+			// If the client did not send a Describe, we must NOT include a RowDescription.
+			if (auto* execute_msg = std::get_if<std::unique_ptr<PgSQL_Execute_Message>>(&extended_query_frame.front())) {
+				if (*execute_msg) {
+					(*execute_msg)->send_describe_portal_result = true;
+					return 0;
+				}
 			}
 		}
 
@@ -5955,6 +5962,8 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 	extended_query_info.stmt_global_id = stmt_global_id;
 	extended_query_info.stmt_info = stmt_info;
 	extended_query_info.bind_msg = bind_waiting_for_execute.get();
+	extended_query_info.flags |= execute_msg->send_describe_portal_result ? 
+		PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL : PGSQL_EXTENDED_QUERY_FLAG_NONE;
 	CurrentQuery.start_time = thread->curtime;
 
 	timespec begint;

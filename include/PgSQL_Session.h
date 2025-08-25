@@ -138,6 +138,11 @@ public:
 class PgSQL_STMT_Global_info;
 using Parse_Param_Types = std::vector<uint32_t>; // Vector of parameter types for prepared statements
 
+enum PgSQL_Extended_Query_Flags : uint8_t {
+	PGSQL_EXTENDED_QUERY_FLAG_NONE				= 0x00,
+	PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL	= 0x01
+};
+
 struct PgSQL_Extended_Query_Info {
 	const char* stmt_client_name;
 	const char* stmt_client_portal_name;
@@ -146,6 +151,7 @@ struct PgSQL_Extended_Query_Info {
 	uint64_t stmt_global_id;
 	uint32_t stmt_backend_id;
 	uint8_t stmt_type;
+	uint8_t flags;
 	Parse_Param_Types parse_param_types;
 };
 

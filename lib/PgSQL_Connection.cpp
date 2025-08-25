@@ -564,8 +564,22 @@ handler_again:
 				}
 
 				if (new_result == true) {
-					const unsigned int bytes_recv = query_result->add_row_description(result.get());
-					update_bytes_recv(bytes_recv);
+					bool should_add_row_description = true;
+
+					// In extended query mode, we should add RowDescription only if the DESCRIBE PORTAL message was sent
+					// before the EXECUTE message.
+					if (fetch_result_end_st == ASYNC_STMT_EXECUTE_END) {
+						should_add_row_description =
+							(query.extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0;
+					}
+
+					if (should_add_row_description) {
+						const auto bytes_recv = query_result->add_row_description(result.get());
+						update_bytes_recv(bytes_recv);
+					} else {
+						query_result->num_fields = PQnfields(result.get());
+					}
+
 					new_result = false;
 				}
 
