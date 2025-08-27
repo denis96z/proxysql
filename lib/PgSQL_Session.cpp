@@ -2939,13 +2939,29 @@ handler_again:
 					}
 				}
 			}
-			// Swtich to fast forward mode if the query matches copy ... stdin command
-			re2::StringPiece matched;
-			const char* query_to_match = (CurrentQuery.get_digest_text() ? CurrentQuery.get_digest_text() : (char*)CurrentQuery.QueryPointer);
-			if (copy_cmd_matcher->match(query_to_match, &matched)) {
-				switch_normal_to_fast_forward_mode(pkt, std::string(matched.data(), matched.size()), SESSION_FORWARD_TYPE_COPY_FROM_STDIN_STDOUT);
-				break;
-			}
+			if (status == PROCESSING_QUERY || status == PROCESSING_STMT_PREPARE) {
+				// Swtich to fast forward mode if the query matches copy ... stdin command
+				re2::StringPiece matched;
+				const char* query_to_match = (CurrentQuery.get_digest_text() ? CurrentQuery.get_digest_text() : (char*)CurrentQuery.QueryPointer);
+				if (copy_cmd_matcher->match(query_to_match, &matched)) {
+
+					if (status == PROCESSING_STMT_PREPARE) {
+						reset_extended_query_frame();
+						proxy_error("'%s' command is not supported in Extended Query protocol mode. Use Simple Query mode to run this command\n",
+							query_to_match ? query_to_match : "");
+						client_myds->setDSS_STATE_QUERY_SENT_NET();
+						client_myds->myprot.generate_error_packet(true, true, "Feature not supported", PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED,
+							false, true);
+						RequestEnd(myds);
+						finishQuery(myds, myconn, false);
+						goto __exit_DSS__STATE_NOT_INITIALIZED;
+					}
+
+					switch_normal_to_fast_forward_mode(pkt , std::string(matched.data(), matched.size()), SESSION_FORWARD_TYPE_COPY_FROM_STDIN_STDOUT);
+					break;
+				}
+			} 
+
 			if (myconn->async_state_machine == ASYNC_IDLE) {
 				SetQueryTimeout();
 			}
