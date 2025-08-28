@@ -3377,7 +3377,8 @@ bool PgSQL_Thread::process_data_on_data_stream(PgSQL_Data_Stream * myds, unsigne
 			//
 			// this can happen, for example, with a low wait_timeout and running transaction
 			if (myds->sess->status == WAITING_CLIENT_DATA) {
-				if (myds->myconn->async_state_machine == ASYNC_IDLE) {
+				if (myds->myconn->async_state_machine == ASYNC_IDLE &&
+					myds->myconn->get_status(STATUS_PGSQL_CONNECTION_HAS_LISTEN) == false) {
 					proxy_warning("Detected broken idle connection on %s:%d\n", myds->myconn->parent->address, myds->myconn->parent->port);
 					myds->destroy_MySQL_Connection_From_Pool(false);
 					myds->sess->set_unhealthy();
@@ -3736,7 +3737,7 @@ void PgSQL_Thread::process_all_sessions() {
 }
 
 void PgSQL_Thread::refresh_variables() {
-	pthread_mutex_lock(&GloVars.global.ext_glomth_mutex);
+	pthread_mutex_lock(&GloVars.global.ext_glopth_mutex);
 	if (GloPTH == NULL) {
 		return;
 	}
@@ -3981,7 +3982,7 @@ void PgSQL_Thread::refresh_variables() {
 #endif // DEBUG
 */
 	GloPTH->wrunlock();
-	pthread_mutex_unlock(&GloVars.global.ext_glomth_mutex);
+	pthread_mutex_unlock(&GloVars.global.ext_glopth_mutex);
 }
 
 PgSQL_Thread::PgSQL_Thread() {

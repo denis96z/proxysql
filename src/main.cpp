@@ -1250,6 +1250,16 @@ void ProxySQL_Main_shutdown_all_modules() {
 		std::cerr << "GloMTH shutdown in ";
 #endif
 	}
+	if (GloPTH) {
+		cpu_timer t;
+		pthread_mutex_lock(&GloVars.global.ext_glopth_mutex);
+		delete GloPTH;
+		GloPTH = NULL;
+		pthread_mutex_unlock(&GloVars.global.ext_glopth_mutex);
+#ifdef DEBUG
+		std::cerr << "GloPTH shutdown in ";
+#endif
+	}
 	if (GloMyLogger) {
 		cpu_timer t;
 		delete GloMyLogger;
@@ -1283,6 +1293,14 @@ void ProxySQL_Main_shutdown_all_modules() {
 		delete MyHGM;
 #ifdef DEBUG
 		std::cerr << "GloHGM shutdown in ";
+#endif
+	}
+	{
+		cpu_timer t;
+		PgHGM->shutdown();
+		delete PgHGM;
+#ifdef DEBUG
+		std::cerr << "GloPGM shutdown in ";
 #endif
 	}
 	if (GloMyStmt) {
