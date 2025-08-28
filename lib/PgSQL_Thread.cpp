@@ -3736,7 +3736,7 @@ void PgSQL_Thread::process_all_sessions() {
 }
 
 void PgSQL_Thread::refresh_variables() {
-	pthread_mutex_lock(&GloVars.global.ext_glomth_mutex);
+	pthread_mutex_lock(&GloVars.global.ext_glopth_mutex);
 	if (GloPTH == NULL) {
 		return;
 	}
@@ -3981,7 +3981,7 @@ void PgSQL_Thread::refresh_variables() {
 #endif // DEBUG
 */
 	GloPTH->wrunlock();
-	pthread_mutex_unlock(&GloVars.global.ext_glomth_mutex);
+	pthread_mutex_unlock(&GloVars.global.ext_glopth_mutex);
 }
 
 PgSQL_Thread::PgSQL_Thread() {

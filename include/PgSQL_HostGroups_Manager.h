@@ -557,12 +557,6 @@ class PgSQL_HostGroups_Manager : public Base_HostGroups_Manager<PgSQL_HGC> {
 
 	SQLite3_result* incoming_pgsql_servers_v2;
 
-	std::thread *HGCU_thread;
-
-	std::thread *GTID_syncer_thread;
-	//pthread_t GTID_syncer_thread_id;
-	//pthread_t HGCU_thread_id;
-
 	char rand_del[8];
 	pthread_mutex_t pgsql_errors_mutex;
 	umap_pgsql_errors pgsql_errors_umap;

@@ -740,19 +740,11 @@ PgSQL_HostGroups_Manager::PgSQL_HostGroups_Manager() {
 }
 
 void PgSQL_HostGroups_Manager::init() {
-	// gtid initialization;
-	//GTID_syncer_thread = new std::thread(&GTID_syncer_run);
-	GTID_syncer_thread = nullptr;
-
-	//pthread_create(&GTID_syncer_thread_id, NULL, GTID_syncer_run , NULL);
+	// do nothing here
 }
 
 void PgSQL_HostGroups_Manager::shutdown() {
-	HGCU_thread->join();
-	delete HGCU_thread;
-	ev_async_send(gtid_ev_loop, gtid_ev_async);
-	GTID_syncer_thread->join();
-	delete GTID_syncer_thread;
+	// do nothing here
 }
 
 PgSQL_HostGroups_Manager::~PgSQL_HostGroups_Manager() {
