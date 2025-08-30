@@ -414,7 +414,6 @@ public:
 	std::stack<enum session_status> previous_status;
 
 	PgSQL_Query_Info CurrentQuery;
-	PtrSize_t mirrorPkt;
 	PtrSize_t pkt;
 	std::string untracked_option_parameters;
 	PgSQL_DateStyle_t current_datestyle = {};
@@ -577,6 +576,8 @@ public:
 	void detected_broken_connection(const char* file, unsigned int line, const char* func, const char* action, PgSQL_Connection* myconn, bool verbose = false);
 	void generate_status_one_hostgroup(int hid, std::string& s);
 	void set_previous_status_mode3(bool allow_execute = true);
+
+	friend class Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread>;
 };
 
 

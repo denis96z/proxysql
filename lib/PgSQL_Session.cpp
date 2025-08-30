@@ -394,8 +394,6 @@ PgSQL_Session::PgSQL_Session() {
 	to_process = 0;
 	mybe = NULL;
 	mirror = false;
-	mirrorPkt.ptr = NULL;
-	mirrorPkt.size = 0;
 	set_status(session_status___NONE);
 
 	idle_since = 0;
@@ -929,9 +927,6 @@ void PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				newsess->default_schema = strdup(default_schema);
 			}
 		}
-		newsess->mirrorPkt.size = pkt.size;
-		newsess->mirrorPkt.ptr = l_alloc(newsess->mirrorPkt.size);
-		memcpy(newsess->mirrorPkt.ptr, pkt.ptr, pkt.size);
 
 		if (thread->mirror_queue_mysql_sessions->len == 0) {
 			// there are no sessions in the queue, we try to execute immediately
@@ -2666,17 +2661,10 @@ int PgSQL_Session::handler() {
 		}
 		else {
 			if (mirror == true) {
-				if (mirrorPkt.ptr) { // this is the first time we call handler()
-					pkt.ptr = mirrorPkt.ptr;
-					pkt.size = mirrorPkt.size;
-					mirrorPkt.ptr = NULL; // this will prevent the copy to happen again
-				}
-				else {
-					if (status == WAITING_CLIENT_DATA) {
-						// we are being called a second time with WAITING_CLIENT_DATA
-						handler_ret = 0;
-						return handler_ret;
-					}
+				if (status == WAITING_CLIENT_DATA) {
+					// we are being called a second time with WAITING_CLIENT_DATA
+					handler_ret = 0;
+					return handler_ret;
 				}
 			}
 		}
@@ -5410,7 +5398,7 @@ void PgSQL_Session::switch_normal_to_fast_forward_mode(PtrSize_t& pkt, std::stri
 		}
 	}
 	set_status(FAST_FORWARD); // we can set status to FAST_FORWARD
-	//client_myds->PSarrayIN->add(pkt.ptr, pkt.size);
+
 	mybe->server_myds->PSarrayOUT->add(pkt.ptr, pkt.size);
 
 	// as we are in FAST_FORWARD mode, we directly send the packet to the backend.
