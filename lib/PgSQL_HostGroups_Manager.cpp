@@ -740,11 +740,11 @@ PgSQL_HostGroups_Manager::PgSQL_HostGroups_Manager() {
 }
 
 void PgSQL_HostGroups_Manager::init() {
-
+	// do nothing here
 }
 
 void PgSQL_HostGroups_Manager::shutdown() {
-
+	// do nothing here
 }
 
 PgSQL_HostGroups_Manager::~PgSQL_HostGroups_Manager() {

@@ -425,6 +425,7 @@ class ProxySQL_Admin {
 	void disk_upgrade_mysql_users();
 	void disk_upgrade_scheduler();
 	void disk_upgrade_rest_api_routes();
+	void disk_upgrade_pgsql_replication_hostgroups();
 
 #ifdef DEBUG
 	template<enum SERVER_TYPE>

@@ -727,6 +727,9 @@ bool ProxySQL_Admin::init(const bootstrap_info_t& bootstrap_info) {
 	// upgrade restapi_routes if needed (upgrade from previous version)
 	disk_upgrade_rest_api_routes();
 
+	// upgrade pgsql_replication_hostgroups if needed (upgrade from previous version)
+	disk_upgrade_pgsql_replication_hostgroups();
+
 	check_and_build_standard_tables(admindb, tables_defs_admin);
 	check_and_build_standard_tables(configdb, tables_defs_config);
 	check_and_build_standard_tables(statsdb, tables_defs_stats);
