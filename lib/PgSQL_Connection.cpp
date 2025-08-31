@@ -2052,7 +2052,7 @@ void PgSQL_Connection::unhandled_notice_cb(void* arg, const PGresult* result) {
 #endif
 }
 
-void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text, int savepoint_count) {
+void PgSQL_Connection::ProcessQueryAndSetStatusFlags(const char* query_digest_text, int savepoint_count) {
 	if (query_digest_text == NULL) return;
 	// unknown what to do with multiplex
 	int mul = -1;
@@ -2210,7 +2210,7 @@ void PgSQL_Connection::ProcessQueryAndSetStatusFlags(char* query_digest_text, in
 	}
 }
 
-// this function is identical to async_query() , with the only exception that MyRS should never be set
+// this function is identical to async_query() , with the only exception that query_result should never contain PGSQL_QUERY_RESULT_TUPLE
 int PgSQL_Connection::async_send_simple_command(short event, char* stmt, unsigned long length) {
 	PROXY_TRACE();
 	PROXY_TRACE2();
@@ -2388,7 +2388,7 @@ void PgSQL_Connection::set_query(const char* stmt, unsigned long length, const c
 	query.extended_query_info = extended_query_info;
 }
 
-bool PgSQL_Connection::IsKeepMultiplexEnabledVariables(char* query_digest_text) {
+bool PgSQL_Connection::IsKeepMultiplexEnabledVariables(const char* query_digest_text) {
 
 	return true;
 	/* TODO: fix this

@@ -319,15 +319,8 @@ PgSQL_Data_Stream::~PgSQL_Data_Stream() {
 		}
 		delete PSarrayOUT;
 	}
-	/*if (resultset) {
-		while (resultset->len) {
-			resultset->remove_index_fast(0, &pkt);
-			l_free(pkt.size, pkt.ptr);
-		}
-		delete resultset;
-	}*/
-	if (mypolls) mypolls->remove_index_fast(poll_fds_idx);
 
+	if (mypolls) mypolls->remove_index_fast(poll_fds_idx);
 
 	if (fd > 0) {
 		//	// Changing logic here. The socket should be closed only if it is not a backend

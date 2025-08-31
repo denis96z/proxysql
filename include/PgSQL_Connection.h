@@ -442,7 +442,7 @@ public:
 	bool set_single_row_mode();
 	void update_bytes_recv(uint64_t bytes_recv);
 	void update_bytes_sent(uint64_t bytes_sent);
-	void ProcessQueryAndSetStatusFlags(char* query_digest_text, int savepoint_count);
+	void ProcessQueryAndSetStatusFlags(const char* query_digest_text, int savepoint_count);
 
 	inline const PGconn* get_pg_connection() const { return pgsql_conn; }
 	inline int get_pg_server_version() { return PQserverVersion(pgsql_conn); }
@@ -501,7 +501,7 @@ public:
 	void set_query(const char* stmt, unsigned long length, const char* _backend_stmt_name = nullptr, const PgSQL_Extended_Query_Info* extended_query_info = nullptr);
 	void reset();
 
-	bool IsKeepMultiplexEnabledVariables(char* query_digest_text);
+	bool IsKeepMultiplexEnabledVariables(const char* query_digest_text);
 
 	/**
 	 * @brief Retrieves startup parameter and it's hash
