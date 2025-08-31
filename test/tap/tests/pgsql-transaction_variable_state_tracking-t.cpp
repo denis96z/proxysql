@@ -277,6 +277,178 @@ int main(int argc, char** argv) {
         return success;
         });
 
+    add_test("Prepared ROLLBACK statement", [&]() {
+        auto conn = createNewConnection(ConnType::BACKEND, "", false);
+
+        executeQuery(conn.get(), "SET client_encoding = 'LATIN1'");
+        const auto original = getVariable(conn.get(), "client_encoding");
+
+        executeQuery(conn.get(), "BEGIN");
+        executeQuery(conn.get(), "SET client_encoding = 'UTF8'");
+
+        {
+            diag(">>> Create Prepared Statement [stmt_client_encoding]: ROLLBACK");
+            PGResultPtr res(PQprepare(conn.get(), "stmt_client_encoding", "ROLLBACK", 0, NULL), &PQclear);
+            if (PQresultStatus(res.get()) != PGRES_COMMAND_OK) {
+                diag("Prepare failed: %s", PQerrorMessage(conn.get()));
+                return false;
+            }
+        }
+
+        bool success = getVariable(conn.get(), "client_encoding") == "UTF8";
+
+        if (!success) {
+            diag("client_encoding not set to UTF8 as expected");
+            return false;
+		}
+
+        {
+            diag(">>> Executing Prepared Statement [stmt_client_encoding]: ROLLBACK");
+			PGResultPtr res(PQexecPrepared(conn.get(), "stmt_client_encoding", 0, NULL, NULL, NULL, 0), &PQclear);
+            if (PQresultStatus(res.get()) != PGRES_COMMAND_OK) {
+                diag("Execute failed: %s", PQerrorMessage(conn.get()));
+                return false;
+            }
+        }
+
+        success = getVariable(conn.get(), "client_encoding") == original;
+        if (!success) {
+            diag("client_encoding not restored after ROLLBACK");
+            return false;
+        }
+
+        return success;
+	});
+
+    add_test("Prepared ROLLBACK statement 2", [&]() {
+        auto conn = createNewConnection(ConnType::BACKEND, "", false);
+
+        executeQuery(conn.get(), "SET standard_conforming_strings = off");
+        const auto original = getVariable(conn.get(), "standard_conforming_strings");
+
+        executeQuery(conn.get(), "BEGIN");
+        executeQuery(conn.get(), "SET standard_conforming_strings = on");
+
+        {
+            diag(">>> Create Prepared Statement [stmt_standard_conforming_strings]: ROLLBACK");
+            PGResultPtr res(PQprepare(conn.get(), "stmt_standard_conforming_strings", "ROLLBACK", 0, NULL), &PQclear);
+            if (PQresultStatus(res.get()) != PGRES_COMMAND_OK) {
+                diag("Prepare failed: %s", PQerrorMessage(conn.get()));
+                return false;
+            }
+        }
+
+        bool success = getVariable(conn.get(), "standard_conforming_strings") == "on";
+
+        if (!success) {
+            diag("standard_conforming_strings not set to 'on' as expected");
+            return false;
+        }
+
+        {
+            diag(">>> Executing Prepared Statement [stmt_standard_conforming_strings]: ROLLBACK");
+            PGResultPtr res(PQexecPrepared(conn.get(), "stmt_standard_conforming_strings", 0, NULL, NULL, NULL, 0), &PQclear);
+            if (PQresultStatus(res.get()) != PGRES_COMMAND_OK) {
+                diag("Execute failed: %s", PQerrorMessage(conn.get()));
+                return false;
+            }
+        }
+
+        success = getVariable(conn.get(), "standard_conforming_strings") == original;
+        if (!success) {
+            diag("standard_conforming_strings not restored after ROLLBACK");
+            return false;
+        }
+
+        return success;
+        });
+
+    add_test("Prepared ROLLBACK TO SAVEPOINT statement", [&]() {
+        auto conn = createNewConnection(ConnType::BACKEND, "", false);
+        const auto original = getVariable(conn.get(), "client_encoding");
+
+        executeQuery(conn.get(), "BEGIN");
+        executeQuery(conn.get(), "SET client_encoding = 'UTF8'");
+        executeQuery(conn.get(), "SAVEPOINT sp1");
+        executeQuery(conn.get(), "SET client_encoding = 'LATIN1'");
+
+        {
+			diag(">>> Create Prepared Statement [stmt_rollback_sp]: ROLLBACK TO SAVEPOINT sp1");
+            PGResultPtr res(PQprepare(conn.get(), "stmt_rollback_sp", "ROLLBACK TO SAVEPOINT sp1", 0, NULL), &PQclear);
+            if (PQresultStatus(res.get()) != PGRES_COMMAND_OK) {
+                diag("Prepare failed: %s", PQerrorMessage(conn.get()));
+                return false;
+            }
+        }
+
+        // Before executing prepared rollback, client_encoding should be 'LATIN1'
+        bool success = getVariable(conn.get(), "client_encoding") == "LATIN1";
+        if (!success) {
+            diag("client_encoding not changed to 'LATIN1' before rollback");
+            return false;
+        }
+
+        {
+			diag(">>> Executing Prepared Statement [stmt_rollback_sp]: ROLLBACK TO SAVEPOINT sp1");
+            PGResultPtr res(PQexecPrepared(conn.get(), "stmt_rollback_sp", 0, NULL, NULL, NULL, 0), &PQclear);
+            if (PQresultStatus(res.get()) != PGRES_COMMAND_OK) {
+                diag("Execute failed: %s", PQerrorMessage(conn.get()));
+                return false;
+            }
+        }
+
+        success = getVariable(conn.get(), "client_encoding") == original;
+        if (!success) {
+            diag("client_encoding not restored after ROLLBACK TO SAVEPOINT");
+            return false;
+        }
+
+        return true;
+        });
+    
+    add_test("Prepared ROLLBACK TO SAVEPOINT statement 2", [&]() {
+        auto conn = createNewConnection(ConnType::BACKEND, "", false);
+        const auto original = getVariable(conn.get(), "standard_conforming_strings");
+
+        executeQuery(conn.get(), "BEGIN");
+        executeQuery(conn.get(), "SET standard_conforming_strings = on");
+        executeQuery(conn.get(), "SAVEPOINT sp1");
+        executeQuery(conn.get(), "SET standard_conforming_strings = off");
+
+        {
+            diag(">>> Create Prepared Statement [stmt_rollback_sp2]: ROLLBACK TO SAVEPOINT sp1");
+            PGResultPtr res(PQprepare(conn.get(), "stmt_rollback_sp2", "ROLLBACK TO SAVEPOINT sp1", 0, NULL), &PQclear);
+            if (PQresultStatus(res.get()) != PGRES_COMMAND_OK) {
+                diag("Prepare failed: %s", PQerrorMessage(conn.get()));
+                return false;
+            }
+        }
+
+        // Before executing prepared rollback, client_encoding should be 'off'
+        bool success = getVariable(conn.get(), "standard_conforming_strings") == "off";
+        if (!success) {
+            diag("standard_conforming_strings not changed to 'off' before rollback");
+            return false;
+        }
+
+        {
+            diag(">>> Executing Prepared Statement [stmt_rollback_sp2]: ROLLBACK TO SAVEPOINT sp1");
+            PGResultPtr res(PQexecPrepared(conn.get(), "stmt_rollback_sp2", 0, NULL, NULL, NULL, 0), &PQclear);
+            if (PQresultStatus(res.get()) != PGRES_COMMAND_OK) {
+                diag("Execute failed: %s", PQerrorMessage(conn.get()));
+                return false;
+            }
+        }
+
+        success = getVariable(conn.get(), "standard_conforming_strings") == original;
+        if (!success) {
+            diag("standard_conforming_strings not restored after ROLLBACK TO SAVEPOINT");
+            return false;
+        }
+   
+        return true;
+        });
+
     int total_tests = 0;
 
     total_tests = tests.size();
