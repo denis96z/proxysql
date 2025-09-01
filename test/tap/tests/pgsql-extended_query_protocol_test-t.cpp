@@ -539,87 +539,145 @@ void test_empty_stmt() {
 }
 
 void test_prepare_statement_mix() {
-	diag("Test %d: Prepare statement + Query", test_count++);
+	diag("Test %d: Prepare statement + Simple Query", test_count++);
 	auto conn = create_connection();
 	if (!conn) return;
 
 	try {
 		conn->prepareStatement("test_stmt_mix", "SELECT 1", false);
-
 		conn->sendQuery("SELECT 2");
 		
 		char type;
-		int parse_count = 0;
-		int row_desc_count = 0;
-		int row_data_count = 0;
-		int command_completion_count = 0;
-		int other_count = 0;
-		bool got_ready = false;
+		std::vector<uint8_t> buffer;
 
-		while (!got_ready) {
-			std::vector<uint8_t> buffer;
-			conn->readMessage(type, buffer);
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::PARSE_COMPLETE, "Received parse complete for prepared statement");
 
-			if (type == PgConnection::PARSE_COMPLETE) {
-				parse_count++;
-			} else if (type == PgConnection::ROW_DESCRIPTION) {
-				row_desc_count++;
-			} else if (type == PgConnection::DATA_ROW) {
-				row_data_count++;
-			} else if (type == PgConnection::COMMAND_COMPLETE) {
-				command_completion_count++;
-			} else if (type == PgConnection::READY_FOR_QUERY) {
-				got_ready = true;
-			} else {
-				other_count++;
-			}
-		}
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::ROW_DESCRIPTION, "Received row description for query");
 
-		ok(parse_count == 1, "Received parse complete for prepared statement (%d/1)", parse_count);
-		ok(row_desc_count == 1, "Received row description for query (%d/1)", row_desc_count);
-		ok(row_data_count == 1, "Received row data for query (%d/1)", row_data_count);
-		ok(command_completion_count == 1, "Received command completion for query (%d/1)", command_completion_count);
-		ok(got_ready, "Received ready for query");
-		ok(other_count == 0, "No other messages received (%d)", other_count);
-		
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::DATA_ROW, "Received row data for query");
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::COMMAND_COMPLETE, "Received command completion for query");
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query");
+
 		// Now send sync
 		conn->sendSync();
 
 		// Should get ready for query
-		got_ready = false;
-		parse_count = 0;
-		row_desc_count = 0;
-		row_data_count = 0;
-		command_completion_count = 0;
-		other_count = 0;
-
-		while (!got_ready) {
-			std::vector<uint8_t> buffer;
-			conn->readMessage(type, buffer);
-			if (type == PgConnection::PARSE_COMPLETE) {
-				parse_count++;
-			} else if (type == PgConnection::ROW_DESCRIPTION) {
-				row_desc_count++;
-			} else if (type == PgConnection::DATA_ROW) {
-				row_data_count++;
-			} else if (type == PgConnection::COMMAND_COMPLETE) {
-				command_completion_count++;
-			} else if (type == PgConnection::READY_FOR_QUERY) {
-				got_ready = true;
-			} else {
-				other_count++;
-			}
-		}
-		// After sync, we should not receive any parse, row description, row data or command completion
-		ok(parse_count == 0, "No parse complete after sync (%d/0)", parse_count);
-		ok(row_desc_count == 0, "No row description after sync (%d/0)", row_desc_count);
-		ok(row_data_count == 0, "No row data after sync (%d/0)", row_data_count);
-		ok(command_completion_count == 0, "No command completion after sync (%d/0)", command_completion_count);
-		ok(got_ready, "Received ready for query after sync");
-		ok(other_count == 0, "No other messages received after sync (%d)", other_count);
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query after sync");
 	}
 	catch (const PgException& e) {
-		ok(false, " Prepare statement + Query failed with error: %s", e.what());
+		ok(false, "Prepare statement + Simple Query failed with error: %s", e.what());
+	}
+}
+
+void test_extended_query_prepared_describe_execute_simple_query_without_sync() {
+	diag("Test %d: Extended Query (Prepare, Describe, Execute) + Simple Query without sync", test_count++);
+	auto conn = create_connection();
+	if (!conn) return;
+	try {
+		// Prepare without sync
+		conn->prepareStatement("test_stmt_eq", "SELECT $1::int + 1", false);
+		conn->describeStatement("test_stmt_eq", false);
+		PgConnection::Param param = { "41", 0 };
+		conn->bindStatement("test_stmt_eq", "", { param }, { 0 }, false);
+		conn->executePortal("", 0, false);
+		// Now send simple query without sync
+		conn->sendQuery("SELECT 2");
+		// Finally send sync
+		conn->sendSync();
+
+		char type;
+		std::vector<uint8_t> buffer;
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::PARSE_COMPLETE, "Received parse complete for prepared statement");
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::PARAMETER_DESCRIPTION, "Received parameter description for prepared statement");
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::ROW_DESCRIPTION, "Received row description for prepared statement");
+		{
+			BufferReader reader(buffer);
+			// Read row description
+			int fieldCount = reader.readInt16();
+			ok(fieldCount == 1, "Row description has 1 field (%d/1)", fieldCount);
+			// Read field name
+			std::string fieldName = reader.readString();
+			ok(fieldName == "?column?", "Field name is '?column?'");
+
+			// Read field table OID
+			unsigned int tableOid = reader.readInt32();
+			ok(tableOid == 0, "Field table OID is 0 (no table)");
+
+			// Read field attribute number
+			unsigned int attrNum = reader.readInt16();
+			ok(attrNum == 0, "Field attribute number is 0 (no specific column)");
+
+			unsigned int typeOid = reader.readInt32();
+			ok(typeOid == 23, "Parameter type OID is 23 (int)");
+
+			// Read field type size
+			unsigned int typeSize = reader.readInt16();
+			ok(typeSize == 4, "Field type size is 4 (integer size)");
+
+			// Read field type modifier
+			unsigned int typeModifier = reader.readInt32();
+			ok(typeModifier == -1, "Field type modifier is -1 (default)");
+
+			// Read field format code
+			unsigned int formatCode = reader.readInt16();
+			ok(formatCode == 0, "Field format code is 0 (text format)");
+		}
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::BIND_COMPLETE, "Received bind complete for prepared statement");
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::DATA_ROW, "Received data row for prepared statement");
+
+		{
+			BufferReader reader(buffer);
+			int fieldCount = reader.readInt16();
+			ok(fieldCount == 1, "Received 1 field in data row for prepared statement");
+			int valueLen = reader.readInt32();
+			ok(valueLen == 2, "Field length is 2 bytes");
+			auto val = reader.readBytes(2);
+			ok(val[0] == '4' && val[1] == '2' , "Received correct value 42 from prepared statement");
+		}
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::COMMAND_COMPLETE, "Received command complete for prepared statement");
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::ROW_DESCRIPTION, "Received row description for simple query");
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::DATA_ROW, "Received data row for simple query");
+		{
+			BufferReader reader(buffer);
+			int fieldCount = reader.readInt16();
+			ok(fieldCount == 1, "Received 1 field in data row for simple query");
+			int valueLen = reader.readInt32();
+			ok(valueLen == 1, "Field length is 1 byte");
+			uint8_t val = reader.readByte();
+			ok(val == '2', "Received correct value 2 from simple query");
+		}
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::COMMAND_COMPLETE, "Received command complete for simple query");
+
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ready for query after all commands");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query + Simple Query without sync failed with error: %s", e.what());
 	}
 }
 
@@ -1283,46 +1341,6 @@ void test_describe_result_metadata() {
 	}
 }
 
-void test_describe_after_execute() {
-	diag("Test %d: Describe after execution", test_count++);
-	auto conn = create_connection();
-	if (!conn) return;
-
-	try {
-	   // conn->prepareStatement("post_exec", , true);
-
-		// Execute statement
-	   // const char* param = "5";
-	  //  conn->sendExecute("post_exec", 1, &param, nullptr, nullptr, true);
-		PgConnection::Param param = { "5", 1 };
-		conn->executeParams("post_exec", "SELECT $1::int", { param });
-		conn->readResult();
-
-		// Describe after execution
-		conn->describeStatement("post_exec", true);
-
-		// Verify response
-		char type;
-		std::vector<uint8_t> buffer;
-
-		conn->readMessage(type, buffer); // Param desc
-		ok(type == PgConnection::PARAMETER_DESCRIPTION,
-			"Received parameter description after execution");
-		conn->readMessage(type, buffer); // Row desc
-		ok(type == PgConnection::ROW_DESCRIPTION,
-			"Received row description after execution");
-		conn->readMessage(type, buffer); // Ready for query
-		ok(type == PgConnection::READY_FOR_QUERY,
-			"Received ready for query after execution");
-
-		ok(true, "Describe works after execution");
-	}
-	catch (const PgException& e) {
-		diag("Exception: %s", e.what());
-		ok(false, "Describe after execute failed");
-	}
-}
-
 void test_describe_prepared_noname() {
 	diag("Test %d: Describe prepared with noname statement", test_count++);
 	auto conn = create_connection();
@@ -1471,43 +1489,6 @@ void test_close_unnamed_statement() {
 	}
 	catch (const PgException& e) {
 		ok(false, "Close unnamed failed with error:%s", e.what());
-	}
-}
-
-void test_close_after_execute() {
-	diag("Test %d: Close after successful execution", test_count++);
-	auto conn = create_connection();
-	if (!conn) return;
-
-	try {
-		// Prepare and execute
-		conn->prepareStatement("post_exec_stmt", "SELECT $1::int", true);
-		PgConnection::Param param = { "1", 1 };
-		conn->executeParams("post_exec_stmt", "SELECT $1::int", { param });
-		conn->readResult();
-
-		// Close after execution
-		conn->closeStatement("post_exec_stmt", false);
-		conn->sendSync();
-
-		char type;
-		std::vector<uint8_t> buffer;
-		conn->readMessage(type, buffer);
-		ok(type == PgConnection::CLOSE_COMPLETE,
-			"Received CloseComplete after execution");
-
-		// Verify closed
-		try {
-			conn->executeParams("post_exec_stmt", "SELECT $1::int", { param });
-			conn->readResult();
-			ok(false, "Execute succeeded after close");
-		}
-		catch (...) {
-			ok(true, "Execute fails after close");
-		}
-	}
-	catch (const PgException& e) {
-		ok(false, "Close after execute failed with error:%s", e.what());
 	}
 }
 
@@ -1670,43 +1651,6 @@ void test_close_twice() {
 		ok(false, "Close twice failed with error:%s", e.what());
 	}
 }
-
-/*
-void test_close_during_transaction() {
-	diag("Test %d: Close during transaction", test_count++);
-	auto conn = create_connection();
-	if (!conn) return;
-
-	try {
-		// Start transaction
-		conn->sendQuery("BEGIN");
-		conn->consumeInputUntilReady();
-
-		// Prepare and close in transaction
-		conn->prepareStatement("tx_stmt", "SELECT 1", true);
-		conn->closeStatement("tx_stmt", true);
-
-		// Rollback transaction
-		conn->sendQuery("ROLLBACK");
-		conn->consumeInputUntilReady();
-
-		// Verify statement remains closed
-		try {
-			char type;
-			std::vector<uint8_t> buffer;
-			conn->describeStatement("tx_stmt", true);
-			conn->readMessage(type, buffer);
-			ok(type == PgConnection::ERROR_RESPONSE,
-				"Describe fails after transaction rollback");
-		}
-		catch (...) {
-			ok(true, "Statement remains closed after rollback");
-		}
-	}
-	catch (const PgException& e) {
-		ok(false, "Close during transaction failed with error:%s", e.what());
-	}
-}*/
 
 void test_close_without_prepare() {
 	diag("Test %d: Close without preparing", test_count++);
@@ -2424,34 +2368,6 @@ void test_malformed_execute_packet() {
 		ok(true, "Session should be terminated error: %s", e.what());
 	}
 }
-
-/*
-void test_bind_transaction_state() {
-	diag("Test %d: Bind in different transaction states", test_count++);
-	auto conn = create_connection();
-	if (!conn) return;
-
-	try {
-		conn->sendQuery("BEGIN");
-		conn->consumeInputUntilReady();
-
-		// Prepare and bind in transaction
-		conn->prepareStatement("tx_bind", "SELECT 1", true);
-		PgConnection::Param param = { "1", 1 };
-		conn->bindStatement("tx_bind", "", { param }, {}, true);
-
-		conn->sendQuery("ROLLBACK");
-		conn->consumeInputUntilReady();
-
-		// Bind should still work after rollback
-		conn->bindStatement("tx_bind", "", { param }, {}, true);
-		ok(true, "Bind after transaction rollback succeeded");
-	}
-	catch (const PgException& e) {
-		ok(false, "Bind in transaction state failed with error:%s", e.what());
-	}
-}
-*/
 
 void test_bind_named_portal() {
 	diag("Test %d: Bind with named portal (should fail)", test_count++);
@@ -3984,6 +3900,12 @@ void test_send_simple_query_and_extended_query_without_waiting_for_response_prox
 		"LOAD PGSQL USERS TO RUNTIME" });
 }
 
+void test_extended_query_simple_query_mix() {
+
+
+	test_prepare_statement_mix();
+}
+
 int main(int argc, char** argv) {
 	if (cl.getEnv())
 		return exit_status();
@@ -3994,7 +3916,7 @@ int main(int argc, char** argv) {
 		return exit_status();
 	}
 
-	plan(772); // Adjust based on number of tests
+	plan(808); // Adjust based on number of tests
 
 	auto admin_conn = createNewConnection(ConnType::ADMIN, "", false);
 
@@ -4019,7 +3941,7 @@ int main(int argc, char** argv) {
 		test_multiple_parse();
 		test_only_sync();
 		test_empty_stmt();
-		//test_prepare_statement_mix();
+		test_prepare_statement_mix();
 		test_invalid_query_parse_packet();
 		test_parse_use_same_stmt_name();
 		test_parse_use_unnamed_stmt();
@@ -4033,19 +3955,16 @@ int main(int argc, char** argv) {
 		test_multiple_describe_calls();
 		test_describe_parameter_types();
 		test_describe_result_metadata();
-		//test_describe_after_execute(); // FIXME: not implemented in PgConnection
 		test_describe_prepared_noname();
 		
 		// Close Statement
 		test_close_existing_statement();
 		test_close_nonexistent_statement();
 		test_close_unnamed_statement();
-		//test_close_after_execute();
 		test_close_without_sync();
 		test_multiple_close_without_sync();
 		test_close_malformed_packet();
 		test_close_twice();
-		//test_close_during_transaction();
 		test_close_without_prepare();
 		test_close_during_pending_ops();
 		test_close_all_types();
@@ -4061,7 +3980,6 @@ int main(int argc, char** argv) {
 		test_bind_null_parameters();
 		test_malformed_bind_packet();
 		test_malformed_execute_packet();
-		//test_bind_transaction_state();
 
 		// Portals
 		test_bind_named_portal(); 
@@ -4096,6 +4014,10 @@ int main(int argc, char** argv) {
 		test_send_multiple_simple_query_without_waiting_for_response_proxysql_fast_forward_mode(admin_conn.get());
 		test_send_multiple_simple_query_in_transaction_without_waiting_for_response_proxysql_fast_forward_mode(admin_conn.get());
 		test_send_simple_query_and_extended_query_without_waiting_for_response_proxysql_fast_forward_mode(admin_conn.get());
+
+		// Extended Query (without sync) + Simple Query 
+		test_extended_query_prepared_describe_execute_simple_query_without_sync();
+		test_prepare_statement_mix();
 	}
 	catch (const std::exception& e) {
 		diag("Fatal error: %s",e.what());
