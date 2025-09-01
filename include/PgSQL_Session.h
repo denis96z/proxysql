@@ -13,7 +13,6 @@
 #include "PgSQL_Variables.h"
 #include "PgSQL_Variables_Validator.h"
 
-
 class PgSQL_Query_Result;
 class PgSQL_ExplicitTxnStateMgr;
 class PgSQL_Parse_Message;
@@ -193,10 +192,18 @@ private:
 
 class PgSQL_Session : public Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread> {
 private:
+	typedef enum ExtendedQueryPhase {
+		EXTQ_PHASE_IDLE = 0,				// No extended query activity
+		EXTQ_PHASE_BUILDING,				// Collecting extended query messages (Parse/Bind/etc.)
+		EXTQ_PHASE_EXECUTING_SYNC_CLIENT,	// Executing after client-initiated Sync
+		EXTQ_PHASE_EXECUTING_SYNC_IMPLICIT	// Executing after implicit Sync (injected)
+	} ExtendedQueryPhase;
+
 	using PktType = std::variant<std::unique_ptr<PgSQL_Parse_Message>,std::unique_ptr<PgSQL_Describe_Message>,
 		std::unique_ptr<PgSQL_Close_Message>, std::unique_ptr<PgSQL_Bind_Message>, std::unique_ptr<PgSQL_Execute_Message>>;
 
 	bool extended_query_exec_qp = false;
+	ExtendedQueryPhase extended_query_phase{ EXTQ_PHASE_IDLE };
 	std::queue<PktType> extended_query_frame;
 	std::unique_ptr<const PgSQL_Bind_Message> bind_waiting_for_execute;
 
@@ -405,6 +412,11 @@ private:
 public:
 	inline bool is_extended_query_frame_empty() const {
 		return extended_query_frame.empty();
+	}
+
+	inline bool is_extended_query_ready_for_query() const {
+		return extended_query_frame.empty() &&
+			extended_query_phase != EXTQ_PHASE_EXECUTING_SYNC_IMPLICIT;
 	}
 
 	bool handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, const char* var_name, const char* var_value, bool no_quote = false, bool set_transaction = false);

@@ -658,7 +658,7 @@ handler_again:
 		// Fix: if the result indicates an error, explicitly send ReadyForQuery immediately.
 		// The extended query flag will still be reset later in the session.
 		if (fetch_result_end_st == ASYNC_STMT_EXECUTE_END &&
-			!myds->sess->is_extended_query_frame_empty() &&
+			!myds->sess->is_extended_query_ready_for_query() &&
 			((query_result->get_result_packet_type() & PGSQL_QUERY_RESULT_ERROR) == 0)) {
 			// Skip sending ReadyForQuery if there are still extended query messages pending in the queue
 			NEXT_IMMEDIATE(fetch_result_end_st);
