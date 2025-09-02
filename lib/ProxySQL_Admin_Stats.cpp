@@ -677,14 +677,14 @@ void ProxySQL_Admin::stats___pgsql_global() {
 	statsdb->execute(query);
 	free(query);
 
-	/*if (GloMyStmt) {
+	if (GloPgStmt) {
 		uint64_t stmt_client_active_unique = 0;
 		uint64_t stmt_client_active_total = 0;
 		uint64_t stmt_max_stmt_id = 0;
 		uint64_t stmt_cached = 0;
 		uint64_t stmt_server_active_unique = 0;
 		uint64_t stmt_server_active_total = 0;
-		GloMyStmt->get_metrics(&stmt_client_active_unique, &stmt_client_active_total, &stmt_max_stmt_id, &stmt_cached, &stmt_server_active_unique, &stmt_server_active_total);
+		GloPgStmt->get_metrics(&stmt_client_active_unique, &stmt_client_active_total, &stmt_max_stmt_id, &stmt_cached, &stmt_server_active_unique, &stmt_server_active_total);
 		vn = (char*)"Stmt_Client_Active_Total";
 		sprintf(bu, "%lu", stmt_client_active_total);
 		query = (char*)malloc(strlen(a) + strlen(vn) + strlen(bu) + 16);
@@ -721,7 +721,7 @@ void ProxySQL_Admin::stats___pgsql_global() {
 		sprintf(query, a, vn, bu);
 		statsdb->execute(query);
 		free(query);
-	}*/
+	}
 
 	if (GloPgQC && (resultset = GloPgQC->SQL3_getStats())) {
 		for (std::vector<SQLite3_row*>::iterator it = resultset->rows.begin(); it != resultset->rows.end(); ++it) {
