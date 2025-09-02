@@ -7187,7 +7187,7 @@ void MySQL_Session::handler___client_DSS_QUERY_SENT___server_DSS_NOT_INITIALIZED
 #ifdef STRESSTESTPOOL_MEASURE
 		timespec begint;
 		timespec endt;
-		clock_gettime(CLOCK_MONOTONIC,&begint);
+		clock_gettime(PROXYSQL_CLOCK_MONOTONIC, &begint);
 #endif // STRESSTESTPOOL_MEASURE
 		for (unsigned int loops=0; loops < NUM_SLOW_LOOPS; loops++) {
 #endif // STRESSTEST_POOL
@@ -7213,7 +7213,7 @@ void MySQL_Session::handler___client_DSS_QUERY_SENT___server_DSS_NOT_INITIALIZED
 		}
 #ifdef STRESSTEST_POOL
 #ifdef STRESSTESTPOOL_MEASURE
-		clock_gettime(CLOCK_MONOTONIC,&endt);
+		clock_gettime(PROXYSQL_CLOCK_MONOTONIC, &endt);
 		thread->status_variables.query_processor_time=thread->status_variables.query_processor_time +
 			(endt.tv_sec*1000000000+endt.tv_nsec) -
 			(begint.tv_sec*1000000000+begint.tv_nsec);

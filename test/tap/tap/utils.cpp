@@ -475,7 +475,7 @@ int create_table_test_sbtest1(int num_rows, MYSQL *mysql) {
 
 unsigned long long monotonic_time() {
   struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(PROXYSQL_CLOCK_MONOTONIC, &ts);
   return (((unsigned long long) ts.tv_sec) * 1000000) + (ts.tv_nsec / 1000);
 }
 
