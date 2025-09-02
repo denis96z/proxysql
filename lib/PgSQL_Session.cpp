@@ -5769,25 +5769,6 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 				(begint.tv_sec * 1000000000 + begint.tv_nsec);
 		}
 	}
-	// Use cached stmt_metadata only for statements; for portals, forward the describe request to backend.
-	if (extended_query_info.stmt_type == 'S') {
-		stmt_info->rdlock();
-		if (stmt_info->stmt_metadata) {
-			// we have the metadata, so we can send it to the client
-			client_myds->setDSS_STATE_QUERY_SENT_NET();
-			bool send_ready_packet = is_extended_query_ready_for_query();
-			unsigned int nTxn = NumActiveTransactions();
-			const char txn_state = (nTxn ? 'T' : 'I');
-			client_myds->myprot.generate_describe_completion_packet(true, send_ready_packet, stmt_info->stmt_metadata, 
-				extended_query_info.stmt_type, txn_state);
-			stmt_info->unlock();
-			//LogQuery(NULL);
-			//CurrentQuery.end_time = thread->curtime;
-			RequestEnd(NULL, false);
-			return 0;
-		}
-		stmt_info->unlock();
-	}
 
 	// setting 'prepared' to prevent fetching results from the cache if the digest matches
 	if (extended_query_exec_qp) {
@@ -6361,26 +6342,12 @@ void PgSQL_Session::handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_St
 	bool send_ready_packet = is_extended_query_ready_for_query();
 	char txn_state = myds->myconn->get_transaction_status_char();
 	
-	if (extended_query_info.stmt_type == 'S') {
-		GloPgStmt->wrlock();
-		extended_query_info.stmt_info->update_stmt_metadata(&myds->myconn->stmt_metadata_result);
-		client_myds->myprot.generate_describe_completion_packet(true, send_ready_packet, extended_query_info.stmt_info->stmt_metadata,
-			extended_query_info.stmt_type, txn_state);
-		LogQuery(myds);
-		GloPgStmt->unlock();
-		if (myds->myconn->stmt_metadata_result) {
-			delete myds->myconn->stmt_metadata_result;
-			myds->myconn->stmt_metadata_result = NULL;
-		}
-	} else {
-		// For portals, we don't cache metadata
-		client_myds->myprot.generate_describe_completion_packet(true, send_ready_packet, myds->myconn->stmt_metadata_result, 
-			extended_query_info.stmt_type, txn_state);
-		LogQuery(myds);
-		if (myds->myconn->stmt_metadata_result) {
-			delete myds->myconn->stmt_metadata_result;
-			myds->myconn->stmt_metadata_result = NULL;
-		}
+	client_myds->myprot.generate_describe_completion_packet(true, send_ready_packet, myds->myconn->stmt_metadata_result, 
+		extended_query_info.stmt_type, txn_state);
+	LogQuery(myds);
+	if (myds->myconn->stmt_metadata_result) {
+		delete myds->myconn->stmt_metadata_result;
+		myds->myconn->stmt_metadata_result = NULL;
 	}
 }
 

@@ -2324,8 +2324,8 @@ void ProxySQL_Admin::stats___pgsql_prepared_statements_info() {
 	char* query32 = NULL;
 	std::string query32s = "";
 	statsdb->execute("DELETE FROM stats_pgsql_prepared_statements_info");
-	query1 = (char*)"INSERT INTO stats_pgsql_prepared_statements_info VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
-	query32s = "INSERT INTO stats_pgsql_prepared_statements_info VALUES " + generate_multi_rows_query(32, 9);
+	query1 = (char*)"INSERT INTO stats_pgsql_prepared_statements_info VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+	query32s = "INSERT INTO stats_pgsql_prepared_statements_info VALUES " + generate_multi_rows_query(32, 8);
 	query32 = (char*)query32s.c_str();
 	//rc=(*proxy_sqlite3_prepare_v2)(mydb3, query1, -1, &statement1, 0);
 	//rc=sqlite3_prepare_v2(mydb3, query1, -1, &statement1, 0);
@@ -2341,15 +2341,14 @@ void ProxySQL_Admin::stats___pgsql_prepared_statements_info() {
 		SQLite3_row* r1 = *it;
 		int idx = row_idx % 32;
 		if (row_idx < max_bulk_row_idx) { // bulk
-			rc = sqlite3_bind_int64(statement32, (idx * 9) + 1, atoll(r1->fields[0])); ASSERT_SQLITE_OK(rc, statsdb);
-			rc = sqlite3_bind_text(statement32, (idx * 9) + 2, r1->fields[1], -1, SQLITE_TRANSIENT); ASSERT_SQLITE_OK(rc, statsdb);
-			rc = sqlite3_bind_text(statement32, (idx * 9) + 3, r1->fields[2], -1, SQLITE_TRANSIENT); ASSERT_SQLITE_OK(rc, statsdb);
-			rc = sqlite3_bind_text(statement32, (idx * 9) + 4, r1->fields[3], -1, SQLITE_TRANSIENT); ASSERT_SQLITE_OK(rc, statsdb);
-			rc = sqlite3_bind_int64(statement32, (idx * 9) + 5, atoll(r1->fields[5])); ASSERT_SQLITE_OK(rc, statsdb);
-			rc = sqlite3_bind_int64(statement32, (idx * 9) + 6, atoll(r1->fields[6])); ASSERT_SQLITE_OK(rc, statsdb);
-			rc = sqlite3_bind_int64(statement32, (idx * 9) + 7, atoll(r1->fields[7])); ASSERT_SQLITE_OK(rc, statsdb);
-			rc = sqlite3_bind_int64(statement32, (idx * 9) + 8, atoll(r1->fields[8])); ASSERT_SQLITE_OK(rc, statsdb);
-			rc = sqlite3_bind_text(statement32, (idx * 9) + 9, r1->fields[4], -1, SQLITE_TRANSIENT); ASSERT_SQLITE_OK(rc, statsdb);
+			rc = sqlite3_bind_int64(statement32, (idx * 8) + 1, atoll(r1->fields[0])); ASSERT_SQLITE_OK(rc, statsdb);
+			rc = sqlite3_bind_text(statement32, (idx * 8) + 2, r1->fields[1], -1, SQLITE_TRANSIENT); ASSERT_SQLITE_OK(rc, statsdb);
+			rc = sqlite3_bind_text(statement32, (idx * 8) + 3, r1->fields[2], -1, SQLITE_TRANSIENT); ASSERT_SQLITE_OK(rc, statsdb);
+			rc = sqlite3_bind_text(statement32, (idx * 8) + 4, r1->fields[3], -1, SQLITE_TRANSIENT); ASSERT_SQLITE_OK(rc, statsdb);
+			rc = sqlite3_bind_int64(statement32, (idx * 8) + 5, atoll(r1->fields[5])); ASSERT_SQLITE_OK(rc, statsdb);
+			rc = sqlite3_bind_int64(statement32, (idx * 8) + 6, atoll(r1->fields[6])); ASSERT_SQLITE_OK(rc, statsdb);
+			rc = sqlite3_bind_int64(statement32, (idx * 8) + 7, atoll(r1->fields[7])); ASSERT_SQLITE_OK(rc, statsdb);
+			rc = sqlite3_bind_text(statement32, (idx * 8) + 8, r1->fields[4], -1, SQLITE_TRANSIENT); ASSERT_SQLITE_OK(rc, statsdb);
 			if (idx == 31) {
 				SAFE_SQLITE3_STEP2(statement32);
 				rc = (*proxy_sqlite3_clear_bindings)(statement32); ASSERT_SQLITE_OK(rc, statsdb);
@@ -2363,8 +2362,7 @@ void ProxySQL_Admin::stats___pgsql_prepared_statements_info() {
 			rc = sqlite3_bind_int64(statement1, 5, atoll(r1->fields[5])); ASSERT_SQLITE_OK(rc, statsdb);
 			rc = sqlite3_bind_int64(statement1, 6, atoll(r1->fields[6])); ASSERT_SQLITE_OK(rc, statsdb);
 			rc = sqlite3_bind_int64(statement1, 7, atoll(r1->fields[7])); ASSERT_SQLITE_OK(rc, statsdb);
-			rc = sqlite3_bind_int64(statement1, 8, atoll(r1->fields[8])); ASSERT_SQLITE_OK(rc, statsdb);
-			rc = sqlite3_bind_text(statement1, 9, r1->fields[4], -1, SQLITE_TRANSIENT); ASSERT_SQLITE_OK(rc, statsdb);
+			rc = sqlite3_bind_text(statement1, 8, r1->fields[4], -1, SQLITE_TRANSIENT); ASSERT_SQLITE_OK(rc, statsdb);
 			SAFE_SQLITE3_STEP2(statement1);
 			rc = (*proxy_sqlite3_clear_bindings)(statement1); ASSERT_SQLITE_OK(rc, statsdb);
 			rc = (*proxy_sqlite3_reset)(statement1); ASSERT_SQLITE_OK(rc, statsdb);
