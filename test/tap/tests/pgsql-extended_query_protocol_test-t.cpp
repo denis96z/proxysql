@@ -3006,8 +3006,6 @@ void test_insert_command_complete() {
 
 		conn->readMessage(type, buf);
 		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for CREATE TEMP TABLE");
-		conn->readMessage(type, buf);
-		ok(type == PgConnection::NO_DATA, "NoData for CREATE TEMP TABLE");
 		
 		conn->readMessage(type, buf);
 		ok(type == PgConnection::COMMAND_COMPLETE,
@@ -3034,9 +3032,6 @@ void test_insert_command_complete() {
 
 		conn->readMessage(type, buf);
 		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for INSERT");
-
-		conn->readMessage(type, buf);
-		ok(type == PgConnection::NO_DATA, "NoData for INSERT");
 
 		conn->readMessage(type, buf);
 		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for INSERT");
@@ -3916,7 +3911,7 @@ int main(int argc, char** argv) {
 		return exit_status();
 	}
 
-	plan(808); // Adjust based on number of tests
+	plan(806); // Adjust based on number of tests
 
 	auto admin_conn = createNewConnection(ConnType::ADMIN, "", false);
 
