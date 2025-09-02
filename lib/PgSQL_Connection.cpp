@@ -485,7 +485,8 @@ handler_again:
 						// In these cases, libpq returns PGRES_COMMAND_OK (whereas SELECT statements
 						// yield PGRES_SINGLE_TUPLE or PGRES_TUPLES_OK). Therefore, it is safe to
 						// explicitly append a NoData packet to the result.
-						if (fetch_result_end_st == ASYNC_STMT_EXECUTE_END) {
+						if (fetch_result_end_st == ASYNC_STMT_EXECUTE_END &&
+							(query.extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
 							const unsigned int bytes_recv = query_result->add_no_data();
 							update_bytes_recv(bytes_recv);
 						}
