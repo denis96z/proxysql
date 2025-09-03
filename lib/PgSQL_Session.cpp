@@ -4885,7 +4885,7 @@ unsigned long long PgSQL_Session::IdleTime() {
 void PgSQL_Session::LogQuery(PgSQL_Data_Stream* myds) {
 	// we need to access statistics before calling CurrentQuery.end()
 	// so we track the time here
-	CurrentQuery.end_time = thread->curtime;
+	CurrentQuery.set_end_time(thread->curtime);
 
 	if (qpo) {
 		if (qpo->log == 1) {

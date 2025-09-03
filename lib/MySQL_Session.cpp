@@ -3322,7 +3322,7 @@ void MySQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 			l_free(pkt.size,pkt.ptr);
 			client_myds->DSS=STATE_SLEEP;
 			status=WAITING_CLIENT_DATA;
-			CurrentQuery.end_time=thread->curtime;
+			CurrentQuery.set_end_time(thread->curtime);
 			CurrentQuery.end();
 		} else {
 			mybe=find_or_create_backend(current_hostgroup);
@@ -7527,7 +7527,7 @@ unsigned long long MySQL_Session::IdleTime() {
 void MySQL_Session::LogQuery(MySQL_Data_Stream *myds, const unsigned int myerrno, const char * errmsg) {
 	// we need to access statistics before calling CurrentQuery.end()
 	// so we track the time here
-	CurrentQuery.end_time=thread->curtime;
+	CurrentQuery.set_end_time(thread->curtime);
 
 	if (qpo) {
 		if (qpo->log==1) {
