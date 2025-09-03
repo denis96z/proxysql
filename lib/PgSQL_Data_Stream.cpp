@@ -1213,7 +1213,9 @@ void PgSQL_Data_Stream::reset_connection() {
 			return_MySQL_Connection_To_Pool();
 		} else {
 			if (sess && sess->session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
-				destroy_MySQL_Connection_From_Pool(true);
+				// If the startup connection includes untracked session parameters (passed via options=),
+				// the connection must be destroyed instead of returned to the pool. Issue #5102
+				destroy_MySQL_Connection_From_Pool(sess->untracked_option_parameters.empty());
 			} else {
 				destroy_MySQL_Connection_From_Pool(false);
 			}
