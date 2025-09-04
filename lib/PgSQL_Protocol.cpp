@@ -1224,16 +1224,22 @@ void PgSQL_Protocol::welcome_client() {
 		pgpkt.write_ParameterStatus("application_name", application_name);
 
 	/*
-	const char* client_encoding = pgsql_variables.client_get_value((*myds)->sess, PGSQL_CLIENT_ENCODING); //(*myds)->myconn->conn_params.get_value(PG_CLIENT_ENCODING);
-	if (client_encoding)
-		pgpkt.write_ParameterStatus("client_encoding", client_encoding);
-	else 
-		assert(0);
+	 * PostgreSQL has two possible internal representations for date/time values:
+	 *   - 64-bit integers (microsecond precision)
+	 *   - floating-point doubles (less precise)
+	 *
+	 * Since PostgreSQL 10, the floating-point option has been removed and
+	 * integer_datetimes is always compiled in and fixed to "on".
+	 *
+	 * The GUC "integer_datetimes" still exists but is read-only and will
+	 * always report "on". In other words, modern PostgreSQL cannot be built
+	 * without 64-bit datetime support.
+	 */
+	pgpkt.write_ParameterStatus("integer_datetimes", "on");
 
-	const char* datestyle = pgsql_variables.client_get_value((*myds)->sess, PGSQL_DATESTYLE);
-	if (datestyle)
-		pgpkt.write_ParameterStatus("datestyle", datestyle);
-	*/
+	// using SCRAM_SHA_256_DEFAULT_ITERATIONS value
+	pgpkt.write_ParameterStatus("scram_iterations", "4096"); 
+
 	for (unsigned int idx = 0; idx < PGSQL_NAME_LAST_LOW_WM; idx++) {
 
 		if (pgsql_variables.client_get_hash((*myds)->sess, idx) == 0)
