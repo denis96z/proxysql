@@ -69,13 +69,9 @@ void PgSQL_Set_Stmt_Parser::generateRE_parse1v2() {
 	proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "Parsing query %s\n", query.c_str());
 #endif // DEBUG
 
-	//const std::string pattern = "(?:(?P<scope>SESSION|LOCAL)\\s+)?(?:(?P<parameter>[^=\\s][^=;]*?)\\s*(?:=|TO)\\s*(?P<value>[^;]+)|(?P<parameter_kw>TIME\\s+ZONE|NAMES|SCHEMA|AUTHORIZATION|TRANSACTION\\s+ISOLATION\\s+LEVEL|CHARACTERISTICS\\s+AS\\s+TRANSACTION\\s+ISOLATION\\s+LEVEL)\\s+(?P<value_kw>[^;]+))\\s*;?\\s*";
-	
 	// Function Call: Check if Group 3 is populated.
 	// Literal: Check if Group 4 is populated.
-	//const std::string pattern = "(?:(SESSION|LOCAL)\\s+)?((?:\\S+(?:\\s+\\S+)*?))(?:\\s+(?:TO|=)\\s+|\\s+)(?:(\\w+\\s*\\([^)]*\\))|((?:'(?:''|[^'])*'|-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?|t|true|f|false|on|off|default|\\S+)))\\s*;?";
-	//const std::string pattern = "(?:(SESSION|LOCAL)\\s+)?((?:\\S+(?:\\s+\\S+)*?))(?:\\s*(?:TO|=)\\s*|\\s+)(?:(\\w+\\s*\\([^)]*\\))|((?:'(?:''|[^'])*'|-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?|true|t|1|yes|false|f|0|no|on|off|default|\\S+)))\\s*;?";
-	const std::string pattern = R"((?:(SESSION)\s+)?((?:[^\s=]+(?:\s+[^\s=]+)*))(?:	*(?:TO|=)\s*|\s+)(?:(\w+\s*\([^)]*\))|((?:'(?:''|[^'])*'|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[^;]+)))\s*;?)";
+	const std::string pattern = R"((?:(SESSION)\s+)?((?:TIME\s+ZONE|TRANSACTION\s+ISOLATION\s+LEVEL|XML\s+OPTION|(?:(?:[^\s=]{1,4}|[^\s=]{6,}|(?:[^lL][^\s=]{4}|[lL][^oO][^\s=]{3}|[lL][oO][^cC][^\s=]{2}|[lL][oO][cC][^aA][^\s=]|[lL][oO][cC][aA][^lL])))))(?:\s*=\s*|\s+TO\s+|\s+)()('(?:''|[^'])*'|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[^;()]+)\s*;?)";
 
 #ifdef DEBUG
 VALGRIND_DISABLE_ERROR_REPORTING;
@@ -91,6 +87,12 @@ VALGRIND_DISABLE_ERROR_REPORTING;
 
 	parse1v2_pattern = pattern;
 	parse1v2_re = new re2::RE2(parse1v2_pattern, *parse1v2_opt2);
+	
+	if (!parse1v2_re->ok()) {
+		proxy_error("Error in RE2 regex pattern: %s\n", parse1v2_re->error().c_str());
+		assert(false);
+	}
+
 	parse1v2_init = true;
 }
 
