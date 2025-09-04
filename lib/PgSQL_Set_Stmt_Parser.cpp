@@ -71,7 +71,7 @@ void PgSQL_Set_Stmt_Parser::generateRE_parse1v2() {
 
 	// Function Call: Check if Group 3 is populated.
 	// Literal: Check if Group 4 is populated.
-	const std::string pattern = R"((?:(SESSION)\s+)?((?:TIME\s+ZONE|TRANSACTION\s+ISOLATION\s+LEVEL|XML\s+OPTION|(?:(?:[^\s=]{1,4}|[^\s=]{6,}|(?:[^lL][^\s=]{4}|[lL][^oO][^\s=]{3}|[lL][oO][^cC][^\s=]{2}|[lL][oO][cC][^aA][^\s=]|[lL][oO][cC][aA][^lL])))))(?:\s*=\s*|\s+TO\s+|\s+)()('(?:''|[^'])*'|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[^;()]+)\s*;?)";
+	const std::string pattern = R"((?:(SESSION)\s+)?((?:TIME\s+ZONE|TRANSACTION\s+ISOLATION\s+LEVEL|XML\s+OPTION|(?:(?:[^\s=]{1,4}|[^\s=]{6,}|(?:[^lL][^\s=]{4}|[lL][^oO][^\s=]{3}|[lL][oO][^cC][^\s=]{2}|[lL][oO][cC][^aA][^\s=]|[lL][oO][cC][aA][^lL])))))(?:\s*=\s*|\s+TO\s+|\s+)(?:([A-Za-z_][\w$\.]*)\s*\(\s*('(?:''|[^'])*'|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[^();]+?)\s*\)|('(?:''|[^'])*'|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[^;()]+))\s*;?)";
 
 #ifdef DEBUG
 VALGRIND_DISABLE_ERROR_REPORTING;
@@ -114,13 +114,13 @@ std::map<std::string,std::vector<std::string>> PgSQL_Set_Stmt_Parser::parse1v2()
 VALGRIND_ENABLE_ERROR_REPORTING;
 #endif // DEBUG
 	std::string var;
-	std::string scope, param_name, param_val, param_val_func;
+	std::string scope, param_name, param_val_func, param_val_func_args, param_val;
 	re2::StringPiece input(query);
-	while (re2::RE2::Consume(&input, *parse1v2_re, &scope, &param_name, &param_val_func, &param_val)) {
+	while (re2::RE2::Consume(&input, *parse1v2_re, &scope, &param_name, &param_val_func, &param_val_func_args, &param_val)) {
 		// FIXME: verify if we reached end of query. Did we parse everything?
 		std::vector<std::string> op;
 #ifdef DEBUG
-		proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "SET parsing: scope='%s' , parameter name='%s' , parameter value='%s' parameter_value_func='%s'\n", scope.c_str(), param_name.c_str(), param_val.c_str(), param_val_func.c_str());
+		proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "SET parsing: scope='%s', parameter name='%s' , parameter value='%s' , parameter_value_func='%s' , parameter_value_func_args='%s'\n", scope.c_str(), param_name.c_str(), param_val.c_str(), param_val_func.c_str(), param_val_func_args.c_str());
 #endif // DEBUG
 		std::string key;
 
