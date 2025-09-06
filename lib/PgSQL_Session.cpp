@@ -760,6 +760,21 @@ void PgSQL_Session::generate_proxysql_internal_session_json(json& j) {
 
 bool PgSQL_Session::handler_special_queries(PtrSize_t* pkt, bool* lock_hostgroup) {
 
+	if ((pkt->size >= 7 + 5) && (strncasecmp("LISTEN ", (const char*)pkt->ptr + 5, 7) == 0)) {
+		client_myds->DSS = STATE_QUERY_SENT_NET;
+		proxy_warning("LISTEN command is not supported\n");
+		client_myds->myprot.generate_error_packet(true, true, "LISTEN is not supported",
+			PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, false, true);
+		if (mirror == false) {
+			RequestEnd(NULL, true);
+		} else {
+			client_myds->DSS = STATE_SLEEP;
+			status = WAITING_CLIENT_DATA;
+		}
+		l_free(pkt->size, pkt->ptr);
+		return true;
+	}
+
 	if (pkt->size > (5 + 18) && strncasecmp((char*)"PROXYSQL INTERNAL ", (char*)pkt->ptr + 5, 18) == 0) {
 		return_proxysql_internal(pkt);
 		return true;
@@ -837,7 +852,7 @@ bool PgSQL_Session::handler_special_queries(PtrSize_t* pkt, bool* lock_hostgroup
 		l_free(pkt->size, pkt->ptr);
 
 		return true;
-	}*/
+	}
 
 	// 'LOAD DATA LOCAL INFILE' is unsupported. We report an specific error to inform clients about this fact. For more context see #833.
 	if ((pkt->size >= 22 + 5) && (strncasecmp((char*)"LOAD DATA LOCAL INFILE", (char*)pkt->ptr + 5, 22) == 0)) {
@@ -869,7 +884,7 @@ bool PgSQL_Session::handler_special_queries(PtrSize_t* pkt, bool* lock_hostgroup
 				);
 			}
 		}
-	}
+	}*/
 
 	return false;
 }
@@ -5532,6 +5547,15 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 	CurrentQuery.begin((unsigned char*)parse_data.query_string, strlen(parse_data.query_string) + 1, false);
 	// parse_msg memory will be freed in pgsql_real_query.end(), if message is sent to backend server
 	// CurrentQuery.stmt_client_name may briefly become a dangling pointer until CurrentQuery.end() is invoked
+
+	// check for LISTEN command
+	const char* query_to_check = (CurrentQuery.get_digest_text() ? CurrentQuery.get_digest_text() : parse_data.query_string);
+	if (query_to_check && (strncasecmp("LISTEN ", query_to_check, 7) == 0)) {
+		proxy_warning("LISTEN command is not supported\n");
+		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, "LISTEN is not supported", false);
+		return 2;
+	}
+
 	extended_query_info.stmt_client_name = parse_data.stmt_name;
 
 	if (extended_query_exec_qp) {
