@@ -296,6 +296,7 @@ struct ColumnMetadata {
 	uint16_t format;        // 0 = text, 1 = binary
 };
 
+/* Not Used anymore. To be removed in next iteration
 class PgSQL_Describe_Prepared_Info {
 public:
 	uint32_t* parameter_types;	   // Array of parameter type OIDs
@@ -314,6 +315,7 @@ private:
 	void extract_parameters(const PGresult* result);
 	void extract_columns(const PGresult* result);
 };
+*/
 
 #define PGSQL_QUERY_RESULT_NO_DATA	0x00
 #define PGSQL_QUERY_RESULT_TUPLE	0x01
@@ -523,10 +525,34 @@ public:
     *
     * @return The number of bytes added to the query result.
     *
-    * @note This method is typically used in response to DESCRIBE command that do not return data rows.
-	* 
     */
     unsigned int add_no_data();
+
+    /**
+    * @brief Adds a prepare completion message to the query result.
+    *
+    * This method adds a prepare completion message to the query result, indicating
+    * that a prepared statement has been successfully created.
+    *
+    * @return The number of bytes added to the query result.
+    *
+    */
+    unsigned int add_parse_completion();
+    
+	/**
+    * @brief Adds a describe completion message to the query result.
+    *
+    * This method adds a describe completion message (from a `PGresult` object) to the query result.
+    * The describe completion message provides metadata about a prepared statement or portal,
+    * such as the statement type and associated fields.
+    *
+    * @param result A pointer to a `PGresult` object containing the describe completion data.
+    * @param stmt_type The type of statement being described (e.g., prepared statement or portal).
+    *
+    * @return The number of bytes added to the query result.
+    *
+    */
+    unsigned int add_describe_completion(const PGresult* result, uint8_t stmt_type);
 
 	/**
 	 * @brief Retrieves the query result set and copies it to a PtrSizeArray.
@@ -557,6 +583,20 @@ public:
 	 * @return The current size of the `PgSQL_Query_Result` object in bytes.
 	 */
 	unsigned long long current_size();
+
+	/**
+	* @brief Clears the contents of the PgSQL_Query_Result object.
+	*
+	* This method resets the internal state of the PgSQL_Query_Result object, freeing any allocated buffers
+	* and removing all packets from the output array.
+	*
+	* The method performs the following actions:
+	*   - Removes and frees all packets from the PSarrayOUT array.
+	*   - Initializes the internal buffer for result data.
+	*   - Resets all counters and state variables to their default values.
+	*
+	*/
+	void clear();
 
 	inline bool is_transfer_started() const { return transfer_started; }
 	inline unsigned long long get_num_rows() const { return num_rows; }
@@ -625,8 +665,6 @@ private:
 	 *       sent to the client and the object is ready to handle a new query.
 	 */
 	void reset();
-
-	void clear();
 
 	PtrSizeArray PSarrayOUT;
 	unsigned long long resultset_size;
@@ -794,7 +832,8 @@ public:
 
 	bool generate_parse_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr = NULL);
 	bool generate_ready_for_query_packet(bool send, char trx_state, PtrSize_t* _ptr = NULL);
-	bool generate_describe_completion_packet(bool send, bool ready, const PgSQL_Describe_Prepared_Info* desc, uint8_t stmt_type, char trx_state, PtrSize_t* _ptr = NULL);
+	// Not Used anymore. To be removed in next iteration
+	//bool generate_describe_completion_packet(bool send, bool ready, const PgSQL_Describe_Prepared_Info* desc, uint8_t stmt_type, char trx_state, PtrSize_t* _ptr = NULL);
 	bool generate_close_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr = NULL);
 	bool generate_bind_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr = NULL);
 
@@ -1028,6 +1067,46 @@ public:
      * @note This method is typically used in response to DESCRIBE commands that do not return data rows.
      */
     unsigned int copy_no_data_to_PgSQL_Query_Result(bool send, PgSQL_Query_Result* pg_query_result);
+
+	/**
+	* @brief Copies a parse completion message to PgSQL_Query_Result.
+	*
+	* This function copies a parse completion message to the provided
+	* PgSQL_Query_Result object.
+	*
+	* @param send A boolean flag indicating whether to send the generated packet
+	*            immediately or just generate it. (Currently not supported).
+	* @param pg_query_result A pointer to the PgSQL_Query_Result object where the
+	*                       parse completion message will be copied.
+	*
+	* @return The number of bytes copied to the PgSQL_Query_Result object.
+	*
+	* @note This function adds a '1' (ParseComplete) packet to the query result.
+	*/
+	unsigned int copy_parse_completion_to_PgSQL_Query_Result(bool send, PgSQL_Query_Result* pg_query_result);
+
+	/**
+	 * @brief Copies a describe completion message to PgSQL_Query_Result.
+	 *
+	 * This function copies a describe completion message (from a `PGresult` object) to the provided
+	 * `PgSQL_Query_Result` object. The describe completion message provides metadata about a prepared
+	 * statement or portal, such as the statement type and associated fields.
+	 *
+	 * If the statement type is 'S', a parameter description packet is generated, including the number
+	 * and types of parameters. If there are result columns, a row description packet is generated for
+	 * each column, including metadata such as column name, table OID, column index, type OID, length,
+	 * type modifier, and format code. If there are no result columns, a NoData packet is generated.
+	 *
+	 * @param send A boolean flag indicating whether to send the generated packet immediately or just generate it. (Currently not supported).
+	 * @param pg_query_result A pointer to the `PgSQL_Query_Result` object where the describe completion message will be copied.
+	 * @param result A pointer to the `PGresult` object containing the describe completion data.
+	 * @param stmt_type The type of statement being described (e.g., prepared statement 'S' or portal 'P').
+	 *
+	 * @return The number of bytes copied to the `PgSQL_Query_Result` object.
+	 *
+	 */
+	unsigned int copy_describe_completion_to_PgSQL_Query_Result(bool send, PgSQL_Query_Result* pg_query_result, 
+		const PGresult* result, uint8_t stmt_type);
 
 private:
 

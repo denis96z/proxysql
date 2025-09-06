@@ -2590,20 +2590,19 @@ void PgSQL_Session::handler_minus1_GenerateErrorMessage(PgSQL_Data_Stream* myds,
 	}
 
 	switch (status) {
-	case PROCESSING_STMT_EXECUTE:
-	case PROCESSING_QUERY:
-		PgSQL_Result_to_PgSQL_wire(myconn, myds);
-		break;
-	case PROCESSING_STMT_DESCRIBE:
 	case PROCESSING_STMT_PREPARE:
-		client_myds->myprot.generate_error_packet(true, true, myconn->get_error_message().c_str(), myconn->get_error_code(), false);
 		if (previous_status.size()) {
 			// an STMT_PREPARE failed
-			// we have a previous status, probably STMT_EXECUTE,
+			// we have a previous status, probably STMT_DESCRIBE or STMT_EXECUTE,
 			//    but returning to that status is not safe after STMT_PREPARE failed
 			// for this reason we exit immediately
 			wrong_pass = true;
 		}
+	// fall through
+	case PROCESSING_STMT_DESCRIBE:
+	case PROCESSING_STMT_EXECUTE:
+	case PROCESSING_QUERY:
+		PgSQL_Result_to_PgSQL_wire(myconn, myds);
 		break;
 	default:
 		// LCOV_EXCL_START
@@ -3048,22 +3047,31 @@ handler_again:
 				}
 
 				switch (status) {
-				case PROCESSING_STMT_EXECUTE:
-				case PROCESSING_QUERY:
-					PgSQL_Result_to_PgSQL_wire(myconn, myconn->myds);
-					break;
 				case PROCESSING_STMT_PREPARE:
 				{
 					enum session_status st;
 					if (handler___rc0_PROCESSING_STMT_PREPARE(st, myds)) {
+						// No need to send response to the client, prepared statement was created implicitly, 
+						// original query will be executed next
+						if (myconn->query_result) { 
+							assert(!myconn->query_result_reuse);
+							myconn->query_result->clear();
+							myconn->query_result_reuse = myconn->query_result;
+							myconn->query_result = NULL;
+						}
 						NEXT_IMMEDIATE(st);
 					}
 				}
-				break;
+				// fall through
 				case PROCESSING_STMT_DESCRIBE:
-					handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(myds);
+				case PROCESSING_STMT_EXECUTE:
+				case PROCESSING_QUERY:
+					PgSQL_Result_to_PgSQL_wire(myconn, myconn->myds);
 					break;
-				// Handled in PROCESSING_QUERY
+				// Handled above
+				//case PROCESSING_STMT_DESCRIBE:
+				//	handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(myds);
+				//	break;
 				//case PROCESSING_STMT_EXECUTE:
 				//	PgSQL_Result_to_PgSQL_wire(myconn, myconn->myds);
 				//	break;
@@ -4798,10 +4806,10 @@ void PgSQL_Session::PgSQL_Result_to_PgSQL_wire(PgSQL_Connection* _conn, PgSQL_Da
 		}
 		CurrentQuery.rows_sent = num_rows;
 		bool resultset_completed = query_result->get_resultset(client_myds->PSarrayOUT);
-		if (_conn->processing_multi_statement == false && status != PROCESSING_STMT_EXECUTE)
+		if (status == PROCESSING_QUERY && _conn->processing_multi_statement == false)
 			assert(resultset_completed); // the resultset should always be completed if PgSQL_Result_to_PgSQL_wire is called
-		if (transfer_started == false && _conn->processing_multi_statement == false && 
-			status != PROCESSING_STMT_EXECUTE) { // we have all the resultset when PgSQL_Result_to_PgSQL_wire was called
+		if (status == PROCESSING_QUERY && transfer_started == false && 
+			_conn->processing_multi_statement == false) { // we have all the resultset when PgSQL_Result_to_PgSQL_wire was called
 			if (qpo && qpo->cache_ttl > 0 && is_tuple == true) { // the resultset should be cached
 				
 				if (_conn->is_error_present() == false &&
@@ -5399,20 +5407,16 @@ void PgSQL_Session::generate_status_one_hostgroup(int hid, std::string& s) {
 void PgSQL_Session::set_previous_status_mode3(bool allow_execute) {
 	switch (status) {
 	case PROCESSING_QUERY:
-		previous_status.push(PROCESSING_QUERY);
-		break;
 	case PROCESSING_STMT_PREPARE:
-		previous_status.push(PROCESSING_STMT_PREPARE);
-		break;
 	case PROCESSING_STMT_DESCRIBE:
-		previous_status.push(PROCESSING_STMT_DESCRIBE);
+		previous_status.push(status);
 		break;
 	case PROCESSING_STMT_EXECUTE:
 		if (allow_execute == true) {
 			previous_status.push(PROCESSING_STMT_EXECUTE);
 			break;
 		}
-	
+	// fall back
 	default:
 		// LCOV_EXCL_START
 		assert(0); // Assert to indicate an unexpected status value
@@ -5572,7 +5576,6 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 				(begint.tv_sec * 1000000000 + begint.tv_nsec);
 		}
 		assert(qpo);	// GloPgQPro->process_mysql_query() should always return a qpo
-
 	}
 
 	if (parse_data.num_param_types > 0) {
@@ -6351,14 +6354,13 @@ bool PgSQL_Session::handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& s
 	assert(extended_query_info.stmt_client_name);
 	client_myds->myconn->local_stmts->client_insert(global_stmtid, extended_query_info.stmt_client_name);
 
-	bool send_ready_packet = is_extended_query_ready_for_query();
-	char txn_state = myds->myconn->get_transaction_status_char();
-	client_myds->myprot.generate_parse_completion_packet(true, send_ready_packet, txn_state);
 	LogQuery(myds);
 	GloPgStmt->unlock();
+
 	return false;
 }
 
+/* FIXME: Not Used anymore. To be removed in next iteration
 void PgSQL_Session::handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds) {
 	//thread->status_variables.stvar[st_var_backend_stmt_describe]++;
 	const PgSQL_Extended_Query_Info& extended_query_info = CurrentQuery.extended_query_info;
@@ -6373,7 +6375,7 @@ void PgSQL_Session::handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_St
 		delete myds->myconn->stmt_metadata_result;
 		myds->myconn->stmt_metadata_result = NULL;
 	}
-}
+}*/
 
 // Optimized single‐pass parser for PostgreSQL DateStyle strings.
 // It supports input in one of these forms:

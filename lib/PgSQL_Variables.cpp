@@ -263,16 +263,10 @@ inline bool verify_server_variable(PgSQL_Session* session, int idx, uint32_t cli
 		session->changing_variable_idx = (enum pgsql_variable_name)idx;
 		switch(session->status) { // this switch can be replaced with a simple previous_status.push(status), but it is here for readibility
 			case PROCESSING_QUERY:
-				session->previous_status.push(PROCESSING_QUERY);
-				break;
 			case PROCESSING_STMT_PREPARE:
-				session->previous_status.push(PROCESSING_STMT_PREPARE);
-				break;
 			case PROCESSING_STMT_DESCRIBE:
-				session->previous_status.push(PROCESSING_STMT_DESCRIBE);
-				break;
 			case PROCESSING_STMT_EXECUTE:
-				session->previous_status.push(PROCESSING_STMT_EXECUTE);
+				session->previous_status.push(session->status);
 				break;
 			default:
 				// LCOV_EXCL_START

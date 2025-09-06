@@ -156,7 +156,7 @@ PgSQL_Connection::PgSQL_Connection(bool is_client_conn) {
 	pgsql_result = NULL;
 	query_result = NULL;
 	query_result_reuse = NULL;
-	stmt_metadata_result = NULL;
+	//stmt_metadata_result = NULL;
 	myds = NULL;
 	parent = NULL;
 	fd = -1;
@@ -224,10 +224,10 @@ PgSQL_Connection::~PgSQL_Connection() {
 		query_result_reuse = NULL;
 	}
 
-	if (stmt_metadata_result) {
+	/*if (stmt_metadata_result) {
 		delete stmt_metadata_result;
 		stmt_metadata_result = NULL;
-	}
+	}*/
 
 	if (connected_host_details.hostname) {
 		free(connected_host_details.hostname);
@@ -255,6 +255,7 @@ PgSQL_Connection::~PgSQL_Connection() {
 			startup_parameters_hash[i] = 0;
 		}
 	}
+	reset_error_info(error_info, true);
 }
 
 void PgSQL_Connection::next_event(PG_ASYNC_ST new_st) {
@@ -422,26 +423,7 @@ handler_again:
 			if (is_error_present()) {
 				NEXT_IMMEDIATE(fetch_result_end_st);
 			}
-			new_result = true;
-			if (myds->sess->mirror == false) {
-				if (query_result_reuse == NULL) {
-					query_result = new PgSQL_Query_Result();
-					query_result->init(&myds->sess->client_myds->myprot, myds, this);
-				} else {
-					query_result = query_result_reuse;
-					query_result_reuse = NULL;
-					query_result->init(&myds->sess->client_myds->myprot, myds, this);
-				}
-			} else {
-				if (query_result_reuse == NULL) {
-					query_result = new PgSQL_Query_Result();
-					query_result->init(NULL, myds, this);
-				} else {
-					query_result = query_result_reuse;
-					query_result_reuse = NULL;
-					query_result->init(NULL, myds, this);
-				}
-			}
+			init_query_result();
 			NEXT_IMMEDIATE(ASYNC_USE_RESULT_CONT);
 		} else {
 			assert(0); // shouldn't ever reach here
@@ -470,7 +452,9 @@ handler_again:
 
 				const ExecStatusType exec_status_type = PQresultStatus(result.get());
 
-				if ((query_result->get_result_packet_type() & (PGSQL_QUERY_RESULT_COMMAND | PGSQL_QUERY_RESULT_EMPTY | PGSQL_QUERY_RESULT_ERROR))) {
+				// Multi-statements are supported only in simple queries
+				if (fetch_result_end_st == ASYNC_QUERY_END &&
+					(query_result->get_result_packet_type() & (PGSQL_QUERY_RESULT_COMMAND | PGSQL_QUERY_RESULT_EMPTY | PGSQL_QUERY_RESULT_ERROR))) {
 					next_multi_statement_result(result.release());
 					next_event(ASYNC_USE_RESULT_START);
 					break;
@@ -479,19 +463,30 @@ handler_again:
 				switch (exec_status_type) {
 				case PGRES_COMMAND_OK:
 					{
-						// PQsendQueryPrepared sends the sequence BIND -> DESCRIBE(PORTAL) -> EXECUTE -> SYNC
-						// Since libpq does not indicate whether the DESCRIBE PORTAL step produced a
-						// NoData packet for commands such as INSERT, DELETE, or UPDATE.
-						// In these cases, libpq returns PGRES_COMMAND_OK (whereas SELECT statements
-						// yield PGRES_SINGLE_TUPLE or PGRES_TUPLES_OK). Therefore, it is safe to
-						// explicitly append a NoData packet to the result.
-						if (fetch_result_end_st == ASYNC_STMT_EXECUTE_END &&
-							(query.extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
-							const unsigned int bytes_recv = query_result->add_no_data();
-							update_bytes_recv(bytes_recv);
+						unsigned int bytes_recv = 0;
+						switch (fetch_result_end_st)
+						{
+						case ASYNC_STMT_PREPARE_END:
+							bytes_recv = query_result->add_parse_completion();
+							break;
+						case ASYNC_DESCRIBE_END:
+							bytes_recv = query_result->add_describe_completion(result.get(), query.extended_query_info->stmt_type);
+							break;
+						case ASYNC_STMT_EXECUTE_END:
+							// PQsendQueryPrepared sends the sequence BIND -> DESCRIBE(PORTAL) -> EXECUTE -> SYNC
+							// Since libpq does not indicate whether the DESCRIBE PORTAL step produced a
+							// NoData packet for commands such as INSERT, DELETE, or UPDATE.
+							// In these cases, libpq returns PGRES_COMMAND_OK (whereas SELECT statements
+							// yield PGRES_SINGLE_TUPLE or PGRES_TUPLES_OK). Therefore, it is safe to
+							// explicitly append a NoData packet to the result.
+							if ((query.extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
+								bytes_recv = query_result->add_no_data();
+							}
+							// fallthrough
+						default:
+							bytes_recv += query_result->add_command_completion(result.get());
+							break;
 						}
-
-						const unsigned int bytes_recv = query_result->add_command_completion(result.get());
 						update_bytes_recv(bytes_recv);
 					}
 					NEXT_IMMEDIATE(ASYNC_USE_RESULT_CONT);
@@ -657,8 +652,8 @@ handler_again:
 		// ReadyForQuery would never be sent because the pending messages are discarded.
 		//
 		// Fix: if the result indicates an error, explicitly send ReadyForQuery immediately.
-		// The extended query flag will still be reset later in the session.
-		if (fetch_result_end_st == ASYNC_STMT_EXECUTE_END &&
+		// The extended query frame will still be reset later in the session.
+		if (fetch_result_end_st != ASYNC_QUERY_END &&
 			!myds->sess->is_extended_query_ready_for_query() &&
 			((query_result->get_result_packet_type() & PGSQL_QUERY_RESULT_ERROR) == 0)) {
 			// Skip sending ReadyForQuery if there are still extended query messages pending in the queue
@@ -744,47 +739,37 @@ handler_again:
 		statuses.questions++;
 		if (async_exit_status) {
 			next_event(ASYNC_STMT_PREPARE_CONT);
-		}
-		else {
+		} else {
 			NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_END);
 		}
 		break;
 	case ASYNC_STMT_PREPARE_CONT:
-		{
-			if (event) {
-				stmt_prepare_cont(event);
-			}
-			if (async_exit_status) {
-				next_event(ASYNC_STMT_PREPARE_END);
-				break;
-			}
+		if (event) {
+			stmt_prepare_cont(event);
+		}
+		if (async_exit_status) {
+			next_event(ASYNC_STMT_PREPARE_CONT);
+		} else {
 			if (is_error_present()) {
 				NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_END);
 			}
-			PGresult* result = get_result();
-			if (result) {
-				if (PQresultStatus(result) != PGRES_COMMAND_OK) {
-					set_error_from_result(result, PGSQL_ERROR_FIELD_ALL);
-					assert(is_error_present());
-				}
-				PQclear(result);
-				NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_CONT);
-			}
-			NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_END);
+			set_fetch_result_end_state(ASYNC_STMT_PREPARE_END);
+			NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
 		}
 		break;
 	case ASYNC_STMT_PREPARE_END:
-		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
+		PROXY_TRACE2();
 		if (is_error_present()) {
+			compute_unknown_transaction_status();
 			proxy_error("Failed to prepare statement: %s\n", get_error_code_with_message().c_str());
-			NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_FAILED);
+		} else {
+			unknown_transaction_status = false;
 		}
-		else {
-			NEXT_IMMEDIATE(ASYNC_STMT_PREPARE_SUCCESSFUL);
-		}
-		break;
-	case ASYNC_STMT_PREPARE_FAILED:
-	case ASYNC_STMT_PREPARE_SUCCESSFUL:
+
+		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
+
+		assert(!pgsql_result);
+		assert(!is_copy_out);
 		break;
 
 	case ASYNC_DESCRIBE_START:
@@ -796,45 +781,34 @@ handler_again:
 		}
 		break;
 	case ASYNC_DESCRIBE_CONT:
-	{
 		if (event) {
 			stmt_describe_cont(event);
 		}
 		if (async_exit_status) {
 			next_event(ASYNC_DESCRIBE_CONT);
-			break;
-		}
-		if (is_error_present()) {
-			NEXT_IMMEDIATE(ASYNC_DESCRIBE_END);
-		}
-		PGresult* result = get_result();
-		if (result) {
-			if (PQresultStatus(result) != PGRES_COMMAND_OK) {
-				set_error_from_result(result, PGSQL_ERROR_FIELD_ALL);
-				assert(is_error_present());
-			}
-			if (stmt_metadata_result == NULL) {
-				stmt_metadata_result = new PgSQL_Describe_Prepared_Info();
-			}
-			stmt_metadata_result->populate(result);
-			PQclear(result);
-			NEXT_IMMEDIATE(ASYNC_DESCRIBE_CONT);
-		}
-		NEXT_IMMEDIATE(ASYNC_DESCRIBE_END);
-	}
-	break;
-	case ASYNC_DESCRIBE_END:
-		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
-		if (is_error_present()) {
-			proxy_error("Failed to describe prepared statement: %s\n", get_error_code_with_message().c_str());
-			NEXT_IMMEDIATE(ASYNC_DESCRIBE_FAILED);
 		} else {
-			NEXT_IMMEDIATE(ASYNC_DESCRIBE_SUCCESSFUL);
+			if (is_error_present()) {
+				NEXT_IMMEDIATE(ASYNC_DESCRIBE_END);
+			}
+			set_fetch_result_end_state(ASYNC_DESCRIBE_END);
+			NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
 		}
 		break;
-	case ASYNC_DESCRIBE_SUCCESSFUL:
-	case ASYNC_DESCRIBE_FAILED:
+	case ASYNC_DESCRIBE_END:
+		PROXY_TRACE2();
+		if (is_error_present()) {
+			compute_unknown_transaction_status();
+			proxy_error("Failed to describe prepared statement: %s\n", get_error_code_with_message().c_str());
+		} else {
+			unknown_transaction_status = false;
+		}
+		
+		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
+
+		assert(!pgsql_result);
+		assert(!is_copy_out);
 		break;
+
 	case ASYNC_STMT_EXECUTE_START:
 		stmt_execute_start();
 		if (async_exit_status) {
@@ -1089,7 +1063,6 @@ void PgSQL_Connection::query_start() {
 	reset_error();
 	processing_multi_statement = false;
 	async_exit_status = PG_EVENT_NONE;
-
 	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
 
 	if (PQsendQuery(pgsql_conn, query.ptr) == 0) {
@@ -1357,28 +1330,13 @@ int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long l
 		break;
 	}
 
-	if (async_state_machine == ASYNC_STMT_EXECUTE_END) {
-		PROXY_TRACE2();
-		async_state_machine = ASYNC_QUERY_END;
-	}
-
-	if (async_state_machine == ASYNC_QUERY_END) {
+	if (async_state_machine == ASYNC_QUERY_END ||
+		async_state_machine == ASYNC_STMT_EXECUTE_END ||
+		async_state_machine == ASYNC_DESCRIBE_END ||
+		async_state_machine == ASYNC_STMT_PREPARE_END) {
 		PROXY_TRACE2();
 		compute_unknown_transaction_status();
 		if (is_error_present()) {
-			return -1;
-		} else {
-			return 0;
-		}
-	}
-
-	if (async_state_machine == ASYNC_STMT_PREPARE_SUCCESSFUL || 
-		async_state_machine == ASYNC_STMT_PREPARE_FAILED || 
-		async_state_machine == ASYNC_DESCRIBE_SUCCESSFUL ||
-		async_state_machine == ASYNC_DESCRIBE_FAILED) {
-		compute_unknown_transaction_status();
-		if (async_state_machine == ASYNC_STMT_PREPARE_FAILED ||
-			async_state_machine == ASYNC_DESCRIBE_FAILED) {
 			return -1;
 		} else {
 			return 0;
@@ -1640,27 +1598,7 @@ void PgSQL_Connection::stmt_prepare_cont(short event) {
 	async_exit_status = PG_EVENT_NONE;
 	if (event & POLLOUT) {
 		flush();
-		return;
 	}
-
-	if (PQconsumeInput(pgsql_conn) == 0) {
-		/* We will only set the error if we didn't capture error in last call. If is_error_present is true,
-		 * it indicates that an error was already captured during a previous PQconsumeInput call,
-		 * and we do not want to overwrite that information.
-		 */
-		if (is_error_present() == false) {
-			set_error_from_PQerrorMessage();
-			proxy_error("Failed to consume input. %s\n", get_error_code_with_message().c_str());
-		}
-		return;
-	}
-
-	if (PQisBusy(pgsql_conn)) {
-		async_exit_status = PG_EVENT_READ;
-		return;
-	}
-
-	pgsql_result = PQgetResult(pgsql_conn);
 }
 
 void PgSQL_Connection::stmt_describe_start() {
@@ -1668,6 +1606,7 @@ void PgSQL_Connection::stmt_describe_start() {
 	reset_error();
 	processing_multi_statement = false;
 	async_exit_status = PG_EVENT_NONE;
+
 	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
 
 	const PgSQL_Extended_Query_Info* extended_query_info = query.extended_query_info;
@@ -1694,30 +1633,14 @@ void PgSQL_Connection::stmt_describe_start() {
 	}
 	flush();
 }
+
 void PgSQL_Connection::stmt_describe_cont(short event) {
 	PROXY_TRACE();
 	proxy_debug(PROXY_DEBUG_MYSQL_PROTOCOL, 6, "event=%d\n", event);
 	async_exit_status = PG_EVENT_NONE;
 	if (event & POLLOUT) {
 		flush();
-		return;
 	}
-	if (PQconsumeInput(pgsql_conn) == 0) {
-		/* We will only set the error if we didn't capture error in last call. If is_error_present is true,
-		 * it indicates that an error was already captured during a previous PQconsumeInput call,
-		 * and we do not want to overwrite that information.
-		 */
-		if (is_error_present() == false) {
-			set_error_from_PQerrorMessage();
-			proxy_error("Failed to consume input. %s\n", get_error_code_with_message().c_str());
-		}
-		return;
-	}
-	if (PQisBusy(pgsql_conn)) {
-		async_exit_status = PG_EVENT_READ;
-		return;
-	}
-	pgsql_result = PQgetResult(pgsql_conn);
 }
 
 void PgSQL_Connection::stmt_execute_start() {
@@ -2677,6 +2600,30 @@ void PgSQL_Connection::copy_startup_parameters_to_pgsql_variables(bool copy_only
 			variables[i].value = nullptr;
 		}
 	}
+}
+
+void PgSQL_Connection::init_query_result() {
+	if (!query_result_reuse) {
+		if (query_result) {
+#ifdef DEBUG
+			assert(!query_result);
+#endif
+			delete query_result;
+			query_result = nullptr;
+		}
+		query_result = new PgSQL_Query_Result();
+	} else {
+		query_result = query_result_reuse;
+		query_result_reuse = nullptr;
+	}
+
+	if (myds->sess->mirror == false) {
+		query_result->init(&myds->sess->client_myds->myprot, myds, this);
+	}
+	else {
+		query_result->init(NULL, myds, this);
+	}
+	new_result = true;
 }
 
 PgSQL_CancelQueryArgs::PgSQL_CancelQueryArgs(PGconn* _conn, const char* user, const char* host,

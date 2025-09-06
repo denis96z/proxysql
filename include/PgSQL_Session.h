@@ -268,7 +268,8 @@ private:
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_EXECUTE(PtrSize_t& pkt);
 	int handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC();
 	bool handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds);
-	void handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds);
+	// FIXME: unused. Remove in next iteration
+	//void handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds);
 	int handler___status_PROCESSING_EXTENDED_QUERY_SYNC();
 	int handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg);
 	int handle_post_sync_describe_message(PgSQL_Describe_Message* describe_msg);

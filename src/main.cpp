@@ -1305,14 +1305,6 @@ void ProxySQL_Main_shutdown_all_modules() {
 		std::cerr << "GloPgHGM shutdown in ";
 #endif
 	}
-	{
-		cpu_timer t;
-		PgHGM->shutdown();
-		delete PgHGM;
-#ifdef DEBUG
-		std::cerr << "GloPGM shutdown in ";
-#endif
-	}
 	if (GloMyStmt) {
 		delete GloMyStmt;
 		GloMyStmt=NULL;
