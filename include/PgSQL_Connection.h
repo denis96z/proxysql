@@ -622,7 +622,8 @@ private:
 	// Set end state for the fetch result to indicate that it originates from a simple query or statement execution.
 	ASYNC_ST fetch_result_end_st = ASYNC_QUERY_END;
 	inline void set_fetch_result_end_state(ASYNC_ST st) {
-		assert(st == ASYNC_QUERY_END || st == ASYNC_STMT_EXECUTE_END || st == ASYNC_DESCRIBE_END || st == ASYNC_STMT_PREPARE_END);
+		assert(st == ASYNC_QUERY_END || st == ASYNC_STMT_EXECUTE_END || 
+			st == ASYNC_STMT_DESCRIBE_END || st == ASYNC_STMT_PREPARE_END);
 		fetch_result_end_st = st;
 	}
 	// Handles the COPY OUT response from the server.

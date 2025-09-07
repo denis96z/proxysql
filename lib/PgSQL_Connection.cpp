@@ -469,7 +469,7 @@ handler_again:
 						case ASYNC_STMT_PREPARE_END:
 							bytes_recv = query_result->add_parse_completion();
 							break;
-						case ASYNC_DESCRIBE_END:
+						case ASYNC_STMT_DESCRIBE_END:
 							bytes_recv = query_result->add_describe_completion(result.get(), query.extended_query_info->stmt_type);
 							break;
 						case ASYNC_STMT_EXECUTE_END:
@@ -772,29 +772,29 @@ handler_again:
 		assert(!is_copy_out);
 		break;
 
-	case ASYNC_DESCRIBE_START:
+	case ASYNC_STMT_DESCRIBE_START:
 		stmt_describe_start();
 		if (async_exit_status) {
-			next_event(ASYNC_DESCRIBE_CONT);
+			next_event(ASYNC_STMT_DESCRIBE_CONT);
 		} else {
-			NEXT_IMMEDIATE(ASYNC_DESCRIBE_END);
+			NEXT_IMMEDIATE(ASYNC_STMT_DESCRIBE_END);
 		}
 		break;
-	case ASYNC_DESCRIBE_CONT:
+	case ASYNC_STMT_DESCRIBE_CONT:
 		if (event) {
 			stmt_describe_cont(event);
 		}
 		if (async_exit_status) {
-			next_event(ASYNC_DESCRIBE_CONT);
+			next_event(ASYNC_STMT_DESCRIBE_CONT);
 		} else {
 			if (is_error_present()) {
-				NEXT_IMMEDIATE(ASYNC_DESCRIBE_END);
+				NEXT_IMMEDIATE(ASYNC_STMT_DESCRIBE_END);
 			}
-			set_fetch_result_end_state(ASYNC_DESCRIBE_END);
+			set_fetch_result_end_state(ASYNC_STMT_DESCRIBE_END);
 			NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
 		}
 		break;
-	case ASYNC_DESCRIBE_END:
+	case ASYNC_STMT_DESCRIBE_END:
 		PROXY_TRACE2();
 		if (is_error_present()) {
 			compute_unknown_transaction_status();
@@ -1317,7 +1317,7 @@ int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long l
 			if (type == PGSQL_EXTENDED_QUERY_TYPE_PARSE) {
 				async_state_machine = ASYNC_STMT_PREPARE_START;
 			} else if (type == PGSQL_EXTENDED_QUERY_TYPE_DESCRIBE) {
-				async_state_machine = ASYNC_DESCRIBE_START;
+				async_state_machine = ASYNC_STMT_DESCRIBE_START;
 			} else if (type == PGSQL_EXTENDED_QUERY_TYPE_EXECUTE) {
 				async_state_machine = ASYNC_STMT_EXECUTE_START;
 			} else {
@@ -1332,7 +1332,7 @@ int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long l
 
 	if (async_state_machine == ASYNC_QUERY_END ||
 		async_state_machine == ASYNC_STMT_EXECUTE_END ||
-		async_state_machine == ASYNC_DESCRIBE_END ||
+		async_state_machine == ASYNC_STMT_DESCRIBE_END ||
 		async_state_machine == ASYNC_STMT_PREPARE_END) {
 		PROXY_TRACE2();
 		compute_unknown_transaction_status();

@@ -2562,10 +2562,8 @@ bool PgSQL_Session::handler_minus1_HandleErrorCodes(PgSQL_Data_Stream* myds, int
 		myds->fd = 0;
 		if (retry_conn) {
 			myds->DSS = STATE_NOT_INITIALIZED;
-			//previous_status.push(PROCESSING_QUERY);
 			set_previous_status_mode3(false);
 			return true; // it will call NEXT_IMMEDIATE(CONNECTING_SERVER);
-			//NEXT_IMMEDIATE(CONNECTING_SERVER);
 		}
 		//handler_ret = -1;
 		//return handler_ret;
