@@ -4114,9 +4114,15 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 		}
 
 		client_myds->DSS = STATE_QUERY_SENT_NET;
+		
+		if (extended_query_phase != EXTQ_PHASE_IDLE &&
+			(CurrentQuery.extended_query_info.flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
+			client_myds->myprot.generate_no_data_packet(true);
+		}
+		bool send_ready_packet = is_extended_query_ready_for_query();
 		unsigned int nTrx = NumActiveTransactions();
 		const char txn_state = (nTrx ? 'T' : 'I');
-		client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, txn_state, NULL, param_status);
+		client_myds->myprot.generate_ok_packet(true, send_ready_packet, NULL, 0, dig, txn_state, NULL, param_status);
 		RequestEnd(NULL, false);
 		return true;
 	} else {
@@ -4212,9 +4218,15 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 		}
 	}
 	client_myds->DSS = STATE_QUERY_SENT_NET;
+
+	if (extended_query_phase != EXTQ_PHASE_IDLE &&
+		(CurrentQuery.extended_query_info.flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
+		client_myds->myprot.generate_no_data_packet(true);
+	}
+	bool send_ready_packet = is_extended_query_ready_for_query();
 	unsigned int nTrx = NumActiveTransactions();
 	const char txn_state = (nTrx ? 'T' : 'I');
-	client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, txn_state, NULL, param_status);
+	client_myds->myprot.generate_ok_packet(true, send_ready_packet, NULL, 0, dig, txn_state, NULL, param_status);
 
 	if (mirror == false) {
 		RequestEnd(NULL, false);
@@ -4258,9 +4270,14 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 
 	if (handled) {
 		client_myds->DSS = STATE_QUERY_SENT_NET;
+		if (extended_query_phase != EXTQ_PHASE_IDLE &&
+			(CurrentQuery.extended_query_info.flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
+			client_myds->myprot.generate_no_data_packet(true);
+		}
+		bool send_ready_packet = is_extended_query_ready_for_query();
 		unsigned int nTrx = NumActiveTransactions();
 		const char txn_state = (nTrx ? 'T' : 'I');
-		client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, txn_state, NULL, {});
+		client_myds->myprot.generate_ok_packet(true, send_ready_packet, NULL, 0, dig, txn_state, NULL, {});
 
 		if (mirror == false) {
 			RequestEnd(NULL, false);
@@ -4304,9 +4321,14 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 	}
 
 	client_myds->DSS = STATE_QUERY_SENT_NET;
+	if (extended_query_phase != EXTQ_PHASE_IDLE &&
+		(CurrentQuery.extended_query_info.flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
+		client_myds->myprot.generate_no_data_packet(true);
+	}
+	bool send_ready_packet = is_extended_query_ready_for_query();
 	unsigned int nTrx = NumActiveTransactions();
 	const char txn_state = (nTrx ? 'T' : 'I');
-	client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, txn_state, NULL, {});
+	client_myds->myprot.generate_ok_packet(true, send_ready_packet, NULL, 0, dig, txn_state, NULL, {});
 
 	if (mirror == false) {
 		RequestEnd(NULL, false);

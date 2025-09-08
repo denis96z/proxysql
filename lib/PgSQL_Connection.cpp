@@ -2168,6 +2168,14 @@ int PgSQL_Connection::async_send_simple_command(short event, char* stmt, unsigne
 		return -2;
 	}
 	if (async_state_machine == ASYNC_QUERY_END) {
+		// We just needed to know if the query was successful, not. 
+		// We discard the result.
+		if (query_result) {
+			assert(!query_result_reuse);
+			query_result->clear();
+			query_result_reuse = query_result;
+			query_result = NULL;
+		}
 		compute_unknown_transaction_status();
 		if (is_error_present()) {
 			return -1;

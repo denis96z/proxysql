@@ -1664,6 +1664,22 @@ bool PgSQL_Protocol::generate_bind_completion_packet(bool send, bool ready, char
 	return true;
 }
 
+bool PgSQL_Protocol::generate_no_data_packet(bool send, PtrSize_t* _ptr) {
+	// to avoid memory leak
+	assert(send == true || _ptr);
+	PG_pkt pgpkt(5);
+	pgpkt.put_char('n');
+	pgpkt.put_uint32(4); // size of the NoData packet (Fixed 4 bytes)
+	auto buff = pgpkt.detach();
+	if (send == true) {
+		(*myds)->PSarrayOUT->add((void*)buff.first, buff.second);
+	} else {
+		_ptr->ptr = buff.first;
+		_ptr->size = buff.second;
+	}
+	return true;
+}
+
 bool PgSQL_Protocol::generate_parse_completion_packet(bool send, bool ready, char trx_state, PtrSize_t* _ptr) {
 	// to avoid memory leak
 	assert(send == true || _ptr);
