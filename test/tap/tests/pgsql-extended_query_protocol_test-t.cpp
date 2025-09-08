@@ -3199,11 +3199,302 @@ void test_set_statement_tracked() {
 		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for SET EXECUTE");
 		conn->readMessage(type, buf);
 		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery after SET STATEMENT");
-
+		usleep(1000);
 		ok(check_logs_for_command(".*\\[WARNING\\] Unable to parse unknown SET query from client.*") == false, "Should not be locked on a hostgroup");
 	}
 	catch (const PgException& e) {
 		ok(false, "Extended Query SET Statement Tracked test failed: %s", e.what());
+	}
+}
+
+void test_set_statement_tracked_with_describe() {
+	diag("Test %d: Extended Query SET Statement Tracked with Describe", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	try {
+		conn->prepareStatement("set_tracked_stmt_2", "SET client_min_messages TO 'error'", false);
+		conn->bindStatement("set_tracked_stmt_2", "", {}, {}, false);
+		conn->describePortal("", false);
+		conn->executeStatement(0, false);
+		conn->sendSync();
+
+		char type;
+		std::vector<uint8_t> buf;
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete for SET STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for SET STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::NO_DATA, "NoData for SET DESCRIBE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for SET EXECUTE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery after SET STATEMENT");
+		usleep(1000);
+		ok(check_logs_for_command(".*\\[WARNING\\] Unable to parse unknown SET query from client.*") == false, "Should not be locked on a hostgroup");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query SET Statement Tracked test failed: %s", e.what());
+	}
+}
+
+void test_set_statement_with_simple_query_mix() {
+	diag("Test %d: Extended Query SET Statement with Simple Query Mix", test_count++);
+	auto conn = create_connection(); if (!conn) return;
+	try {
+		conn->prepareStatement("set_stmt_mix", "SET client_min_messages TO 'error'", false);
+		conn->bindStatement("set_stmt_mix", "", {}, {}, false);
+		conn->describePortal("", false);
+		conn->executeStatement(0, false);
+		conn->execute("SHOW client_min_messages");
+
+		char type;
+		std::vector<uint8_t> buf;
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete for SET STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for SET STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::NO_DATA, "NoData for SET DESCRIBE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for SET EXECUTE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::ROW_DESCRIPTION, "RowDescription for SHOW");
+		BufferReader buff(buf);
+		int16_t fields = buff.readInt16();
+		ok(fields == 1, "One field in RowDescription for SHOW (%d/1)", fields);
+		std::string field_name = buff.readString();
+		ok(field_name == "client_min_messages", "Field name is 'client_min_messages' (%s)", field_name.c_str());
+		unsigned int table_oid = buff.readInt32();
+		ok(table_oid == 0, "Field table OID is 0 (no table)");
+		unsigned int attr_num = buff.readInt16();
+		ok(attr_num == 0, "Field attribute number is 0 (no specific column)");
+		unsigned int type_oid = buff.readInt32();
+		ok(type_oid == 25, "Field type OID is 25 (text)");
+		unsigned int type_size = buff.readInt16();
+		ok(type_size == -1, "Field type size is -1 (text size)");
+		unsigned int type_modifier = buff.readInt32();
+		ok(type_modifier == -1, "Field type modifier is -1 (default)");
+		unsigned int format_code = buff.readInt16();
+		ok(format_code == 0, "Field format code is 0 (text format)");
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::DATA_ROW, "DataRow for SHOW");
+		buff = buf;
+		int16_t cols = buff.readInt16();
+		ok(cols == 1, "One column in DataRow for SHOW (%d/1)", cols);
+		// Read column length
+		int32_t col_len = buff.readInt32();
+		ok(col_len == 5, "Column length is 5 (text size)");
+		std::vector<uint8_t> val = buff.readBytes(col_len);
+		ok(memcmp((char*)val.data(), "error", col_len) == 0, "SHOW returned 'error'");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for SHOW");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery after SET STATEMENT and SHOW");
+		
+		usleep(1000);
+		ok(check_logs_for_command(".*\\[WARNING\\] Unable to parse unknown SET query from client.*") == false, "Should not be locked on a hostgroup");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query SET Statement Tracked test failed: %s", e.what());
+	}
+}
+
+void test_reset_statement_with_simple_query_mix() {
+	diag("Test %d: Extended Query RESET Statement with Simple Query Mix", test_count++);
+	auto conn = create_connection();
+	if (!conn) return;
+	try {
+		conn->execute("SET client_min_messages='notice'");
+		conn->waitForReady();
+
+		conn->prepareStatement("reset_stmt_mix", "RESET client_min_messages", false);
+		conn->bindStatement("reset_stmt_mix", "", {}, {}, false);
+		conn->describePortal("", false);
+		conn->executeStatement(0, false);
+		conn->execute("SHOW client_min_messages");
+
+		char type;
+		std::vector<uint8_t> buf;
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete for RESET STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for RESET STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::NO_DATA, "NoData for RESET DESCRIBE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for RESET EXECUTE");
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::ROW_DESCRIPTION, "RowDescription for SHOW after RESET");
+
+		BufferReader buff(buf);
+		int16_t fields = buff.readInt16();
+		ok(fields == 1, "One field in RowDescription for SHOW (%d/1)", fields);
+
+		std::string field_name = buff.readString();
+		ok(field_name == "client_min_messages", "Field name is 'client_min_messages' (%s)", field_name.c_str());
+
+		buff.readInt32(); // table_oid
+		buff.readInt16(); // attr_num
+		unsigned int type_oid = buff.readInt32();
+		ok(type_oid == 25, "Field type OID is 25 (text)");
+
+		buff.readInt16(); // type_size
+		buff.readInt32(); // type_modifier
+		buff.readInt16(); // format_code
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::DATA_ROW, "DataRow for SHOW after RESET");
+
+		buff = buf;
+		int16_t cols = buff.readInt16();
+		ok(cols == 1, "One column in DataRow (%d/1)", cols);
+
+		int32_t col_len = buff.readInt32();
+		std::vector<uint8_t> val = buff.readBytes(col_len);
+		ok(col_len == 6, "Column length is 6 (text size) after RESET");
+		ok(memcmp((char*)val.data(), "notice", col_len) == 0, "SHOW after RESET returned 'notice'");
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for SHOW");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery after RESET and SHOW");
+
+		usleep(1000);
+		ok(check_logs_for_command(".*\\[WARNING\\] Unable to parse unknown RESET query from client.*") == false,
+			"Should not be locked on a hostgroup");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query RESET Statement test failed: %s", e.what());
+	}
+}
+
+void test_discard_statement_with_simple_query_mix() {
+	diag("Test %d: Extended Query DISCARD Statement with Simple Query Mix", test_count++);
+	auto conn = create_connection();
+	if (!conn) return;
+	try {
+		conn->prepareStatement("discard_stmt_mix", "DISCARD TEMP", false);
+		conn->bindStatement("discard_stmt_mix", "", {}, {}, false);
+		conn->describePortal("", false);
+		conn->executeStatement(0, false);
+		conn->execute("SELECT 1");
+
+		char type;
+		std::vector<uint8_t> buf;
+
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete for DISCARD STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for DISCARD STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::NO_DATA, "NoData for DISCARD DESCRIBE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for DISCARD EXECUTE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::ROW_DESCRIPTION, "RowDescription for SELECT after DISCARD");
+		BufferReader buff(buf);
+		int16_t fields = buff.readInt16();
+		ok(fields == 1, "One field in RowDescription for SELECT (%d/1)", fields);
+		std::string field_name = buff.readString();
+		ok(field_name == "?column?", "Field name is '?column?' (%s)", field_name.c_str());
+		unsigned int table_oid = buff.readInt32();
+		ok(table_oid == 0, "Field table OID is 0 (no table)");
+		unsigned int attr_num = buff.readInt16();
+		ok(attr_num == 0, "Field attribute number is 0 (no specific column)");
+		unsigned int type_oid = buff.readInt32();
+		ok(type_oid == 23, "Field type OID is 23 (integer)");
+		unsigned int type_size = buff.readInt16();
+		ok(type_size == 4, "Field type size is 4 (integer size)");
+		unsigned int type_modifier = buff.readInt32();
+		ok(type_modifier == -1, "Field type modifier is -1 (default)");
+		unsigned int format_code = buff.readInt16();
+		ok(format_code == 0, "Field format code is 0 (text format)");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::DATA_ROW, "DataRow for SELECT after DISCARD");
+		buff = buf;
+		int16_t cols = buff.readInt16();
+		ok(cols == 1, "One column in DataRow for SELECT (%d/1)", cols);
+		// Read column length
+		int32_t col_len = buff.readInt32();
+		ok(col_len == 1, "Column length is 1 (text size)");
+		std::vector<uint8_t> val = buff.readBytes(col_len);
+		ok(memcmp((char*)val.data(), "1", col_len) == 0, "SELECT after DISCARD returned '1'");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for SELECT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery after DISCARD and SELECT");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query DISCARD Statement with Simple Query Mix test failed: %s", e.what());
+	}
+}
+
+void test_deallocate_statement_with_simple_query_mix() {
+	diag("Test %d: Extended Query DEALLOCATE Statement with Simple Query Mix", test_count++);
+	auto conn = create_connection();
+	if (!conn) return;
+	try {
+		// Prepare a dummy statement first
+		conn->prepareStatement("dummy_stmt", "SELECT 1", false);
+
+		// Now DEALLOCATE it
+		conn->prepareStatement("dealloc_stmt_mix", "DEALLOCATE dummy_stmt", false);
+		conn->bindStatement("dealloc_stmt_mix", "", {}, {}, false);
+		conn->describePortal("", false);
+		conn->executeStatement(0, false);
+		conn->execute("SELECT 1");
+
+		char type;
+		std::vector<uint8_t> buf;
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete for DEALLOCATE STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::PARSE_COMPLETE, "ParseComplete for DEALLOCATE STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::BIND_COMPLETE, "BindComplete for DEALLOCATE STATEMENT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::NO_DATA, "NoData for DEALLOCATE DESCRIBE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for DEALLOCATE EXECUTE");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::ROW_DESCRIPTION, "RowDescription for SELECT after DEALLOCATE");
+		BufferReader buff(buf);
+		int16_t fields = buff.readInt16();
+		ok(fields == 1, "One field in RowDescription for SELECT (%d/1)", fields);
+		std::string field_name = buff.readString();
+		ok(field_name == "?column?", "Field name is '?column?' (%s)", field_name.c_str());
+		unsigned int table_oid = buff.readInt32();
+		ok(table_oid == 0, "Field table OID is 0 (no table)");
+		unsigned int attr_num = buff.readInt16();
+		ok(attr_num == 0, "Field attribute number is 0 (no specific column)");
+		unsigned int type_oid = buff.readInt32();
+		ok(type_oid == 23, "Field type OID is 23 (integer)");
+		unsigned int type_size = buff.readInt16();
+		ok(type_size == 4, "Field type size is 4 (integer size)");
+		unsigned int type_modifier = buff.readInt32();
+		ok(type_modifier == -1, "Field type modifier is -1 (default)");
+		unsigned int format_code = buff.readInt16();
+		ok(format_code == 0, "Field format code is 0 (text format)");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::DATA_ROW, "DataRow for SELECT after DEALLOCATE");
+		buff = buf;
+		int16_t cols = buff.readInt16();
+		ok(cols == 1, "One column in DataRow for SELECT (%d/1)", cols);
+		// Read column length
+		int32_t col_len = buff.readInt32();
+		ok(col_len == 1, "Column length is 1 (text size)");
+		std::vector<uint8_t> val = buff.readBytes(col_len);
+		ok(memcmp((char*)val.data(), "1", col_len) == 0, "SELECT after DEALLOCATE returned '1'");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::COMMAND_COMPLETE, "CommandComplete for SELECT");
+		conn->readMessage(type, buf);
+		ok(type == PgConnection::READY_FOR_QUERY, "ReadyForQuery after DEALLOCATE and SELECT");
+	}
+	catch (const PgException& e) {
+		ok(false, "Extended Query DEALLOCATE Statement with Simple Query Mix test failed: %s", e.what());
 	}
 }
 
@@ -3895,12 +4186,6 @@ void test_send_simple_query_and_extended_query_without_waiting_for_response_prox
 		"LOAD PGSQL USERS TO RUNTIME" });
 }
 
-void test_extended_query_simple_query_mix() {
-
-
-	test_prepare_statement_mix();
-}
-
 int main(int argc, char** argv) {
 	if (cl.getEnv())
 		return exit_status();
@@ -3911,7 +4196,7 @@ int main(int argc, char** argv) {
 		return exit_status();
 	}
 
-	plan(806); // Adjust based on number of tests
+	plan(886); // Adjust based on number of tests
 
 	auto admin_conn = createNewConnection(ConnType::ADMIN, "", false);
 
@@ -3993,7 +4278,10 @@ int main(int argc, char** argv) {
 
 		// SET statement tracking
 		test_set_statement_tracked();
+		test_set_statement_tracked_with_describe();
 		test_set_statement_untracked();
+		test_set_statement_with_simple_query_mix();
+		test_reset_statement_with_simple_query_mix();
 
 		// DEALLOCATE statements
 		test_deallocate_having_stmt_name_via_simple_query();
@@ -4001,6 +4289,7 @@ int main(int argc, char** argv) {
 		test_deallocate_all_via_simple_query();
 		test_deallocate_all_via_prepared();
 		test_deallocate_non_existent_stmt();
+		test_deallocate_statement_with_simple_query_mix();
 
 		// Tests for sending multiple simple queries and extended queries without waiting for response
 		test_send_multiple_simple_query_without_waiting_for_response();
@@ -4013,6 +4302,9 @@ int main(int argc, char** argv) {
 		// Extended Query (without sync) + Simple Query 
 		test_extended_query_prepared_describe_execute_simple_query_without_sync();
 		test_prepare_statement_mix();
+
+		// DISCARD
+		test_discard_statement_with_simple_query_mix();
 	}
 	catch (const std::exception& e) {
 		diag("Fatal error: %s",e.what());
