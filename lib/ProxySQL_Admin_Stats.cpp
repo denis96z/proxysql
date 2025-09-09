@@ -2013,8 +2013,8 @@ void ProxySQL_Admin::stats___mysql_errors(bool reset) {
 
 void ProxySQL_Admin::stats___pgsql_errors(bool reset) {
 	if (!PgHGM) return;
-	SQLite3_result* resultset = PgHGM->get_pgsql_errors(reset);
-	if (resultset == NULL) return;
+	auto resultset = PgHGM->get_pgsql_errors(reset);
+	if (!resultset) return;
 	statsdb->execute("BEGIN");
 	int rc;
 	sqlite3_stmt* statement1 = NULL;
@@ -2032,8 +2032,7 @@ void ProxySQL_Admin::stats___pgsql_errors(bool reset) {
 		query1 = (char*)"INSERT INTO stats_pgsql_errors_reset VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
 		query32s = "INSERT INTO stats_pgsql_errors_reset VALUES " + generate_multi_rows_query(32, 11);
 		query32 = (char*)query32s.c_str();
-	}
-	else {
+	} else {
 		query1 = (char*)"INSERT INTO stats_pgsql_errors VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
 		query32s = "INSERT INTO stats_pgsql_errors VALUES " + generate_multi_rows_query(32, 11);
 		query32 = (char*)query32s.c_str();
@@ -2087,7 +2086,6 @@ void ProxySQL_Admin::stats___pgsql_errors(bool reset) {
 	(*proxy_sqlite3_finalize)(statement1);
 	(*proxy_sqlite3_finalize)(statement32);
 	statsdb->execute("COMMIT");
-	delete resultset;
 }
 
 void ProxySQL_Admin::stats___mysql_users() {
