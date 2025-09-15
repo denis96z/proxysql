@@ -267,8 +267,8 @@ PgSQL_Data_Stream::PgSQL_Data_Stream() {
 	CompPktOUT.pkt.ptr = NULL;
 	CompPktOUT.pkt.size = 0;
 	CompPktOUT.partial = 0;
-	multi_pkt.ptr = NULL;
-	multi_pkt.size = 0;
+	//multi_pkt.ptr = NULL;
+	//multi_pkt.size = 0;
 
 	statuses.questions = 0;
 	statuses.pgconnpoll_get = 0;
@@ -319,15 +319,8 @@ PgSQL_Data_Stream::~PgSQL_Data_Stream() {
 		}
 		delete PSarrayOUT;
 	}
-	/*if (resultset) {
-		while (resultset->len) {
-			resultset->remove_index_fast(0, &pkt);
-			l_free(pkt.size, pkt.ptr);
-		}
-		delete resultset;
-	}*/
-	if (mypolls) mypolls->remove_index_fast(poll_fds_idx);
 
+	if (mypolls) mypolls->remove_index_fast(poll_fds_idx);
 
 	if (fd > 0) {
 		//	// Changing logic here. The socket should be closed only if it is not a backend
@@ -353,11 +346,11 @@ PgSQL_Data_Stream::~PgSQL_Data_Stream() {
 		}
 		if (ssl) SSL_free(ssl);
 	}
-	if (multi_pkt.ptr) {
-		l_free(multi_pkt.size, multi_pkt.ptr);
-		multi_pkt.ptr = NULL;
-		multi_pkt.size = 0;
-	}
+	//if (multi_pkt.ptr) {
+	//	l_free(multi_pkt.size, multi_pkt.ptr);
+	//	multi_pkt.ptr = NULL;
+	//	multi_pkt.size = 0;
+	//}
 	if (CompPktIN.pkt.ptr) {
 		l_free(CompPktIN.pkt.size, CompPktIN.pkt.ptr);
 		CompPktIN.pkt.ptr = NULL;
@@ -1213,7 +1206,10 @@ void PgSQL_Data_Stream::reset_connection() {
 			return_MySQL_Connection_To_Pool();
 		} else {
 			if (sess && sess->session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
-				destroy_MySQL_Connection_From_Pool(true);
+				// If the startup connection includes untracked session parameters (passed via options=),
+				// the connection must be destroyed instead of returned to the pool. Issue #5102
+				bool can_reuse_connection = sess->untracked_option_parameters.empty();
+				destroy_MySQL_Connection_From_Pool(can_reuse_connection);
 			} else {
 				destroy_MySQL_Connection_From_Pool(false);
 			}

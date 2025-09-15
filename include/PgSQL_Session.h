@@ -13,7 +13,6 @@
 #include "PgSQL_Variables.h"
 #include "PgSQL_Variables_Validator.h"
 
-
 class PgSQL_Query_Result;
 class PgSQL_ExplicitTxnStateMgr;
 class PgSQL_Parse_Message;
@@ -138,6 +137,11 @@ public:
 class PgSQL_STMT_Global_info;
 using Parse_Param_Types = std::vector<uint32_t>; // Vector of parameter types for prepared statements
 
+enum PgSQL_Extended_Query_Flags : uint8_t {
+	PGSQL_EXTENDED_QUERY_FLAG_NONE				= 0x00,
+	PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL	= 0x01
+};
+
 struct PgSQL_Extended_Query_Info {
 	const char* stmt_client_name;
 	const char* stmt_client_portal_name;
@@ -146,6 +150,7 @@ struct PgSQL_Extended_Query_Info {
 	uint64_t stmt_global_id;
 	uint32_t stmt_backend_id;
 	uint8_t stmt_type;
+	uint8_t flags;
 	Parse_Param_Types parse_param_types;
 };
 
@@ -187,10 +192,18 @@ private:
 
 class PgSQL_Session : public Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread> {
 private:
+	typedef enum ExtendedQueryPhase {
+		EXTQ_PHASE_IDLE = 0,				// No extended query activity
+		EXTQ_PHASE_BUILDING,				// Collecting extended query messages (Parse/Bind/etc.)
+		EXTQ_PHASE_EXECUTING_SYNC_CLIENT,	// Executing after client-initiated Sync
+		EXTQ_PHASE_EXECUTING_SYNC_IMPLICIT	// Executing after implicit Sync (injected)
+	} ExtendedQueryPhase;
+
 	using PktType = std::variant<std::unique_ptr<PgSQL_Parse_Message>,std::unique_ptr<PgSQL_Describe_Message>,
 		std::unique_ptr<PgSQL_Close_Message>, std::unique_ptr<PgSQL_Bind_Message>, std::unique_ptr<PgSQL_Execute_Message>>;
 
 	bool extended_query_exec_qp = false;
+	ExtendedQueryPhase extended_query_phase{ EXTQ_PHASE_IDLE };
 	std::queue<PktType> extended_query_frame;
 	std::unique_ptr<const PgSQL_Bind_Message> bind_waiting_for_execute;
 
@@ -255,7 +268,8 @@ private:
 	bool handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_EXECUTE(PtrSize_t& pkt);
 	int handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC();
 	bool handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& st, PgSQL_Data_Stream* myds);
-	void handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds);
+	// FIXME: unused. Remove in next iteration
+	//void handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds);
 	int handler___status_PROCESSING_EXTENDED_QUERY_SYNC();
 	int handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg);
 	int handle_post_sync_describe_message(PgSQL_Describe_Message* describe_msg);
@@ -298,7 +312,7 @@ private:
 	 * @param myds If not null, should point to a PgSQL_Data_Stream (backend connection) which connection status
 	 *   should be updated, and previous query resources cleanup.
 	 */
-	void RequestEnd(PgSQL_Data_Stream*, const unsigned int myerrno = 0, const char * errmsg = nullptr);
+	void RequestEnd(PgSQL_Data_Stream*, bool called_on_failure);
 	void LogQuery(PgSQL_Data_Stream*);
 
 	void handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY___create_mirror_session();
@@ -401,6 +415,11 @@ public:
 		return extended_query_frame.empty();
 	}
 
+	inline bool is_extended_query_ready_for_query() const {
+		return extended_query_frame.empty() &&
+			extended_query_phase != EXTQ_PHASE_EXECUTING_SYNC_IMPLICIT;
+	}
+
 	bool handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, const char* var_name, const char* var_value, bool no_quote = false, bool set_transaction = false);
 #if 0
 	bool handler_again___status_SETTING_SQL_LOG_BIN(int*);
@@ -408,7 +427,6 @@ public:
 	std::stack<enum session_status> previous_status;
 
 	PgSQL_Query_Info CurrentQuery;
-	PtrSize_t mirrorPkt;
 	PtrSize_t pkt;
 	std::string untracked_option_parameters;
 	PgSQL_DateStyle_t current_datestyle = {};
@@ -571,6 +589,8 @@ public:
 	void detected_broken_connection(const char* file, unsigned int line, const char* func, const char* action, PgSQL_Connection* myconn, bool verbose = false);
 	void generate_status_one_hostgroup(int hid, std::string& s);
 	void set_previous_status_mode3(bool allow_execute = true);
+
+	friend class Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread>;
 };
 
 

@@ -445,6 +445,7 @@ class MySQL_Session: public Base_Session<MySQL_Session, MySQL_Data_Stream, MySQL
 	void set_previous_status_mode3(bool allow_execute=true);
 
 	friend void SQLite3_Server_session_handler(MySQL_Session*, void *_pa, PtrSize_t *pkt);
+	friend class Base_Session<MySQL_Session, MySQL_Data_Stream, MySQL_Backend, MySQL_Thread>;
 };
 
 #define KILL_QUERY       1

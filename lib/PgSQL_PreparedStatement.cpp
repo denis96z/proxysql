@@ -11,7 +11,7 @@
 
 extern PgSQL_STMT_Manager_v14 *GloPgStmt;
 
-const int PS_GLOBAL_STATUS_FIELD_NUM = 9;
+const int PS_GLOBAL_STATUS_FIELD_NUM = 8;
 
 static uint64_t stmt_compute_hash(const char *user,
 	const char *database, const char *query, unsigned int query_length, const Parse_Param_Types& param_types) {
@@ -69,13 +69,11 @@ PgSQL_STMT_Global_info::PgSQL_STMT_Global_info(uint64_t id,
                                                char *fc,
 											   Parse_Param_Types&& ppt,
                                                uint64_t _h) {
-	pthread_rwlock_init(&rwlock_, NULL);
 	total_mem_usage = 0;
 	statement_id = id;
 	ref_count_client = 0;
 	ref_count_server = 0;
 	digest_text = nullptr;
-	stmt_metadata = nullptr;
 	username = strdup(u);
 	dbname = strdup(d);
 	query = (char *)malloc(ql + 1);
@@ -162,81 +160,6 @@ __exit_PgSQL_STMT_Global_info___search_select:
 	calculate_mem_usage();
 }
 
-void PgSQL_STMT_Global_info::calculate_mem_usage() {
-	total_mem_usage = sizeof(PgSQL_STMT_Global_info) +
-		query_length + 1;
-
-	// NOSONAR: strlen is safe here 
-	if (username) total_mem_usage += strlen(username) + 1; // NOSONAR
-	if (dbname) total_mem_usage += strlen(dbname) + 1; // NOSONAR
-	if (first_comment) total_mem_usage += strlen(first_comment) + 1; // NOSONAR
-	if (digest_text) total_mem_usage += strlen(digest_text) + 1; // NOSONAR
-
-	if (stmt_metadata) {
-		total_mem_usage += sizeof(PgSQL_Describe_Prepared_Info);
-		total_mem_usage += stmt_metadata->parameter_types_count * sizeof(uint32_t) ;
-		total_mem_usage += stmt_metadata->columns_count * sizeof(ColumnMetadata);
-		for (uint16_t i = 0; i < stmt_metadata->columns_count; i++) {
-			if (stmt_metadata->columns[i].name)
-				// NOSONAR: strlen is safe here
-				total_mem_usage += strlen(stmt_metadata->columns[i].name) + 1; // NOSONAR
-		}
-	}
-}
-
-void PgSQL_STMT_Global_info::update_stmt_metadata(PgSQL_Describe_Prepared_Info** new_stmt_metadata) {
-
-	bool need_refresh = false;
-	pthread_rwlock_wrlock(&rwlock_);
-
-	if (stmt_metadata == nullptr) {
-		stmt_metadata = *new_stmt_metadata;
-		*new_stmt_metadata = nullptr;
-		pthread_rwlock_unlock(&rwlock_);
-		return;
-	}
-
-	if (stmt_metadata->parameter_types_count != (*new_stmt_metadata)->parameter_types_count) {
-		need_refresh = true;
-	} else {
-		for (size_t i = 0; i < (*new_stmt_metadata)->parameter_types_count; i++) {
-			if (stmt_metadata->parameter_types[i] != (*new_stmt_metadata)->parameter_types[i]) {
-				need_refresh = true;
-				break;
-			}
-		}
-	}
-
-	if (need_refresh == false) {
-		if (stmt_metadata->columns_count != (*new_stmt_metadata)->columns_count) {
-			need_refresh = true;
-		} else {
-			for (size_t i = 0; i < (*new_stmt_metadata)->columns_count; ++i) {
-				const auto& current_col = stmt_metadata->columns[i];
-				const auto& update_col = (*new_stmt_metadata)->columns[i];
-				if (strcmp(current_col.name, update_col.name) || // NOSONAR: strcmp is safe here
-					current_col.table_oid != update_col.table_oid ||
-					current_col.column_index != update_col.column_index ||
-					current_col.type_oid != update_col.type_oid ||
-					current_col.length != update_col.length ||
-					current_col.type_modifier != update_col.type_modifier ||
-					current_col.format != update_col.format) {
-					need_refresh = true;
-					break;
-				}
-			}
-		}
-	}
-
-	if (need_refresh) {
-		delete stmt_metadata;
-		stmt_metadata = *new_stmt_metadata;
-		*new_stmt_metadata = nullptr;
-		calculate_mem_usage();
-	}
-	pthread_rwlock_unlock(&rwlock_);
-}
-
 PgSQL_STMT_Global_info::~PgSQL_STMT_Global_info() {
 	free(username);
 	free(dbname);
@@ -246,9 +169,17 @@ PgSQL_STMT_Global_info::~PgSQL_STMT_Global_info() {
 	if (digest_text)
 		free(digest_text);
 	parse_param_types.clear(); // clear the parameter types vector
-	if (stmt_metadata)
-		delete stmt_metadata;
-	pthread_rwlock_destroy(&rwlock_);
+}
+
+void PgSQL_STMT_Global_info::calculate_mem_usage() {
+	total_mem_usage = sizeof(PgSQL_STMT_Global_info) +
+		query_length + 1;
+
+	// NOSONAR: strlen is safe here 
+	if (username) total_mem_usage += strlen(username) + 1; // NOSONAR
+	if (dbname) total_mem_usage += strlen(dbname) + 1; // NOSONAR
+	if (first_comment) total_mem_usage += strlen(first_comment) + 1; // NOSONAR
+	if (digest_text) total_mem_usage += strlen(digest_text) + 1; // NOSONAR
 }
 
 void PgSQL_STMTs_local_v14::backend_insert(uint64_t global_stmt_id, uint32_t backend_stmt_id) {
@@ -608,10 +539,9 @@ class PgSQL_PS_global_stats {
 	unsigned long long ref_count_client;
 	unsigned long long ref_count_server;
 	char *query;
-	int num_columns;
-	int num_params;
+	int num_param_types;
 	PgSQL_PS_global_stats(uint64_t stmt_id, const char *d, const char *u, uint64_t dig, const char *q,
-		unsigned long long ref_c, unsigned long long ref_s, int columns, int params) {
+		unsigned long long ref_c, unsigned long long ref_s, int params) {
 		statement_id = stmt_id;
 		digest = dig;
 		query = strndup(q, pgsql_thread___query_digests_max_digest_length);
@@ -619,8 +549,7 @@ class PgSQL_PS_global_stats {
 		dbname = strdup(d);
 		ref_count_client = ref_c;
 		ref_count_server = ref_s;
-		num_columns = columns;
-		num_params = params;
+		num_param_types = params;
 	}
 	~PgSQL_PS_global_stats() {
 		if (query) 
@@ -647,10 +576,8 @@ class PgSQL_PS_global_stats {
 		pta[5]=strdup(buf);
 		snprintf(buf,sizeof(buf),"%llu",ref_count_server);
 		pta[6]=strdup(buf);
-		snprintf(buf,sizeof(buf),"%d",num_columns);
+		snprintf(buf,sizeof(buf),"%d",num_param_types);
 		pta[7]=strdup(buf);
-		snprintf(buf,sizeof(buf),"%d",num_params);
-		pta[8]=strdup(buf);
 
 		return pta;
 	}
@@ -668,7 +595,6 @@ class PgSQL_PS_global_stats {
 SQLite3_result* PgSQL_STMT_Manager_v14::get_prepared_statements_global_infos() {
 	proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "Dumping current prepared statements global info\n");
 	auto result = std::make_unique<SQLite3_result>(PS_GLOBAL_STATUS_FIELD_NUM);
-	rdlock();
 	result->add_column_definition(SQLITE_TEXT,"stmt_id");
 	result->add_column_definition(SQLITE_TEXT,"database");
 	result->add_column_definition(SQLITE_TEXT,"username");
@@ -676,25 +602,15 @@ SQLite3_result* PgSQL_STMT_Manager_v14::get_prepared_statements_global_infos() {
 	result->add_column_definition(SQLITE_TEXT,"query");
 	result->add_column_definition(SQLITE_TEXT,"ref_count_client");
 	result->add_column_definition(SQLITE_TEXT,"ref_count_server");
-	result->add_column_definition(SQLITE_TEXT,"num_columns");
-	result->add_column_definition(SQLITE_TEXT,"num_params");
+	result->add_column_definition(SQLITE_TEXT,"num_param_types");
+
+	rdlock();
 	for (auto it = map_stmt_id_to_info.begin(); it != map_stmt_id_to_info.end(); ++it) {
-		int columns_count = -1;
-		int parameter_types_count = -1;
-		PgSQL_STMT_Global_info *a = it->second;
+		PgSQL_STMT_Global_info *stmt_global_info = it->second;
 
-		a->rdlock();
-		if (const PgSQL_Describe_Prepared_Info* stmt_metadata = a->stmt_metadata; stmt_metadata != nullptr) {
-			columns_count = stmt_metadata->columns_count;
-			parameter_types_count = stmt_metadata->parameter_types_count;
-		}
-		a->unlock();
-
-		auto pgs = std::make_unique<PgSQL_PS_global_stats>(a->statement_id,
-			a->dbname, a->username, a->hash, a->query,
-			a->ref_count_client, a->ref_count_server,
-			columns_count,
-			parameter_types_count);
+		auto pgs = std::make_unique<PgSQL_PS_global_stats>(stmt_global_info->statement_id,
+			stmt_global_info->dbname, stmt_global_info->username, stmt_global_info->hash, stmt_global_info->query,
+			stmt_global_info->ref_count_client, stmt_global_info->ref_count_server, stmt_global_info->parse_param_types.size());
 		char **pta = pgs->get_row();
 		result->add_row(pta);
 		pgs->free_row(pta);

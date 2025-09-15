@@ -51,21 +51,13 @@ static unsigned long long array_mysrvc_cands = 0;
 } while (0)
 
 extern ProxySQL_Admin *GloAdmin;
-
 extern PgSQL_Threads_Handler *GloPTH;
-
 extern MySQL_Monitor *GloMyMon;
 
 class PgSQL_SrvConnList;
 class PgSQL_SrvC;
 class PgSQL_SrvList;
 class PgSQL_HGC;
-
-//static struct ev_async * gtid_ev_async;
-
-static pthread_mutex_t ev_loop_mutex;
-
-//static std::unordered_map <string, Gtid_Server_Info *> gtid_map;
 
 const int PgSQL_ERRORS_STATS_FIELD_NUM = 11;
 
@@ -110,6 +102,117 @@ T PgSQL_j_get_srv_default_int_val(
 	}
 
 	return static_cast<T>(-1);
+}
+
+PgSQL_Errors_stats::PgSQL_Errors_stats(int _hostgroup, const char* _hostname, int _port, const char* _username, const char* _address, const char* _dbname,
+	const char* _sqlstate, const char* _errmsg, time_t tn) {
+	hostgroup = _hostgroup;
+	if (_hostname) {
+		hostname = strdup(_hostname);
+	} else {
+		hostname = strdup((char*)"");
+	}
+	port = _port;
+	if (_username) {
+		username = strdup(_username);
+	} else {
+		username = strdup((char*)"");
+	}
+	if (_address) {
+		client_address = strdup(_address);
+	} else {
+		client_address = strdup((char*)"");
+	}
+	if (_dbname) {
+		dbname = strdup(_dbname);
+	} else {
+		dbname = strdup((char*)"");
+	}
+	if (_sqlstate) {
+		strncpy(sqlstate, _sqlstate, 5);
+		sqlstate[5] = '\0';
+	} else {
+		sqlstate[0] = '\0';
+	}
+	if (_errmsg) {
+		errmsg = strdup(_errmsg);
+	} else {
+		errmsg = strdup((char*)"");
+	}
+	last_seen = tn;
+	first_seen = tn;
+	count_star = 1;
+}
+
+PgSQL_Errors_stats::~PgSQL_Errors_stats() {
+	if (hostname) {
+		free(hostname);
+		hostname = NULL;
+	}
+	if (username) {
+		free(username);
+		username = NULL;
+	}
+	if (client_address) {
+		free(client_address);
+		client_address = NULL;
+	}
+	if (dbname) {
+		free(dbname);
+		dbname = NULL;
+	}
+	if (errmsg) {
+		free(errmsg);
+		errmsg = NULL;
+	}
+}
+
+char** PgSQL_Errors_stats::get_row() {
+	char buf[128];
+	char** pta = (char**)malloc(sizeof(char*) * PgSQL_ERRORS_STATS_FIELD_NUM);
+	sprintf(buf, "%d", hostgroup);
+	pta[0] = strdup(buf);
+	assert(hostname);
+	pta[1] = strdup(hostname);
+	sprintf(buf, "%d", port);
+	pta[2] = strdup(buf);
+	assert(username);
+	pta[3] = strdup(username);
+	assert(client_address);
+	pta[4] = strdup(client_address);
+	assert(dbname);
+	pta[5] = strdup(dbname);
+	pta[6] = strdup(sqlstate);
+	sprintf(buf, "%llu", count_star);
+	pta[7] = strdup(buf);
+	sprintf(buf, "%ld", first_seen);
+	pta[8] = strdup(buf);
+	sprintf(buf, "%ld", last_seen);
+	pta[9] = strdup(buf);
+	assert(errmsg);
+	pta[10] = strdup(errmsg);
+	return pta;
+}
+
+void PgSQL_Errors_stats::add_time(unsigned long long n, const char* le) {
+	count_star++;
+	if (first_seen == 0) {
+		first_seen = n;
+	}
+	last_seen = n;
+	if (strcmp(errmsg, le)) {
+		free(errmsg);
+		errmsg = strdup(le);
+	}
+}
+
+void PgSQL_Errors_stats::free_row(char** pta) {
+	int i;
+	for (i = 0; i < PgSQL_ERRORS_STATS_FIELD_NUM; i++) {
+		assert(pta[i]);
+		free(pta[i]);
+	}
+	free(pta);
 }
 
 PgSQL_Connection *PgSQL_SrvConnList::index(unsigned int _k) {
@@ -657,7 +760,6 @@ hg_metrics_map = std::make_tuple(
 );
 
 PgSQL_HostGroups_Manager::PgSQL_HostGroups_Manager() {
-	pthread_mutex_init(&ev_loop_mutex, NULL);
 	status.client_connections=0;
 	status.client_connections_aborted=0;
 	status.client_connections_created=0;
@@ -712,11 +814,6 @@ PgSQL_HostGroups_Manager::PgSQL_HostGroups_Manager() {
 	incoming_replication_hostgroups=NULL;
 	incoming_hostgroup_attributes = NULL;
 	incoming_pgsql_servers_v2 = NULL;
-	pthread_rwlock_init(&gtid_rwlock, NULL);
-	gtid_missing_nodes = false;
-	gtid_ev_loop=NULL;
-	gtid_ev_timer=NULL;
-	gtid_ev_async = (struct ev_async *)malloc(sizeof(struct ev_async));
 	pgsql_servers_to_monitor = NULL;
 
 	{
@@ -744,7 +841,9 @@ void PgSQL_HostGroups_Manager::init() {
 }
 
 void PgSQL_HostGroups_Manager::shutdown() {
-	// do nothing here
+	pthread_mutex_lock(&pgsql_errors_mutex);
+	pgsql_errors_umap.clear();
+	pthread_mutex_unlock(&pgsql_errors_mutex);
 }
 
 PgSQL_HostGroups_Manager::~PgSQL_HostGroups_Manager() {
@@ -757,11 +856,6 @@ PgSQL_HostGroups_Manager::~PgSQL_HostGroups_Manager() {
 	if (admindb) {
 		delete admindb;
 	}
-	free(gtid_ev_async);
-	if (gtid_ev_loop)
-		ev_loop_destroy(gtid_ev_loop);
-	if (gtid_ev_timer)
-		free(gtid_ev_timer);
 	pthread_mutex_destroy(&lock);
 }
 
@@ -792,6 +886,8 @@ void PgSQL_HostGroups_Manager::p_update_pgsql_error_counter(p_pgsql_error_type e
 		metric_id,
 		metric_labels
 	);
+
+
 
 	pthread_mutex_unlock(&pgsql_errors_mutex);
 }
@@ -1429,8 +1525,6 @@ bool PgSQL_HostGroups_Manager::commit(
 
 	// fill Hostgroup_Manager_Mapping with latest records
 	update_hostgroup_manager_mappings();
-
-	//ev_async_send(gtid_ev_loop, gtid_ev_async);
 
 	__sync_fetch_and_add(&status.servers_table_version,1);
 
@@ -3945,128 +4039,6 @@ unsigned long long PgSQL_HostGroups_Manager::Get_Memory_Stats() {
 	return intsize;
 }
 
-class PgSQL_Errors_stats {
-public:
-	PgSQL_Errors_stats(int _hostgroup, const char *_hostname, int _port, const char *_username, const char *_address, const char *_dbname, 
-		const char* _sqlstate, const char *_errmsg, time_t tn) {
-		hostgroup = _hostgroup;
-		if (_hostname) {
-			hostname = strdup(_hostname);
-		} else {
-			hostname = strdup((char *)"");
-		}
-		port = _port;
-		if (_username) {
-			username = strdup(_username);
-		} else {
-			username = strdup((char *)"");
-		}
-		if (_address) {
-			client_address = strdup(_address);
-		} else {
-			client_address = strdup((char *)"");
-		}
-		if (_dbname) {
-			dbname = strdup(_dbname);
-		} else {
-			dbname = strdup((char *)"");
-		}
-		if (_sqlstate) {
-			strncpy(sqlstate, _sqlstate, 5);
-			sqlstate[5] = '\0';
-		} else {
-			sqlstate[0] = '\0';
-		}
-		if (_errmsg) {
-			errmsg = strdup(_errmsg);
-		} else {
-			_errmsg = strdup((char *)"");
-		}
-		last_seen = tn;
-		first_seen = tn;
-		count_star = 1;
-	}
-	~PgSQL_Errors_stats() {
-		if (hostname) {
-			free(hostname);
-			hostname=NULL;
-		}
-		if (username) {
-			free(username);
-			username=NULL;
-		}
-		if (client_address) {
-			free(client_address);
-			client_address=NULL;
-		}
-		if (dbname) {
-			free(dbname);
-			dbname=NULL;
-		}
-		if (errmsg) {
-			free(errmsg);
-			errmsg=NULL;
-		}
-	}
-	char **get_row() {
-		char buf[128];
-		char **pta=(char **)malloc(sizeof(char *)*PgSQL_ERRORS_STATS_FIELD_NUM);
-		sprintf(buf,"%d",hostgroup);
-		pta[0]=strdup(buf);
-		assert(hostname);
-		pta[1]=strdup(hostname);
-		sprintf(buf,"%d",port);
-		pta[2]=strdup(buf);
-		assert(username);
-		pta[3]=strdup(username);
-		assert(client_address);
-		pta[4]=strdup(client_address);
-		assert(dbname);
-		pta[5]=strdup(dbname);
-		pta[6]=strdup(sqlstate);
-		sprintf(buf,"%llu",count_star);
-		pta[7]=strdup(buf);
-		sprintf(buf,"%ld", first_seen);
-		pta[8]=strdup(buf);
-		sprintf(buf,"%ld", last_seen);
-		pta[9]=strdup(buf);
-		assert(errmsg);
-		pta[10]=strdup(errmsg);
-		return pta;
-	}
-	void add_time(unsigned long long n, const char *le) {
-		count_star++;
-		if (first_seen==0) {
-			first_seen=n;
-		}
-		last_seen=n;
-		if (strcmp(errmsg,le)){
-			free(errmsg);
-			errmsg=strdup(le);
-		}
-	}
-	void free_row(char **pta) {
-		int i;
-		for (i=0;i<PgSQL_ERRORS_STATS_FIELD_NUM;i++) {
-			assert(pta[i]);
-			free(pta[i]);
-		}
-		free(pta);
-	}
-private:
-	int hostgroup;
-	char *hostname;
-	int port;
-	char *username;
-	char *client_address;
-	char *dbname;
-	char sqlstate[5+1];
-	char *errmsg;
-	time_t first_seen;
-	time_t last_seen;
-	unsigned long long count_star;
-};
-
 void PgSQL_HostGroups_Manager::add_pgsql_errors(int hostgroup, const char *hostname, int port, const char *username, const char *address, 
 	const char *dbname, const char* sqlstate, const char *errmsg) {
 	SpookyHash myhash;
@@ -4099,14 +4071,10 @@ void PgSQL_HostGroups_Manager::add_pgsql_errors(int hostgroup, const char *hostn
 	}
 	myhash.Final(&hash1,&hash2);
 
-	std::unordered_map<uint64_t, PgSQL_Errors_stats*>::iterator it;
 	pthread_mutex_lock(&pgsql_errors_mutex);
-
-	it=pgsql_errors_umap.find(hash1);
-
-	if (it != pgsql_errors_umap.end()) {
+	if (auto it = pgsql_errors_umap.find(hash1); it != pgsql_errors_umap.end()) {
 		// found
-		PgSQL_Errors_stats* err_stats = it->second;
+		auto& err_stats = it->second;
 		err_stats->add_time(tn, errmsg);
 	} else {
 		PgSQL_Errors_stats* err_stats = new PgSQL_Errors_stats(hostgroup, hostname, port, username, address, dbname, sqlstate, errmsg, tn);
@@ -4115,9 +4083,8 @@ void PgSQL_HostGroups_Manager::add_pgsql_errors(int hostgroup, const char *hostn
 	pthread_mutex_unlock(&pgsql_errors_mutex);
 }
 
-SQLite3_result* PgSQL_HostGroups_Manager::get_pgsql_errors(bool reset) {
-	SQLite3_result *result=new SQLite3_result(PgSQL_ERRORS_STATS_FIELD_NUM);
-	pthread_mutex_lock(&pgsql_errors_mutex);
+std::unique_ptr<SQLite3_result> PgSQL_HostGroups_Manager::get_pgsql_errors(bool reset) {
+	std::unique_ptr<SQLite3_result> result = std::make_unique<SQLite3_result>(PgSQL_ERRORS_STATS_FIELD_NUM);
 	result->add_column_definition(SQLITE_TEXT,"hid");
 	result->add_column_definition(SQLITE_TEXT,"hostname");
 	result->add_column_definition(SQLITE_TEXT,"port");
@@ -4129,17 +4096,18 @@ SQLite3_result* PgSQL_HostGroups_Manager::get_pgsql_errors(bool reset) {
 	result->add_column_definition(SQLITE_TEXT,"first_seen");
 	result->add_column_definition(SQLITE_TEXT,"last_seen");
 	result->add_column_definition(SQLITE_TEXT,"last_error");
-	for (std::unordered_map<uint64_t, PgSQL_Errors_stats*>::iterator it=pgsql_errors_umap.begin(); it!=pgsql_errors_umap.end(); ++it) {
-		PgSQL_Errors_stats *err_stats=it->second;
+	pthread_mutex_lock(&pgsql_errors_mutex);
+	for (auto it=pgsql_errors_umap.begin(); it!=pgsql_errors_umap.end(); ++it) {
+		auto& err_stats = it->second;
 		char **pta= err_stats->get_row();
 		result->add_row(pta);
 		err_stats->free_row(pta);
 		if (reset) {
-			delete err_stats;
+			err_stats.reset();
 		}
 	}
 	if (reset) {
-		pgsql_errors_umap.erase(pgsql_errors_umap.begin(),pgsql_errors_umap.end());
+		pgsql_errors_umap.clear();
 	}
 	pthread_mutex_unlock(&pgsql_errors_mutex);
 	return result;

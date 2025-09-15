@@ -13,7 +13,7 @@
 class PgSQL_SrvC;
 class PgSQL_Query_Result;
 class PgSQL_STMTs_local_v14;
-class PgSQL_Describe_Prepared_Info;
+//class PgSQL_Describe_Prepared_Info;
 class PgSQL_Bind_Info;
 //#define STATUS_PGSQL_CONNECTION_SEQUENCE			 0x00000001
 #define STATUS_PGSQL_CONNECTION_COMPRESSION          0x00000002
@@ -442,7 +442,7 @@ public:
 	bool set_single_row_mode();
 	void update_bytes_recv(uint64_t bytes_recv);
 	void update_bytes_sent(uint64_t bytes_sent);
-	void ProcessQueryAndSetStatusFlags(char* query_digest_text, int savepoint_count);
+	void ProcessQueryAndSetStatusFlags(const char* query_digest_text, int savepoint_count);
 
 	inline const PGconn* get_pg_connection() const { return pgsql_conn; }
 	inline int get_pg_server_version() { return PQserverVersion(pgsql_conn); }
@@ -501,7 +501,7 @@ public:
 	void set_query(const char* stmt, unsigned long length, const char* _backend_stmt_name = nullptr, const PgSQL_Extended_Query_Info* extended_query_info = nullptr);
 	void reset();
 
-	bool IsKeepMultiplexEnabledVariables(char* query_digest_text);
+	bool IsKeepMultiplexEnabledVariables(const char* query_digest_text);
 
 	/**
 	 * @brief Retrieves startup parameter and it's hash
@@ -588,7 +588,6 @@ public:
 	PSresult  ps_result;
 	PgSQL_Query_Result* query_result;
 	PgSQL_Query_Result* query_result_reuse;
-	PgSQL_Describe_Prepared_Info* stmt_metadata_result;
 	unsigned long long creation_time;
 	unsigned long long last_time_used;
 	unsigned long long timeout;
@@ -623,7 +622,8 @@ private:
 	// Set end state for the fetch result to indicate that it originates from a simple query or statement execution.
 	ASYNC_ST fetch_result_end_st = ASYNC_QUERY_END;
 	inline void set_fetch_result_end_state(ASYNC_ST st) {
-		assert(st == ASYNC_QUERY_END || st == ASYNC_STMT_EXECUTE_END);
+		assert(st == ASYNC_QUERY_END || st == ASYNC_STMT_EXECUTE_END || 
+			st == ASYNC_STMT_DESCRIBE_END || st == ASYNC_STMT_PREPARE_END);
 		fetch_result_end_st = st;
 	}
 	// Handles the COPY OUT response from the server.
@@ -631,6 +631,7 @@ private:
 	bool handle_copy_out(const PGresult* result, uint64_t* processed_bytes);
 	static void notice_handler_cb(void* arg, const PGresult* result);
 	static void unhandled_notice_cb(void* arg, const PGresult* result);
+	void init_query_result();
 
 	/**
 	 * @brief Checks if a substring at a given position in a string matches the format of a formatted PostgreSQL error header.

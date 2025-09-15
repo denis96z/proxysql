@@ -302,6 +302,10 @@ public:
 	 * @return True if parsing was successful, false otherwise.
 	 */
 	bool parse(PtrSize_t& pkt);
+
+	// Set by the Describe (P) handler. If the client sent Describe(portal),
+	// its row description is appended; otherwise it's omitted to avoid redundancy.
+	bool send_describe_portal_result = false; 
 };
 
 #endif /* CLASS_PGSQL_EXTENDED_QUERY_MESSAGE_H */

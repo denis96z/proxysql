@@ -218,6 +218,7 @@ void PgSQL_Query_Info::reset_extended_query_info() {
 	extended_query_info.stmt_global_id = 0;
 	extended_query_info.stmt_backend_id = 0;
 	extended_query_info.stmt_type = 'S';
+	extended_query_info.flags = PGSQL_EXTENDED_QUERY_FLAG_NONE;
 	extended_query_info.parse_param_types.clear();
 }
 
@@ -393,8 +394,6 @@ PgSQL_Session::PgSQL_Session() {
 	to_process = 0;
 	mybe = NULL;
 	mirror = false;
-	mirrorPkt.ptr = NULL;
-	mirrorPkt.size = 0;
 	set_status(session_status___NONE);
 
 	idle_since = 0;
@@ -562,7 +561,7 @@ bool PgSQL_Session::handler_CommitRollback(PtrSize_t* pkt) {
 		//client_myds->myprot.generate_pkt_OK(true, NULL, NULL, 1, 0, 0, setStatus, 0, NULL);
 		client_myds->myprot.generate_ok_packet(true, true, NULL, 0, (const char*)pkt->ptr + 5);
 		if (mirror == false) {
-			RequestEnd(NULL);
+			RequestEnd(NULL, false);
 		} else {
 			client_myds->DSS = STATE_SLEEP;
 			status = WAITING_CLIENT_DATA;
@@ -761,6 +760,21 @@ void PgSQL_Session::generate_proxysql_internal_session_json(json& j) {
 
 bool PgSQL_Session::handler_special_queries(PtrSize_t* pkt, bool* lock_hostgroup) {
 
+	if ((pkt->size >= 7 + 5) && (strncasecmp("LISTEN ", (const char*)pkt->ptr + 5, 7) == 0)) {
+		client_myds->DSS = STATE_QUERY_SENT_NET;
+		proxy_warning("LISTEN command is not supported\n");
+		client_myds->myprot.generate_error_packet(true, true, "LISTEN is not supported",
+			PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, false, true);
+		if (mirror == false) {
+			RequestEnd(NULL, true);
+		} else {
+			client_myds->DSS = STATE_SLEEP;
+			status = WAITING_CLIENT_DATA;
+		}
+		l_free(pkt->size, pkt->ptr);
+		return true;
+	}
+
 	if (pkt->size > (5 + 18) && strncasecmp((char*)"PROXYSQL INTERNAL ", (char*)pkt->ptr + 5, 18) == 0) {
 		return_proxysql_internal(pkt);
 		return true;
@@ -838,7 +852,7 @@ bool PgSQL_Session::handler_special_queries(PtrSize_t* pkt, bool* lock_hostgroup
 		l_free(pkt->size, pkt->ptr);
 
 		return true;
-	}*/
+	}
 
 	// 'LOAD DATA LOCAL INFILE' is unsupported. We report an specific error to inform clients about this fact. For more context see #833.
 	if ((pkt->size >= 22 + 5) && (strncasecmp((char*)"LOAD DATA LOCAL INFILE", (char*)pkt->ptr + 5, 22) == 0)) {
@@ -847,7 +861,7 @@ bool PgSQL_Session::handler_special_queries(PtrSize_t* pkt, bool* lock_hostgroup
 			client_myds->myprot.generate_error_packet(true, true, "Unsupported 'LOAD DATA LOCAL INFILE' command", 
 				PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, false, true);
 			if (mirror == false) {
-				RequestEnd(NULL);
+				RequestEnd(NULL, true);
 			}
 			else {
 				client_myds->DSS = STATE_SLEEP;
@@ -870,7 +884,7 @@ bool PgSQL_Session::handler_special_queries(PtrSize_t* pkt, bool* lock_hostgroup
 				);
 			}
 		}
-	}
+	}*/
 
 	return false;
 }
@@ -928,9 +942,6 @@ void PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 				newsess->default_schema = strdup(default_schema);
 			}
 		}
-		newsess->mirrorPkt.size = pkt.size;
-		newsess->mirrorPkt.ptr = l_alloc(newsess->mirrorPkt.size);
-		memcpy(newsess->mirrorPkt.ptr, pkt.ptr, pkt.size);
 
 		if (thread->mirror_queue_mysql_sessions->len == 0) {
 			// there are no sessions in the queue, we try to execute immediately
@@ -1079,7 +1090,7 @@ int PgSQL_Session::handler_again___status_RESETTING_CONNECTION() {
 			}
 			myds->destroy_MySQL_Connection_From_Pool(false);
 			myds->fd = 0;
-			RequestEnd(myds); //fix bug #682
+			RequestEnd(myds, true); //fix bug #682
 			return -1;
 		} else {
 			// rc==1 , nothing to do for now
@@ -1371,7 +1382,7 @@ bool PgSQL_Session::handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, co
 				client_myds->myprot.generate_error_packet(true, true, myconn->get_error_message().c_str(), myconn->get_error_code(), false);
 				myds->destroy_MySQL_Connection_From_Pool(true);
 				myds->fd = 0;
-				RequestEnd(myds); //fix bug #682
+				RequestEnd(myds, true); //fix bug #682
 				ret = true;
 			}
 		} else {
@@ -1410,7 +1421,7 @@ bool PgSQL_Session::handler_again___status_CONNECTING_SERVER(int* _rc) {
 			}
 			client_myds->myprot.generate_error_packet(true, true, errmsg.c_str(), PGSQL_ERROR_CODES::ERRCODE_SQLCLIENT_UNABLE_TO_ESTABLISH_SQLCONNECTION, 
 				false, true); 
-			RequestEnd(mybe->server_myds);
+			RequestEnd(mybe->server_myds, true);
 
 			string hg_status{};
 			generate_status_one_hostgroup(current_hostgroup, hg_status);
@@ -1572,7 +1583,7 @@ __exit_handler_again___status_CONNECTING_SERVER_with_err:
 				}
 				if (session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
 					// see bug #979
-					RequestEnd(myds);
+					RequestEnd(myds, true);
 				}
 				while (previous_status.size()) {
 					st = previous_status.top();
@@ -1652,7 +1663,7 @@ bool PgSQL_Session::handler_again___status_RESETTING_CONNECTION(int* _rc) {
 				client_myds->myprot.generate_error_packet(true, true, myconn->get_error_message().c_str(), myconn->get_error_code(), false);
 				myds->destroy_MySQL_Connection_From_Pool(true);
 				myds->fd = 0;
-				RequestEnd(myds); //fix bug #682
+				RequestEnd(myds, true); //fix bug #682
 			}
 		} else {
 			if (rc == -2) {
@@ -1759,7 +1770,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_C
 					proxy_error("SQLinjection detected with fingerprint of '%s' from client %s@%s . Query listed below:\n", state.fingerprint, username, client_address);
 					fwrite(CurrentQuery.QueryPointer, CurrentQuery.QueryLength, 1, stderr);
 					fprintf(stderr, "\n");
-					RequestEnd(NULL);
+					RequestEnd(NULL, true);
 					return true;
 				}
 			}
@@ -1930,7 +1941,6 @@ int PgSQL_Session::get_pkts_from_client(bool& wrong_pass, PtrSize_t& pkt) {
 	int handler_ret = 0;
 	unsigned char c;
 
-//__get_pkts_from_client:
 
 	// implement a more complex logic to run even in case of mirror
 	// if client_myds , this is a regular client
@@ -1938,9 +1948,64 @@ int PgSQL_Session::get_pkts_from_client(bool& wrong_pass, PtrSize_t& pkt) {
 	//     process mirror only status==WAITING_CLIENT_DATA
 	for (unsigned int j = 0; j < (client_myds->PSarrayIN ? client_myds->PSarrayIN->len : 0) || (mirror == true && status == WAITING_CLIENT_DATA);) {
 		
+		if (session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
+			// If the client sends a new packet while a query is still executing,
+			// we no longer treat this as an error. Previously, such packets were
+			// considered unexpected and the session was terminated.
+			// This often occurs with pgJDBC, which may pipeline commands
+			// (e.g., sending "BEGIN" immediately followed by another statement).
+			// Now the new packet is kept in the queue (FIFO) and processed only
+			// after the current query finishes and its response is sent.
+			// This preserves correct ordering and ensures only one query is
+			// active at a time, with no client-side changes required.
+			switch (status) {
+			case WAITING_CLIENT_DATA:
+				if (extended_query_frame.empty() == false) {
+					// peeking message type of the next packet
+					if (const PtrSize_t* nxt_pkt = client_myds->PSarrayIN->index(0); nxt_pkt->size > 0) {
+						char msg_type = *static_cast<char*>(nxt_pkt->ptr);
+
+						// As noted in https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY,
+						// "The simple Query message is approximately equivalent to the series Parse, Bind, portal Describe,
+						// Execute, Close, Sync". This means a simple query implicitly includes a Sync at the end.
+						//
+						// To handle this, if there are pending extended query messages in the frame, we first send an
+						// implicit Sync, process all those extended query messages, and then execute the simple query.
+						//
+						// Note: in this case, ReadyForQuery will not be sent immediately after the extended query frame
+						// is processed, but only after the simple query completes.
+						if (msg_type == 'Q') {
+							proxy_warning("Simple query received from client '%s:%d' before extended query cycle completed. Issuing implicit Sync.\n",
+								client_myds->addr.addr ? client_myds->addr.addr : "", client_myds->addr.port);
+							PG_pkt pgpkt(5);
+							pgpkt.put_char('S');
+							pgpkt.put_uint32(4);
+							auto [ptr, size] = pgpkt.detach();
+							pkt.ptr = ptr;
+							pkt.size = size;
+							extended_query_phase = EXTQ_PHASE_EXECUTING_SYNC_IMPLICIT;
+							goto __implicit_sync;
+						}
+					}
+				}
+				break; // allowed states
+			case CONNECTING_CLIENT:
+				break; // allowed states
+			default:
+				proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5,
+					"Session=%p , client_myds=%p . Deferring packet from client while session is in status %d\n",
+					this, client_myds, status);
+				handler_ret = 0;
+				return handler_ret;
+			}
+		}
+
 		if (mirror == false) {
 			client_myds->PSarrayIN->remove_index(0, &pkt);
 		}
+
+__implicit_sync:
+
 		switch (status) {
 
 		case CONNECTING_CLIENT:
@@ -2171,13 +2236,13 @@ int PgSQL_Session::get_pkts_from_client(bool& wrong_pass, PtrSize_t& pkt) {
 												end = (char*)"...";
 											}
 											string nqn = string((char*)CurrentQuery.QueryPointer, l);
-											char* err_msg = (char*)"Session trying to reach HG %d while locked on HG %d . Rejecting query: %s";
+											const char* err_msg = "Session trying to reach HG %d while locked on HG %d . Rejecting query: %s%s";
 											char* buf = (char*)malloc(strlen(err_msg) + strlen(nqn.c_str()) + strlen(end) + 64);
 											sprintf(buf, err_msg, current_hostgroup, locked_on_hostgroup, nqn.c_str(), end);
 											client_myds->myprot.generate_error_packet(true, true, buf, PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION,
 												false, true);
 											thread->status_variables.stvar[st_var_hostgroup_locked_queries]++;
-											RequestEnd(NULL);
+											RequestEnd(NULL, true);
 											free(buf);
 											l_free(pkt.size, pkt.ptr);
 											break;
@@ -2226,30 +2291,35 @@ int PgSQL_Session::get_pkts_from_client(bool& wrong_pass, PtrSize_t& pkt) {
 							break;
 						// Extended Query Handling
 						case 'P':
+							extended_query_phase = EXTQ_PHASE_BUILDING;
 							if (handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_PARSE(pkt) == false) {
 								handler_ret = -1;
 								return handler_ret;
 							}
 							break;
 						case 'D':
+							extended_query_phase = EXTQ_PHASE_BUILDING;
 							if (handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_DESCRIBE(pkt) == false) {
 								handler_ret = -1;
 								return handler_ret;
 							}
 							break;
 						case 'C':
+							extended_query_phase = EXTQ_PHASE_BUILDING;
 							if (handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_CLOSE(pkt) == false) {
 								handler_ret = -1;
 								return handler_ret;
 							}
 							break;
 						case 'B':
+							extended_query_phase = EXTQ_PHASE_BUILDING;
 							if (handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_BIND(pkt) == false) {
 								handler_ret = -1;
 								return handler_ret;
 							}
 							break;
 						case 'E':
+							extended_query_phase = EXTQ_PHASE_BUILDING;
 							if (handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_EXECUTE(pkt) == false) {
 								handler_ret = -1;
 								return handler_ret;
@@ -2257,6 +2327,9 @@ int PgSQL_Session::get_pkts_from_client(bool& wrong_pass, PtrSize_t& pkt) {
 							break;
 						case 'S':
 						{
+							if (extended_query_phase != EXTQ_PHASE_EXECUTING_SYNC_IMPLICIT) {
+								extended_query_phase = EXTQ_PHASE_EXECUTING_SYNC_CLIENT;
+							}
 #ifdef DEBUG
 							dbg_extended_query_backend_conn = nullptr;
 #endif
@@ -2489,10 +2562,8 @@ bool PgSQL_Session::handler_minus1_HandleErrorCodes(PgSQL_Data_Stream* myds, int
 		myds->fd = 0;
 		if (retry_conn) {
 			myds->DSS = STATE_NOT_INITIALIZED;
-			//previous_status.push(PROCESSING_QUERY);
 			set_previous_status_mode3(false);
 			return true; // it will call NEXT_IMMEDIATE(CONNECTING_SERVER);
-			//NEXT_IMMEDIATE(CONNECTING_SERVER);
 		}
 		//handler_ret = -1;
 		//return handler_ret;
@@ -2517,20 +2588,19 @@ void PgSQL_Session::handler_minus1_GenerateErrorMessage(PgSQL_Data_Stream* myds,
 	}
 
 	switch (status) {
-	case PROCESSING_STMT_EXECUTE:
-	case PROCESSING_QUERY:
-		PgSQL_Result_to_PgSQL_wire(myconn, myds);
-		break;
-	case PROCESSING_STMT_DESCRIBE:
 	case PROCESSING_STMT_PREPARE:
-		client_myds->myprot.generate_error_packet(true, true, myconn->get_error_message().c_str(), myconn->get_error_code(), false);
 		if (previous_status.size()) {
 			// an STMT_PREPARE failed
-			// we have a previous status, probably STMT_EXECUTE,
+			// we have a previous status, probably STMT_DESCRIBE or STMT_EXECUTE,
 			//    but returning to that status is not safe after STMT_PREPARE failed
 			// for this reason we exit immediately
 			wrong_pass = true;
 		}
+	// fall through
+	case PROCESSING_STMT_DESCRIBE:
+	case PROCESSING_STMT_EXECUTE:
+	case PROCESSING_QUERY:
+		PgSQL_Result_to_PgSQL_wire(myconn, myds);
 		break;
 	default:
 		// LCOV_EXCL_START
@@ -2649,17 +2719,10 @@ int PgSQL_Session::handler() {
 		}
 		else {
 			if (mirror == true) {
-				if (mirrorPkt.ptr) { // this is the first time we call handler()
-					pkt.ptr = mirrorPkt.ptr;
-					pkt.size = mirrorPkt.size;
-					mirrorPkt.ptr = NULL; // this will prevent the copy to happen again
-				}
-				else {
-					if (status == WAITING_CLIENT_DATA) {
-						// we are being called a second time with WAITING_CLIENT_DATA
-						handler_ret = 0;
-						return handler_ret;
-					}
+				if (status == WAITING_CLIENT_DATA) {
+					// we are being called a second time with WAITING_CLIENT_DATA
+					handler_ret = 0;
+					return handler_ret;
 				}
 			}
 		}
@@ -2667,6 +2730,7 @@ int PgSQL_Session::handler() {
 	if (!hgs_expired_conns.empty())
 		housekeeping_before_pkts();
 
+__handler_again_get_pkts_from_client:
 	handler_ret = get_pkts_from_client(wrong_pass, pkt);
 	if (handler_ret != 0) {
 		return handler_ret;
@@ -2685,7 +2749,7 @@ handler_again:
 		}
 
 		// Extended query synchronization complete; clean up and prepare for next command
-		if (rc == 0){
+		if (rc == 0) {
 			if (extended_query_frame.empty() == false) {
 				writeout();
 				NEXT_IMMEDIATE(PROCESSING_EXTENDED_QUERY_SYNC);
@@ -2707,6 +2771,7 @@ handler_again:
 				}
 			}
 		}
+
 		goto handler_again;
 	}
 		break;
@@ -2920,13 +2985,30 @@ handler_again:
 					}
 				}
 			}
-			// Swtich to fast forward mode if the query matches copy ... stdin command
-			re2::StringPiece matched;
-			const char* query_to_match = (CurrentQuery.get_digest_text() ? CurrentQuery.get_digest_text() : (char*)CurrentQuery.QueryPointer);
-			if (copy_cmd_matcher->match(query_to_match, &matched)) {
-				switch_normal_to_fast_forward_mode(pkt, std::string(matched.data(), matched.size()), SESSION_FORWARD_TYPE_COPY_FROM_STDIN_STDOUT);
-				break;
-			}
+			if (status == PROCESSING_QUERY || status == PROCESSING_STMT_PREPARE) {
+				// Swtich to fast forward mode if the query matches copy ... stdin command
+				re2::StringPiece matched;
+				const char* query_to_match = (CurrentQuery.get_digest_text() ? CurrentQuery.get_digest_text() : (char*)CurrentQuery.QueryPointer);
+				if (copy_cmd_matcher->match(query_to_match, &matched)) {
+
+					if (status == PROCESSING_STMT_PREPARE) {
+						reset_extended_query_frame();
+						proxy_error("'%s' command is not supported in Extended Query protocol mode. Use Simple Query mode to run this command\n",
+							query_to_match ? query_to_match : "");
+						client_myds->setDSS_STATE_QUERY_SENT_NET();
+						bool send_ready_packet = is_extended_query_ready_for_query();
+						client_myds->myprot.generate_error_packet(true, send_ready_packet, "Feature not supported", PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED,
+							false, true);
+						RequestEnd(myds, true);
+						finishQuery(myds, myconn, false);
+						goto __exit_DSS__STATE_NOT_INITIALIZED;
+					}
+
+					switch_normal_to_fast_forward_mode(pkt , std::string(matched.data(), matched.size()), SESSION_FORWARD_TYPE_COPY_FROM_STDIN_STDOUT);
+					break;
+				}
+			} 
+
 			if (myconn->async_state_machine == ASYNC_IDLE) {
 				SetQueryTimeout();
 			}
@@ -2963,22 +3045,31 @@ handler_again:
 				}
 
 				switch (status) {
-				case PROCESSING_STMT_EXECUTE:
-				case PROCESSING_QUERY:
-					PgSQL_Result_to_PgSQL_wire(myconn, myconn->myds);
-					break;
 				case PROCESSING_STMT_PREPARE:
 				{
 					enum session_status st;
 					if (handler___rc0_PROCESSING_STMT_PREPARE(st, myds)) {
+						// No need to send response to the client, prepared statement was created implicitly, 
+						// original query will be executed next
+						if (myconn->query_result) { 
+							assert(!myconn->query_result_reuse);
+							myconn->query_result->clear();
+							myconn->query_result_reuse = myconn->query_result;
+							myconn->query_result = NULL;
+						}
 						NEXT_IMMEDIATE(st);
 					}
 				}
-				break;
+				// fall through
 				case PROCESSING_STMT_DESCRIBE:
-					handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(myds);
+				case PROCESSING_STMT_EXECUTE:
+				case PROCESSING_QUERY:
+					PgSQL_Result_to_PgSQL_wire(myconn, myconn->myds);
 					break;
-				// Handled in PROCESSING_QUERY
+				// Handled above
+				//case PROCESSING_STMT_DESCRIBE:
+				//	handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(myds);
+				//	break;
 				//case PROCESSING_STMT_EXECUTE:
 				//	PgSQL_Result_to_PgSQL_wire(myconn, myconn->myds);
 				//	break;
@@ -3012,7 +3103,7 @@ handler_again:
 #endif
 				} 
 
-				RequestEnd(myds);
+				RequestEnd(myds, false);
 				finishQuery(myds, myconn, has_pending_messages);
 
 				if (has_pending_messages) {
@@ -3051,7 +3142,7 @@ handler_again:
 							return handler_ret;
 						}
 						handler_minus1_GenerateErrorMessage(myds, wrong_pass);
-						RequestEnd(myds);
+						RequestEnd(myds, true);
 						handler_minus1_HandleBackendConnection(myds);
 					}
 				} else {
@@ -3142,7 +3233,6 @@ handler_again:
 
 __exit_DSS__STATE_NOT_INITIALIZED:
 
-
 	if (mybe && mybe->server_myds) {
 		if (mybe->server_myds->DSS > STATE_MARIADB_BEGIN && mybe->server_myds->DSS < STATE_MARIADB_END) {
 #ifdef DEBUG
@@ -3161,6 +3251,18 @@ __exit_DSS__STATE_NOT_INITIALIZED:
 		handler_ret = -1;
 		return handler_ret;
 	}
+
+	// previously active query has been fully processed and its response has been sent to the client.
+	// At this point, check whether deferred packets from the client exist in PSarrayIN.
+	// If so, control is redirected to get_pkts_from_client() to process them.
+	if (status == WAITING_CLIENT_DATA) {
+		if (client_myds->PSarrayIN && client_myds->PSarrayIN->len) {
+			proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5, "Session %p client_myds %p . Client PSarrayIN has '%d' deferred packets, redirecting to get_pkts_from_client()\n",
+				client_myds, this, client_myds->PSarrayIN->len);
+			goto __handler_again_get_pkts_from_client;
+		}
+	}
+
 	handler_ret = 0;
 	return handler_ret;
 }
@@ -3803,7 +3905,7 @@ void PgSQL_Session::handler_WCD_SS_MCQ_qpo_OK_msg(PtrSize_t* pkt) {
 	unsigned int nTrx = NumActiveTransactions();
 	const char txn_state = (nTrx ? 'T' : 'I');
 	client_myds->myprot.generate_ok_packet(true, true, qpo->OK_msg, 0, nullptr, txn_state);
-	RequestEnd(NULL);
+	RequestEnd(NULL, false);
 	l_free(pkt->size, pkt->ptr);
 }
 
@@ -3812,7 +3914,7 @@ void PgSQL_Session::handler_WCD_SS_MCQ_qpo_error_msg(PtrSize_t* pkt) {
 	client_myds->DSS = STATE_QUERY_SENT_NET;
 	client_myds->myprot.generate_error_packet(true, true, qpo->error_msg, 
 		PGSQL_ERROR_CODES::ERRCODE_INSUFFICIENT_PRIVILEGE, false);
-	RequestEnd(NULL);
+	RequestEnd(NULL, true);
 	l_free(pkt->size, pkt->ptr);
 }
 
@@ -3822,7 +3924,7 @@ void PgSQL_Session::handler_WCD_SS_MCQ_qpo_LargePacket(PtrSize_t* pkt) {
 	client_myds->DSS = STATE_QUERY_SENT_NET;
 	client_myds->myprot.generate_error_packet(true, true, "Got a packet bigger than 'max_allowed_packet' bytes",
 		PGSQL_ERROR_CODES::ERRCODE_PROGRAM_LIMIT_EXCEEDED, false);
-	RequestEnd(NULL);
+	RequestEnd(NULL, true);
 	l_free(pkt->size, pkt->ptr);
 }
 
@@ -3925,7 +4027,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 							unsigned int nTrx = NumActiveTransactions();
 							const char trx_state = (nTrx ? 'T' : 'I');
 							client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, trx_state, NULL, param_status);
-							RequestEnd(NULL);
+							RequestEnd(NULL, false);
 							return true;
 						}
 						value1 = value;
@@ -3948,7 +4050,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 						client_myds->myprot.generate_error_packet(true, true, errmsg,
 							PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE, false, true);
 						free(errmsg);
-						RequestEnd(NULL);
+						RequestEnd(NULL, true);
 						return true;
 					}
 
@@ -3963,7 +4065,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 							unsigned int nTrx = NumActiveTransactions();
 							const char txn_state = (nTrx ? 'T' : 'I');
 							client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, txn_state, NULL, param_status);
-							RequestEnd(NULL);
+							RequestEnd(NULL, false);
 							return true;
 						}
 					}
@@ -4012,10 +4114,16 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 		}
 
 		client_myds->DSS = STATE_QUERY_SENT_NET;
+		
+		if (extended_query_phase != EXTQ_PHASE_IDLE &&
+			(CurrentQuery.extended_query_info.flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
+			client_myds->myprot.generate_no_data_packet(true);
+		}
+		bool send_ready_packet = is_extended_query_ready_for_query();
 		unsigned int nTrx = NumActiveTransactions();
 		const char txn_state = (nTrx ? 'T' : 'I');
-		client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, txn_state, NULL, param_status);
-		RequestEnd(NULL);
+		client_myds->myprot.generate_ok_packet(true, send_ready_packet, NULL, 0, dig, txn_state, NULL, param_status);
+		RequestEnd(NULL, false);
 		return true;
 	} else {
 		unable_to_parse_set_statement(lock_hostgroup);
@@ -4110,12 +4218,18 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 		}
 	}
 	client_myds->DSS = STATE_QUERY_SENT_NET;
+
+	if (extended_query_phase != EXTQ_PHASE_IDLE &&
+		(CurrentQuery.extended_query_info.flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
+		client_myds->myprot.generate_no_data_packet(true);
+	}
+	bool send_ready_packet = is_extended_query_ready_for_query();
 	unsigned int nTrx = NumActiveTransactions();
 	const char txn_state = (nTrx ? 'T' : 'I');
-	client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, txn_state, NULL, param_status);
+	client_myds->myprot.generate_ok_packet(true, send_ready_packet, NULL, 0, dig, txn_state, NULL, param_status);
 
 	if (mirror == false) {
-		RequestEnd(NULL);
+		RequestEnd(NULL, false);
 	} else {
 		client_myds->DSS = STATE_SLEEP;
 		status = WAITING_CLIENT_DATA;
@@ -4156,12 +4270,17 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 
 	if (handled) {
 		client_myds->DSS = STATE_QUERY_SENT_NET;
+		if (extended_query_phase != EXTQ_PHASE_IDLE &&
+			(CurrentQuery.extended_query_info.flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
+			client_myds->myprot.generate_no_data_packet(true);
+		}
+		bool send_ready_packet = is_extended_query_ready_for_query();
 		unsigned int nTrx = NumActiveTransactions();
 		const char txn_state = (nTrx ? 'T' : 'I');
-		client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, txn_state, NULL, {});
+		client_myds->myprot.generate_ok_packet(true, send_ready_packet, NULL, 0, dig, txn_state, NULL, {});
 
 		if (mirror == false) {
-			RequestEnd(NULL);
+			RequestEnd(NULL, false);
 		} else {
 			client_myds->DSS = STATE_SLEEP;
 			status = WAITING_CLIENT_DATA;
@@ -4192,7 +4311,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 			const std::string& errmsg = "prepared statement \"" + std::string(dealloc_value) + "\" does not exist";
 			client_myds->myprot.generate_error_packet(true, true, errmsg.c_str(), PGSQL_ERROR_CODES::ERRCODE_INVALID_SQL_STATEMENT_NAME, false, true);
 			if (mirror == false) {
-				RequestEnd(NULL);
+				RequestEnd(NULL, true);
 			} else {
 				client_myds->DSS = STATE_SLEEP;
 				status = WAITING_CLIENT_DATA;
@@ -4202,12 +4321,17 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 	}
 
 	client_myds->DSS = STATE_QUERY_SENT_NET;
+	if (extended_query_phase != EXTQ_PHASE_IDLE &&
+		(CurrentQuery.extended_query_info.flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
+		client_myds->myprot.generate_no_data_packet(true);
+	}
+	bool send_ready_packet = is_extended_query_ready_for_query();
 	unsigned int nTrx = NumActiveTransactions();
 	const char txn_state = (nTrx ? 'T' : 'I');
-	client_myds->myprot.generate_ok_packet(true, true, NULL, 0, dig, txn_state, NULL, {});
+	client_myds->myprot.generate_ok_packet(true, send_ready_packet, NULL, 0, dig, txn_state, NULL, {});
 
 	if (mirror == false) {
-		RequestEnd(NULL);
+		RequestEnd(NULL, false);
 	} else {
 		client_myds->DSS = STATE_SLEEP;
 		status = WAITING_CLIENT_DATA;
@@ -4366,7 +4490,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_Q
 				current_hostgroup = -1;
 			}
 
-			RequestEnd(NULL);
+			RequestEnd(NULL, false);
 			l_free(pkt->size, pkt->ptr);
 			return true;
 		}
@@ -4392,7 +4516,7 @@ __exit_set_destination_hostgroup:
 			client_myds->myprot.generate_error_packet(true, true, buf,
 				PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION, false);
 			thread->status_variables.stvar[st_var_hostgroup_locked_queries]++;
-			RequestEnd(NULL);
+			RequestEnd(NULL, true);
 			l_free(pkt->size, pkt->ptr);
 			return true;
 		}
@@ -4702,10 +4826,10 @@ void PgSQL_Session::PgSQL_Result_to_PgSQL_wire(PgSQL_Connection* _conn, PgSQL_Da
 		}
 		CurrentQuery.rows_sent = num_rows;
 		bool resultset_completed = query_result->get_resultset(client_myds->PSarrayOUT);
-		if (_conn->processing_multi_statement == false && status != PROCESSING_STMT_EXECUTE)
+		if (status == PROCESSING_QUERY && _conn->processing_multi_statement == false)
 			assert(resultset_completed); // the resultset should always be completed if PgSQL_Result_to_PgSQL_wire is called
-		if (transfer_started == false && _conn->processing_multi_statement == false && 
-			status != PROCESSING_STMT_EXECUTE) { // we have all the resultset when PgSQL_Result_to_PgSQL_wire was called
+		if (status == PROCESSING_QUERY && transfer_started == false && 
+			_conn->processing_multi_statement == false) { // we have all the resultset when PgSQL_Result_to_PgSQL_wire was called
 			if (qpo && qpo->cache_ttl > 0 && is_tuple == true) { // the resultset should be cached
 				
 				if (_conn->is_error_present() == false &&
@@ -4900,36 +5024,48 @@ void PgSQL_Session::LogQuery(PgSQL_Data_Stream* myds) {
 		}
 	}
 }
-void PgSQL_Session::RequestEnd(PgSQL_Data_Stream* myds, const unsigned int myerrno, const char * errmsg) {
+
+void PgSQL_Session::RequestEnd(PgSQL_Data_Stream* myds, bool called_on_failure) {
+
 	// check if multiplexing needs to be disabled
-	char* qdt = NULL;
+	const char* query_digest_text = NULL;
 
-	if (status != PROCESSING_STMT_EXECUTE && 
-		status != PROCESSING_STMT_DESCRIBE) {
-		qdt = CurrentQuery.get_digest_text();
-	} else {
-		qdt = CurrentQuery.extended_query_info.stmt_info->digest_text;
+	if (session_fast_forward != SESSION_FORWARD_TYPE_NONE) {
+		goto __cleanup;
 	}
 
-	if (qdt) {
-		// is savepoint currently present in transaction.
-		int savepoint_count = -1; // haven't checked yet
-
-		// we do not maintain the transaction variable state if the session is locked on a hostgroup 
-		// or is a Fast Forward session.
-		if (locked_on_hostgroup == -1 && session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
-			transaction_state_manager->handle_transaction(qdt);
-			savepoint_count = transaction_state_manager->get_savepoint_count();
+	if (called_on_failure == false && myds && myds->myconn) {
+		// if we are here, means query was executed successfully
+		switch (status)
+		{
+		case PROCESSING_QUERY:
+			query_digest_text = CurrentQuery.get_digest_text();
+			break;
+		case PROCESSING_STMT_EXECUTE:
+			query_digest_text = CurrentQuery.extended_query_info.stmt_info->digest_text;
+			break;
+		default:
+			break;
 		}
 
-		if (myds && myds->myconn) {
-			myds->myconn->ProcessQueryAndSetStatusFlags(qdt, savepoint_count);
+		if (query_digest_text) {
+			// is savepoint currently present in transaction.
+			int savepoint_count = -1; // haven't checked yet
+
+			// we do not maintain the transaction variable state if the session is locked on a hostgroup 
+			// or is a Fast Forward session.
+			if (locked_on_hostgroup == -1) {
+				transaction_state_manager->handle_transaction(query_digest_text);
+				savepoint_count = transaction_state_manager->get_savepoint_count();
+			}
+
+			myds->myconn->ProcessQueryAndSetStatusFlags(query_digest_text, savepoint_count);
 		}
 	}
 
-	if (session_fast_forward == SESSION_FORWARD_TYPE_NONE) {
-		LogQuery(myds);
-	}
+	LogQuery(myds);
+
+__cleanup:
 
 	GloPgQPro->delete_QP_out(qpo);
 	// if there is an associated myds, clean its status
@@ -5291,20 +5427,16 @@ void PgSQL_Session::generate_status_one_hostgroup(int hid, std::string& s) {
 void PgSQL_Session::set_previous_status_mode3(bool allow_execute) {
 	switch (status) {
 	case PROCESSING_QUERY:
-		previous_status.push(PROCESSING_QUERY);
-		break;
 	case PROCESSING_STMT_PREPARE:
-		previous_status.push(PROCESSING_STMT_PREPARE);
-		break;
 	case PROCESSING_STMT_DESCRIBE:
-		previous_status.push(PROCESSING_STMT_DESCRIBE);
+		previous_status.push(status);
 		break;
 	case PROCESSING_STMT_EXECUTE:
 		if (allow_execute == true) {
 			previous_status.push(PROCESSING_STMT_EXECUTE);
 			break;
 		}
-	
+	// fall back
 	default:
 		// LCOV_EXCL_START
 		assert(0); // Assert to indicate an unexpected status value
@@ -5364,7 +5496,7 @@ void PgSQL_Session::switch_normal_to_fast_forward_mode(PtrSize_t& pkt, std::stri
 		}
 	}
 	set_status(FAST_FORWARD); // we can set status to FAST_FORWARD
-	//client_myds->PSarrayIN->add(pkt.ptr, pkt.size);
+
 	mybe->server_myds->PSarrayOUT->add(pkt.ptr, pkt.size);
 
 	// as we are in FAST_FORWARD mode, we directly send the packet to the backend.
@@ -5393,7 +5525,7 @@ void PgSQL_Session::switch_fast_forward_to_normal_mode() {
 			myds->encrypted = false;
 			myds->ssl = NULL;
 		}
-		RequestEnd(myds);
+		RequestEnd(myds, false);
 		finishQuery(myds, myconn, false);
 	} else {
 		// cannot switch Permanent Fast Forward to Normal
@@ -5424,7 +5556,7 @@ void PgSQL_Session::handle_post_sync_locked_on_hostgroup_error(const char* query
 		false, true);
 	free(buf);
 	thread->status_variables.stvar[st_var_hostgroup_locked_queries]++;
-	RequestEnd(NULL);
+	RequestEnd(NULL, true);
 }
 
 int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg) {
@@ -5439,6 +5571,15 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 	CurrentQuery.begin((unsigned char*)parse_data.query_string, strlen(parse_data.query_string) + 1, false);
 	// parse_msg memory will be freed in pgsql_real_query.end(), if message is sent to backend server
 	// CurrentQuery.stmt_client_name may briefly become a dangling pointer until CurrentQuery.end() is invoked
+
+	// check for LISTEN command
+	const char* query_to_check = (CurrentQuery.get_digest_text() ? CurrentQuery.get_digest_text() : parse_data.query_string);
+	if (query_to_check && (strncasecmp("LISTEN ", query_to_check, 7) == 0)) {
+		proxy_warning("LISTEN command is not supported\n");
+		handle_post_sync_error(PGSQL_ERROR_CODES::ERRCODE_FEATURE_NOT_SUPPORTED, "LISTEN is not supported", false);
+		return 2;
+	}
+
 	extended_query_info.stmt_client_name = parse_data.stmt_name;
 
 	if (extended_query_exec_qp) {
@@ -5455,7 +5596,6 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 				(begint.tv_sec * 1000000000 + begint.tv_nsec);
 		}
 		assert(qpo);	// GloPgQPro->process_mysql_query() should always return a qpo
-
 	}
 
 	if (parse_data.num_param_types > 0) {
@@ -5498,7 +5638,6 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 		if (locked_on_hostgroup >= 0) {
 			if (current_hostgroup != locked_on_hostgroup) {
 				handle_post_sync_locked_on_hostgroup_error((const char*)CurrentQuery.QueryPointer, CurrentQuery.QueryLength);
-				RequestEnd(NULL);
 				l_free(parse_pkt.size, parse_pkt.ptr);
 				return 2;
 			}
@@ -5552,11 +5691,11 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 		GloPgStmt->unlock();
 		client_myds->setDSS_STATE_QUERY_SENT_NET();
 		char txn_state = NumActiveTransactions() > 0 ? 'T' : 'I';
-		bool send_ready_packet = extended_query_frame.empty();
+		bool send_ready_packet = is_extended_query_ready_for_query();
 		client_myds->myprot.generate_parse_completion_packet(true, send_ready_packet, txn_state);
 		//LogQuery(nullptr);
 		//CurrentQuery.end_time = thread->curtime;
-		RequestEnd(NULL);
+		RequestEnd(NULL, false);
 		l_free(parse_pkt.size, parse_pkt.ptr);
 		return 0;
 	}
@@ -5605,11 +5744,17 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 		}
 
 		if (extended_query_frame.empty() == false) {
-			// Peeking next message in the extended query frame
-			// Assuming the client follows correct Bind/Describe/Execute order,
-			// we can skip this Describe message, as libpq's PQsendQueryPrepared already sends it.
-			if (std::holds_alternative<std::unique_ptr<PgSQL_Execute_Message>>(extended_query_frame.front())) {
-				return 0; 
+			// Peek at the next message in the extended query frame.
+			// If the client explicitly sent a Describe followed by Execute,
+			// we can skip re-executing Describe (to avoid redundancy, since libpq’s
+			// PQsendQueryPrepared always emits Bind/Describe Portal/Execute in order) and
+			// include its RowDescription once in the result set.
+			// If the client did not send a Describe, we must NOT include a RowDescription.
+			if (auto* execute_msg = std::get_if<std::unique_ptr<PgSQL_Execute_Message>>(&extended_query_frame.front())) {
+				if (*execute_msg) {
+					(*execute_msg)->send_describe_portal_result = true;
+					return 0;
+				}
 			}
 		}
 
@@ -5671,25 +5816,6 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 				(begint.tv_sec * 1000000000 + begint.tv_nsec);
 		}
 	}
-	// Use cached stmt_metadata only for statements; for portals, forward the describe request to backend.
-	if (extended_query_info.stmt_type == 'S') {
-		stmt_info->rdlock();
-		if (stmt_info->stmt_metadata) {
-			// we have the metadata, so we can send it to the client
-			client_myds->setDSS_STATE_QUERY_SENT_NET();
-			bool send_ready_packet = extended_query_frame.empty();
-			unsigned int nTxn = NumActiveTransactions();
-			const char txn_state = (nTxn ? 'T' : 'I');
-			client_myds->myprot.generate_describe_completion_packet(true, send_ready_packet, stmt_info->stmt_metadata, 
-				extended_query_info.stmt_type, txn_state);
-			stmt_info->unlock();
-			//LogQuery(NULL);
-			//CurrentQuery.end_time = thread->curtime;
-			RequestEnd(NULL);
-			return 0;
-		}
-		stmt_info->unlock();
-	}
 
 	// setting 'prepared' to prevent fetching results from the cache if the digest matches
 	if (extended_query_exec_qp) {
@@ -5720,7 +5846,6 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 			if (current_hostgroup != locked_on_hostgroup) {
 				handle_post_sync_locked_on_hostgroup_error(CurrentQuery.extended_query_info.stmt_info->query, 
 					CurrentQuery.extended_query_info.stmt_info->query_length);
-				RequestEnd(NULL);
 				return 2;
 			}
 		}
@@ -5766,8 +5891,8 @@ int PgSQL_Session::handle_post_sync_close_message(PgSQL_Close_Message* close_msg
 	client_myds->setDSS_STATE_QUERY_SENT_NET();
 	unsigned int nTxn = NumActiveTransactions();
 	char txn_state = (nTxn ? 'T' : 'I');
-	bool send_ready = extended_query_frame.empty();
-	client_myds->myprot.generate_close_completion_packet(true, send_ready, txn_state);
+	bool send_ready_packet = is_extended_query_ready_for_query();
+	client_myds->myprot.generate_close_completion_packet(true, send_ready_packet, txn_state);
 	client_myds->DSS = STATE_SLEEP;
 	status = WAITING_CLIENT_DATA;
 	return 0;
@@ -5861,7 +5986,6 @@ int PgSQL_Session::handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg) {
 			if (current_hostgroup != locked_on_hostgroup) {
 				handle_post_sync_locked_on_hostgroup_error(CurrentQuery.extended_query_info.stmt_info->query,
 					CurrentQuery.extended_query_info.stmt_info->query_length);
-				RequestEnd(NULL);
 				return 2;
 			}
 		}
@@ -5871,8 +5995,8 @@ int PgSQL_Session::handle_post_sync_bind_message(PgSQL_Bind_Message* bind_msg) {
 	client_myds->setDSS_STATE_QUERY_SENT_NET();
 	unsigned int nTxn = NumActiveTransactions();
 	char txn_state = (nTxn ? 'T' : 'I');
-	bool send_ready = extended_query_frame.empty();
-	client_myds->myprot.generate_bind_completion_packet(true, send_ready, txn_state);
+	bool send_ready_packet = is_extended_query_ready_for_query();
+	client_myds->myprot.generate_bind_completion_packet(true, send_ready_packet, txn_state);
 	client_myds->DSS = STATE_SLEEP;
 	status = WAITING_CLIENT_DATA;
 	return 0;
@@ -5926,6 +6050,8 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 	extended_query_info.stmt_global_id = stmt_global_id;
 	extended_query_info.stmt_info = stmt_info;
 	extended_query_info.bind_msg = bind_waiting_for_execute.get();
+	extended_query_info.flags |= execute_msg->send_describe_portal_result ? 
+		PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL : PGSQL_EXTENDED_QUERY_FLAG_NONE;
 	CurrentQuery.start_time = thread->curtime;
 
 	timespec begint;
@@ -5992,7 +6118,6 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 			if (current_hostgroup != locked_on_hostgroup) {
 				handle_post_sync_locked_on_hostgroup_error(CurrentQuery.extended_query_info.stmt_info->query,
 					CurrentQuery.extended_query_info.stmt_info->query_length);
-				RequestEnd(NULL);
 				return 2;
 			}
 		}
@@ -6019,6 +6144,7 @@ void PgSQL_Session::reset_extended_query_frame() {
 		extended_query_frame.pop();
 	}
 	bind_waiting_for_execute.reset(nullptr);
+	extended_query_phase = EXTQ_PHASE_IDLE;
 }
 
 int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_SYNC() {
@@ -6035,7 +6161,7 @@ int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_S
 	proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Session=%p client_myds=%p. Processing '%lu' pending messages in extended query frame\n",
 		this, client_myds, extended_query_frame.size());
 
-	if (extended_query_frame.empty()) {
+	if (extended_query_frame.empty() == true) {
 		client_myds->setDSS_STATE_QUERY_SENT_NET();
 		unsigned int nTxn = NumActiveTransactions();
 		const char txn_state = (nTxn ? 'T' : 'I');
@@ -6248,43 +6374,28 @@ bool PgSQL_Session::handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& s
 	assert(extended_query_info.stmt_client_name);
 	client_myds->myconn->local_stmts->client_insert(global_stmtid, extended_query_info.stmt_client_name);
 
-	bool send_ready_packet = extended_query_frame.empty();
-	char txn_state = myds->myconn->get_transaction_status_char();
-	client_myds->myprot.generate_parse_completion_packet(true, send_ready_packet, txn_state);
 	LogQuery(myds);
 	GloPgStmt->unlock();
+
 	return false;
 }
 
+/* FIXME: Not Used anymore. To be removed in next iteration
 void PgSQL_Session::handler___rc0_PROCESSING_STMT_DESCRIBE_PREPARE(PgSQL_Data_Stream* myds) {
 	//thread->status_variables.stvar[st_var_backend_stmt_describe]++;
 	const PgSQL_Extended_Query_Info& extended_query_info = CurrentQuery.extended_query_info;
 	assert(extended_query_info.stmt_info);
-	bool send_ready_packet = extended_query_frame.empty();
+	bool send_ready_packet = is_extended_query_ready_for_query();
 	char txn_state = myds->myconn->get_transaction_status_char();
 	
-	if (extended_query_info.stmt_type == 'S') {
-		GloPgStmt->wrlock();
-		extended_query_info.stmt_info->update_stmt_metadata(&myds->myconn->stmt_metadata_result);
-		client_myds->myprot.generate_describe_completion_packet(true, send_ready_packet, extended_query_info.stmt_info->stmt_metadata,
-			extended_query_info.stmt_type, txn_state);
-		LogQuery(myds);
-		GloPgStmt->unlock();
-		if (myds->myconn->stmt_metadata_result) {
-			delete myds->myconn->stmt_metadata_result;
-			myds->myconn->stmt_metadata_result = NULL;
-		}
-	} else {
-		// For portals, we don't cache metadata
-		client_myds->myprot.generate_describe_completion_packet(true, send_ready_packet, myds->myconn->stmt_metadata_result, 
-			extended_query_info.stmt_type, txn_state);
-		LogQuery(myds);
-		if (myds->myconn->stmt_metadata_result) {
-			delete myds->myconn->stmt_metadata_result;
-			myds->myconn->stmt_metadata_result = NULL;
-		}
+	client_myds->myprot.generate_describe_completion_packet(true, send_ready_packet, myds->myconn->stmt_metadata_result, 
+		extended_query_info.stmt_type, txn_state);
+	LogQuery(myds);
+	if (myds->myconn->stmt_metadata_result) {
+		delete myds->myconn->stmt_metadata_result;
+		myds->myconn->stmt_metadata_result = NULL;
 	}
-}
+}*/
 
 // Optimized single‐pass parser for PostgreSQL DateStyle strings.
 // It supports input in one of these forms:
