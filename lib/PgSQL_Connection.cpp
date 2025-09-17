@@ -190,6 +190,8 @@ PgSQL_Connection::PgSQL_Connection(bool is_client_conn) {
 
 	new_result = true;
 	is_copy_out = false;
+	exit_pipeline_mode = false;
+	resync_failed = false;
 	reset_error();
 	memset(&connected_host_details, 0, sizeof(connected_host_details));
 }
@@ -522,6 +524,18 @@ handler_again:
 					set_error(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION, "Unable to process 'COPY' command", true);
 					NEXT_IMMEDIATE(fetch_result_end_st);
 					break;
+				case PGRES_PIPELINE_SYNC:
+					// backend connection is in Ready for Query state, we can now safely exit pipeline mode
+					exit_pipeline_mode = true;
+					NEXT_IMMEDIATE(ASYNC_USE_RESULT_CONT);
+					break;
+				case PGRES_PIPELINE_ABORTED:
+					// received an extended query immediately after an error was triggered by a previous query (before sync).
+					// In ProxySQL this should never happen, since the extended query frame is reset after an error.
+					// However, it may rarely occur if an error is raised during the "describe portal" phase (while executing).
+					// In that case, we continue until PGRES_PIPELINE_SYNC (Ready for Query state) is received, then safely exit pipeline mode.					NEXT_IMMEDIATE(ASYNC_USE_RESULT_CONT);
+					NEXT_IMMEDIATE(ASYNC_USE_RESULT_CONT);
+					break;
 				case PGRES_BAD_RESPONSE:
 				case PGRES_NONFATAL_ERROR:
 				case PGRES_FATAL_ERROR:
@@ -555,7 +569,6 @@ handler_again:
 						error_category != PGSQL_ERROR_CATEGORY::ERRCATEGORY_DATA_ERROR) {
 						proxy_error("Error: %s, Multi-Statement: %d\n", get_error_code_with_message().c_str(), processing_multi_statement);
 					}
-					//}
 					NEXT_IMMEDIATE(ASYNC_USE_RESULT_CONT);
 				}
 
@@ -635,7 +648,11 @@ handler_again:
 			assert(0);
 		}
 
-		if ((query_result->get_result_packet_type() & (PGSQL_QUERY_RESULT_COMMAND | PGSQL_QUERY_RESULT_EMPTY | PGSQL_QUERY_RESULT_ERROR)) == 0) {
+		// if we arrive here via async_perform_resync, the connection is in "Ready for Query" state,  
+		// but query_result will be empty. In this case, we check exit_pipeline_mode; if it is true,  
+		// it indicates a non-error scenario and we skip this check.
+		if (exit_pipeline_mode == false &&
+			(query_result->get_result_packet_type() & (PGSQL_QUERY_RESULT_COMMAND | PGSQL_QUERY_RESULT_EMPTY | PGSQL_QUERY_RESULT_ERROR)) == 0) {
 			// if we reach here we assume that error_info is already set in previous call
 			if (!is_error_present())
 				assert(0); // we might have missed setting error_info in previous call
@@ -643,22 +660,32 @@ handler_again:
 			query_result->add_error(NULL);
 		}
 
-		// Normally, ReadyForQuery is not sent immediately if we are in extended query mode
-		// and there are pending messages in the queue, as it will be sent once the entire
-		// extended query frame has been processed.
-		//
-		// Edge case: if a message fails with an error while the queue still contains pending
-		// messages, the queue will be cleared later in the session. In this situation,
-		// ReadyForQuery would never be sent because the pending messages are discarded.
-		//
-		// Fix: if the result indicates an error, explicitly send ReadyForQuery immediately.
-		// The extended query frame will still be reset later in the session.
-		if (fetch_result_end_st != ASYNC_QUERY_END &&
-			!myds->sess->is_extended_query_ready_for_query() &&
-			((query_result->get_result_packet_type() & PGSQL_QUERY_RESULT_ERROR) == 0)) {
-			// Skip sending ReadyForQuery if there are still extended query messages pending in the queue
-			NEXT_IMMEDIATE(fetch_result_end_st);
+		if (fetch_result_end_st != ASYNC_QUERY_END) {
+			bool has_error = (query_result->get_result_packet_type() & PGSQL_QUERY_RESULT_ERROR) != 0;
+
+			// Normally, ReadyForQuery is not sent immediately if we are in extended query mode
+			// and there are pending messages in the queue, as it will be sent once the entire
+			// extended query frame has been processed.
+			//
+			// Edge case: if a message fails with an error while the queue still contains pending
+			// messages, the queue will be cleared later in the session. In this situation,
+			// ReadyForQuery would never be sent because the pending messages are discarded.
+			//
+			// Fix: if the result indicates an error, explicitly send ReadyForQuery immediately.
+			// The extended query frame will still be reset later in the session.
+			if (!myds->sess->is_extended_query_ready_for_query() && !has_error) {
+				// Skip sending ReadyForQuery if there are still extended query messages pending in the queue
+				NEXT_IMMEDIATE(fetch_result_end_st);
+			}
+
+			// An error has occurred while executing extended query sequence,  
+			// and connection is not in 'Ready for Query' state, i.e., unsynchronized.  
+			// To recover, we must resync by sending a SYNC to the backend connection.
+			if (!exit_pipeline_mode && has_error) {
+				NEXT_IMMEDIATE(ASYNC_RESYNC_START);
+			}
 		}
+
 		// finally add ready for query packet
 		query_result->add_ready_status(PQtransactionStatus(pgsql_conn));
 		update_bytes_recv(6);
@@ -666,72 +693,7 @@ handler_again:
 		NEXT_IMMEDIATE(fetch_result_end_st);
 	}
 	break;
-	case ASYNC_QUERY_END:
-		PROXY_TRACE2();
-		if (is_error_present()) {
-			compute_unknown_transaction_status();
-		} else {
-			unknown_transaction_status = false;
-		}
-		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
-		// should be NULL
-		assert(!pgsql_result);
-		assert(!is_copy_out);
-		break;
-	case ASYNC_RESET_SESSION_START:
-		reset_session_start();
-		update_bytes_sent((reset_session_in_txn == false ? (sizeof("DISCARD ALL") + 5) : (sizeof("ROLLBACK") + 5)));
-		if (async_exit_status) {
-			next_event(ASYNC_RESET_SESSION_CONT);
-		} else {
-			if (is_error_present()) {
-				NEXT_IMMEDIATE(ASYNC_RESET_SESSION_END);
-			}
-			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_CONT);
-		}
-		break;
-	case ASYNC_RESET_SESSION_CONT:
-	{
-		if (event) {
-			reset_session_cont(event);
-		}
-		if (async_exit_status) {
-			if (myds->wait_until != 0 && myds->sess->thread->curtime >= myds->wait_until) {
-				NEXT_IMMEDIATE(ASYNC_RESET_SESSION_TIMEOUT);
-			}
-			next_event(ASYNC_RESET_SESSION_CONT);
-			break;
-		}
-		if (is_error_present()) {
-			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_END);
-		}
-		PGresult* result = get_result();
-		if (result) {
-			if (PQresultStatus(result) != PGRES_COMMAND_OK) {
-				set_error_from_result(result, PGSQL_ERROR_FIELD_ALL);
-				assert(is_error_present());
-			}
-			PQclear(result);
-			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_CONT);
-		}
-		if (reset_session_in_txn) {
-			//assert(IsKnownActiveTransaction() == false);
-			reset_session_in_txn = false;
-			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_START);
-		} 
-		NEXT_IMMEDIATE(ASYNC_RESET_SESSION_END);
-	}
-		break;
-	case ASYNC_RESET_SESSION_END:
-		if (is_error_present()) {
-			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_FAILED);
-		}
-		NEXT_IMMEDIATE(ASYNC_RESET_SESSION_SUCCESSFUL);
-		break;
-	case ASYNC_RESET_SESSION_FAILED:
-	case ASYNC_RESET_SESSION_SUCCESSFUL:
-	case ASYNC_RESET_SESSION_TIMEOUT:
-		break;
+
 	case ASYNC_STMT_PREPARE_START:
 		stmt_prepare_start();
 		__sync_fetch_and_add(&parent->queries_sent, 1);
@@ -757,20 +719,6 @@ handler_again:
 			NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
 		}
 		break;
-	case ASYNC_STMT_PREPARE_END:
-		PROXY_TRACE2();
-		if (is_error_present()) {
-			compute_unknown_transaction_status();
-			proxy_error("Failed to prepare statement: %s\n", get_error_code_with_message().c_str());
-		} else {
-			unknown_transaction_status = false;
-		}
-
-		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
-
-		assert(!pgsql_result);
-		assert(!is_copy_out);
-		break;
 
 	case ASYNC_STMT_DESCRIBE_START:
 		stmt_describe_start();
@@ -793,20 +741,6 @@ handler_again:
 			set_fetch_result_end_state(ASYNC_STMT_DESCRIBE_END);
 			NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
 		}
-		break;
-	case ASYNC_STMT_DESCRIBE_END:
-		PROXY_TRACE2();
-		if (is_error_present()) {
-			compute_unknown_transaction_status();
-			proxy_error("Failed to describe prepared statement: %s\n", get_error_code_with_message().c_str());
-		} else {
-			unknown_transaction_status = false;
-		}
-		
-		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
-
-		assert(!pgsql_result);
-		assert(!is_copy_out);
 		break;
 
 	case ASYNC_STMT_EXECUTE_START:
@@ -832,6 +766,17 @@ handler_again:
 			NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
 		}
 		break;
+
+	case ASYNC_RESYNC_END:
+		// if we reach here, it means that the connection is now synchronized
+		if (resync_failed) {
+			// if resync failed
+			set_error(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION, "Failed to synchronize connection", false);
+		}
+		// fall through
+	case ASYNC_QUERY_END:
+	case ASYNC_STMT_PREPARE_END:
+	case ASYNC_STMT_DESCRIBE_END:
 	case ASYNC_STMT_EXECUTE_END:
 		PROXY_TRACE2();
 		if (is_error_present()) {
@@ -839,11 +784,131 @@ handler_again:
 		} else {
 			unknown_transaction_status = false;
 		}
+
 		PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::unhandled_notice_cb, this);
+
+		// we check exit_pipeline_mode to ensure it is safe to exit pipeline mode
+		if (exit_pipeline_mode &&
+			PQpipelineStatus(pgsql_conn) == PQ_PIPELINE_ON) {
+			if (PQexitPipelineMode(pgsql_conn) == 0) {
+				set_error_from_PQerrorMessage();
+				proxy_error("Failed to exit pipeline mode. %s\n", get_error_code_with_message().c_str());
+			}
+			exit_pipeline_mode = false;
+		}
 		// should be NULL
 		assert(!pgsql_result);
 		assert(!is_copy_out);
 		break;
+
+	case ASYNC_RESYNC_START:
+		if (PQpipelineStatus(pgsql_conn) == PQ_PIPELINE_OFF) {
+			proxy_warning("Resync not required — connection already synchronized.\n");
+			NEXT_IMMEDIATE(ASYNC_RESYNC_END);
+		}
+		resync_start();
+		if (async_exit_status) {
+			next_event(ASYNC_RESYNC_CONT);
+		} else {
+			NEXT_IMMEDIATE(ASYNC_RESYNC_END);
+		}
+		break;
+	case ASYNC_RESYNC_CONT:
+		if (event) {
+			resync_cont(event);
+		}
+		if (async_exit_status) {
+			if (myds->wait_until != 0 && myds->sess->thread->curtime >= myds->wait_until) {
+				proxy_error("Timeout waiting for pipeline sync to complete.\n");
+				resync_failed = true;
+				NEXT_IMMEDIATE(ASYNC_RESYNC_END);
+			}
+			next_event(ASYNC_RESYNC_CONT);
+			break;
+		} else {
+			if (resync_failed == true) {
+				NEXT_IMMEDIATE(ASYNC_RESYNC_END);
+			}
+			if (query_result && query_result->result_packet_type != PGSQL_QUERY_RESULT_NO_DATA) {
+				// we have already have some result set, so we just continue
+				NEXT_IMMEDIATE(ASYNC_USE_RESULT_CONT);
+			} else {
+				set_fetch_result_end_state(ASYNC_RESYNC_END);
+				NEXT_IMMEDIATE(ASYNC_USE_RESULT_START);
+			}
+		}
+		break;		
+
+	case ASYNC_RESET_SESSION_START:
+		reset_session_start();
+		if (reset_session_in_pipeline) {
+			update_bytes_sent(5);
+		}
+		else {
+			update_bytes_sent((reset_session_in_txn == false ? (sizeof("DISCARD ALL") + 5) : (sizeof("ROLLBACK") + 5)));
+		}
+		if (async_exit_status) {
+			next_event(ASYNC_RESET_SESSION_CONT);
+		}
+		else {
+			if (is_error_present()) {
+				NEXT_IMMEDIATE(ASYNC_RESET_SESSION_END);
+			}
+			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_CONT);
+		}
+		break;
+	case ASYNC_RESET_SESSION_CONT:
+	{
+		if (event) {
+			reset_session_cont(event);
+		}
+		if (async_exit_status) {
+			if (myds->wait_until != 0 && myds->sess->thread->curtime >= myds->wait_until) {
+				NEXT_IMMEDIATE(ASYNC_RESET_SESSION_TIMEOUT);
+			}
+			next_event(ASYNC_RESET_SESSION_CONT);
+			break;
+		}
+		if (is_error_present()) {
+			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_END);
+		}
+		PGresult* result = get_result();
+		if (result) {
+			if (PQresultStatus(result) != PGRES_COMMAND_OK &&
+				PQresultStatus(result) != PGRES_PIPELINE_SYNC) {
+				set_error_from_result(result, PGSQL_ERROR_FIELD_ALL);
+				assert(is_error_present());
+			}
+			PQclear(result);
+			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_CONT);
+		}
+		if (reset_session_in_pipeline) {
+			if (PQexitPipelineMode(pgsql_conn) == 0) {
+				set_error_from_PQerrorMessage();
+				proxy_error("Failed to exit pipeline mode. %s\n", get_error_code_with_message().c_str());
+				NEXT_IMMEDIATE(ASYNC_RESET_SESSION_END);
+			}
+			reset_session_in_pipeline = false;
+			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_START);
+		}
+		if (reset_session_in_txn) {
+			reset_session_in_txn = false;
+			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_START);
+		}
+		NEXT_IMMEDIATE(ASYNC_RESET_SESSION_END);
+	}
+	break;
+	case ASYNC_RESET_SESSION_END:
+		if (is_error_present()) {
+			NEXT_IMMEDIATE(ASYNC_RESET_SESSION_FAILED);
+		}
+		NEXT_IMMEDIATE(ASYNC_RESET_SESSION_SUCCESSFUL);
+		break;
+	case ASYNC_RESET_SESSION_FAILED:
+	case ASYNC_RESET_SESSION_SUCCESSFUL:
+	case ASYNC_RESET_SESSION_TIMEOUT:
+		break;
+
 	default:
 		// not implemented yet
 		assert(0); 
@@ -1107,6 +1172,12 @@ void PgSQL_Connection::fetch_result_cont(short event) {
 			if (PQisBusy(pgsql_conn) == 0) {
 				result_type = 1;
 				pgsql_result = PQgetResult(pgsql_conn);
+
+				if (!pgsql_result &&
+					query.extended_query_info &&
+					(query.extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_SYNC) != 0) {
+					pgsql_result = PQgetResult(pgsql_conn);
+				}
 				return;
 			}
 			break;
@@ -1141,10 +1212,15 @@ void PgSQL_Connection::fetch_result_cont(short event) {
 	}
 	result_type = 1;
 	pgsql_result = PQgetResult(pgsql_conn);
+
+	if (!pgsql_result &&
+		query.extended_query_info &&
+		(query.extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_SYNC) != 0) {
+		pgsql_result = PQgetResult(pgsql_conn);
+	}
 }
 
 void PgSQL_Connection::flush() {
-	reset_error();
 	int res = PQflush(pgsql_conn);
 
 	if (res > 0) {
@@ -1333,7 +1409,8 @@ int PgSQL_Connection::async_query(short event, const char* stmt, unsigned long l
 	if (async_state_machine == ASYNC_QUERY_END ||
 		async_state_machine == ASYNC_STMT_EXECUTE_END ||
 		async_state_machine == ASYNC_STMT_DESCRIBE_END ||
-		async_state_machine == ASYNC_STMT_PREPARE_END) {
+		async_state_machine == ASYNC_STMT_PREPARE_END ||
+		async_state_machine == ASYNC_RESYNC_END) {
 		PROXY_TRACE2();
 		compute_unknown_transaction_status();
 		if (is_error_present()) {
@@ -1580,14 +1657,41 @@ void PgSQL_Connection::stmt_prepare_start() {
 	processing_multi_statement = false;
 	async_exit_status = PG_EVENT_NONE;
 
+	if (PQpipelineStatus(pgsql_conn) == PQ_PIPELINE_OFF) {
+		if (PQenterPipelineMode(pgsql_conn) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to enter pipeline mode. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+	}
+	
 	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
 
-	const Parse_Param_Types& parse_param_types = query.extended_query_info->parse_param_types;
+	const PgSQL_Extended_Query_Info* extended_query_info = query.extended_query_info;
+	const Parse_Param_Types& parse_param_types = extended_query_info->parse_param_types;
 
 	if (PQsendPrepare(pgsql_conn, query.backend_stmt_name, query.ptr, parse_param_types.size(), parse_param_types.data()) == 0) {
 		set_error_from_PQerrorMessage();
 		proxy_error("Failed to send prepare. %s\n", get_error_code_with_message().c_str());
 		return;
+	}
+
+	// Send a Flush if this is not the last extended query message in the sequence/frame (or is an implicit prepared);  
+	// otherwise, send a SYNC.
+	if ((extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_IMPLICIT_PREPARE) != 0 ||
+		(extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_SYNC) == 0) {
+		if (PQsendFlushRequest(pgsql_conn) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to send flush request. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+	} else {
+		// FIXME: Switch to PQsendPipelineSync once libpq is updated to version 17 or higher
+		if (PQpipelineSync(pgsql_conn) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to send pipeline sync. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
 	}
 	flush();
 }
@@ -1606,6 +1710,14 @@ void PgSQL_Connection::stmt_describe_start() {
 	reset_error();
 	processing_multi_statement = false;
 	async_exit_status = PG_EVENT_NONE;
+
+	if (PQpipelineStatus(pgsql_conn) == PQ_PIPELINE_OFF) {
+		if (PQenterPipelineMode(pgsql_conn) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to enter pipeline mode. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+	}
 
 	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
 
@@ -1631,6 +1743,23 @@ void PgSQL_Connection::stmt_describe_start() {
 		proxy_error("Failed to send describe message. %s\n", get_error_code_with_message().c_str());
 		return;
 	}
+
+	// Send a Flush if this is not the last extended query message in the sequence/frame;  
+	// otherwise, send a SYNC.
+	if ((extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_SYNC) == 0) {
+		if (PQsendFlushRequest(pgsql_conn) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to send flush request. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+	} else {
+		// FIXME: Switch to PQsendPipelineSync once libpq is updated to version 17 or higher
+		if (PQpipelineSync(pgsql_conn) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to send pipeline sync. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+	}
 	flush();
 }
 
@@ -1643,14 +1772,58 @@ void PgSQL_Connection::stmt_describe_cont(short event) {
 	}
 }
 
+void PgSQL_Connection::resync_start() {
+	PROXY_TRACE();
+	async_exit_status = PG_EVENT_NONE;
+
+	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
+
+	// FIXME: Switch to PQsendPipelineSync once libpq is updated to version 17 or higher
+	if (PQpipelineSync(pgsql_conn) == 0) {
+		proxy_error("Failed to send pipeline sync.\n");
+		resync_failed = true;
+		return;
+	}
+	async_exit_status = PG_EVENT_WRITE;
+}
+
+void PgSQL_Connection::resync_cont(short event) {
+	PROXY_TRACE();
+	proxy_debug(PROXY_DEBUG_MYSQL_PROTOCOL, 6, "event=%d\n", event);
+	async_exit_status = PG_EVENT_NONE;
+	if (event & POLLOUT) {
+		int res = PQflush(pgsql_conn);
+
+		if (res > 0) {
+			async_exit_status = PG_EVENT_WRITE;
+		} else if (res == 0) {
+			async_exit_status = PG_EVENT_READ;
+		} else {
+			proxy_error("Failed to flush data to backend.\n");
+			async_exit_status = PG_EVENT_NONE;
+			resync_failed = true;
+		}
+	}
+}
+
 void PgSQL_Connection::stmt_execute_start() {
 	PROXY_TRACE();
 	reset_error();
 	processing_multi_statement = false;
 	async_exit_status = PG_EVENT_NONE;
+
+	if (PQpipelineStatus(pgsql_conn) == PQ_PIPELINE_OFF) {
+		if (PQenterPipelineMode(pgsql_conn) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to enter pipeline mode. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+	}
+
 	PQsetNoticeReceiver(pgsql_conn, &PgSQL_Connection::notice_handler_cb, this);
 
-	const PgSQL_Bind_Message* bind_msg = query.extended_query_info->bind_msg;
+	const PgSQL_Extended_Query_Info* extended_query_info = query.extended_query_info;
+	const PgSQL_Bind_Message* bind_msg = extended_query_info->bind_msg;
 	assert(bind_msg); // should never be null
 	const PgSQL_Bind_Data& bind_data = bind_msg->data(); // will always have valid data
 
@@ -1719,6 +1892,23 @@ void PgSQL_Connection::stmt_execute_start() {
 		proxy_error("Failed to send execute prepared statement. %s\n", get_error_code_with_message().c_str());
 		return;
 	}
+
+	// Send a Flush if this is not the last extended query message in the sequence/frame;  
+	// otherwise, send a SYNC.
+	if ((extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_SYNC) == 0) {
+		if (PQsendFlushRequest(pgsql_conn) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to send flush request. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+	} else {
+		// FIXME: Switch to PQsendPipelineSync once libpq is updated to version 17 or higher
+		if (PQpipelineSync(pgsql_conn) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to send pipeline sync. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+	}
 	flush();
 }
 
@@ -1736,11 +1926,22 @@ void PgSQL_Connection::reset_session_start() {
 	assert(pgsql_conn);
 	reset_error();
 	async_exit_status = PG_EVENT_NONE;
-	reset_session_in_txn = IsKnownActiveTransaction();
-	if (PQsendQuery(pgsql_conn, (reset_session_in_txn == false ? "DISCARD ALL" : "ROLLBACK")) == 0) {
-		set_error_from_PQerrorMessage();
-		proxy_error("Failed to send query. %s\n", get_error_code_with_message().c_str());
-		return;
+
+	reset_session_in_pipeline = is_pipeline_active();
+	if (reset_session_in_pipeline) {
+		// FIXME: Switch to PQsendPipelineSync once libpq is updated to version 17 or higher
+		if (PQpipelineSync(pgsql_conn) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to send pipeline sync. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
+	} else {
+		reset_session_in_txn = IsKnownActiveTransaction();
+		if (PQsendQuery(pgsql_conn, (reset_session_in_txn == false ? "DISCARD ALL" : "ROLLBACK")) == 0) {
+			set_error_from_PQerrorMessage();
+			proxy_error("Failed to send query. %s\n", get_error_code_with_message().c_str());
+			return;
+		}
 	}
 	flush();
 }
@@ -2199,6 +2400,57 @@ int PgSQL_Connection::async_send_simple_command(short event, char* stmt, unsigne
 	return 1;
 }
 
+int PgSQL_Connection::async_perform_resync(short event) {
+	PROXY_TRACE();
+	PROXY_TRACE2();
+	assert(pgsql_conn);
+
+	server_status = parent->status; // we copy it here to avoid race condition. The caller will see this
+	if (IsServerOffline())
+		return -1;
+
+	switch (async_state_machine) {
+	case ASYNC_RESYNC_END:
+		processing_multi_statement = false;
+		break;
+	case ASYNC_IDLE:
+		if (myds && myds->sess) {
+			if (myds->sess->active_transactions == 0) {
+				myds->sess->active_transactions = 1;
+				myds->sess->transaction_started_at = myds->sess->thread->curtime;
+			}
+		}
+		async_state_machine = ASYNC_RESYNC_START;
+	default:
+		handler(event);
+		break;
+	}
+	if (async_state_machine == ASYNC_RESYNC_END) {
+		if (myds && myds->sess) {
+			if (myds->sess->active_transactions != 0) {
+				myds->sess->active_transactions = 0;
+				myds->sess->transaction_started_at = 0;
+			}
+		}
+		// We just needed to know if the query was successful, not. 
+		// We discard the result.
+		if (query_result) {
+			assert(!query_result_reuse);
+			query_result->clear();
+			query_result_reuse = query_result;
+			query_result = NULL;
+		}
+		compute_unknown_transaction_status();
+		if (resync_failed) {
+			return -1;
+		} else {
+			async_state_machine = ASYNC_IDLE;
+			return 0;
+		}
+	}
+	return 1;
+}
+
 unsigned int PgSQL_Connection::reorder_dynamic_variables_idx() {
 	dynamic_variables_idx.clear();
 	// note that we are inserting the index already ordered
@@ -2280,13 +2532,18 @@ void PgSQL_Connection::reset() {
 		options.init_connect_sent = false;
 	}
 	auto_increment_delay_token = 0;	
+	exit_pipeline_mode = false;
+	resync_failed = false;
+#ifdef DEBUG
+	if (pgsql_conn)
+		assert(PQpipelineStatus(pgsql_conn) == PQ_PIPELINE_OFF);
+#endif
 }
 
 void PgSQL_Connection::set_status(bool set, uint32_t status_flag) {
 	if (set) {
 		this->status_flags |= status_flag;
-	}
-	else {
+	} else {
 		this->status_flags &= ~status_flag;
 	}
 }

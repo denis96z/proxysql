@@ -139,7 +139,9 @@ using Parse_Param_Types = std::vector<uint32_t>; // Vector of parameter types fo
 
 enum PgSQL_Extended_Query_Flags : uint8_t {
 	PGSQL_EXTENDED_QUERY_FLAG_NONE				= 0x00,
-	PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL	= 0x01
+	PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL	= 0x01,
+	PGSQL_EXTENDED_QUERY_FLAG_SYNC				= 0x02,
+	PGSQL_EXTENDED_QUERY_FLAG_IMPLICIT_PREPARE  = 0x04,
 };
 
 struct PgSQL_Extended_Query_Info {
@@ -318,7 +320,7 @@ private:
 	void handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___MYSQL_COM_QUERY___create_mirror_session();
 	int handler_again___status_PINGING_SERVER();
 	int handler_again___status_RESETTING_CONNECTION();
-
+	int handler_again___status_RESYNCHRONIZING_CONNECTION();
 
 	/**
 	 * @brief Initiates a new thread to kill current running query.
