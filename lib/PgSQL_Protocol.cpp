@@ -628,6 +628,7 @@ bool PgSQL_Protocol::process_startup_packet(unsigned char* pkt, unsigned int len
 
 	//PG_PKT_STARTUP_V2 not supported
 	if (hdr.type != PG_PKT_STARTUP) {
+		proxy_error("Unsupported packet type '%u' received from client %s:%d\n", hdr.type, (*myds)->addr.addr, (*myds)->addr.port);
 		return false;
 	}
 

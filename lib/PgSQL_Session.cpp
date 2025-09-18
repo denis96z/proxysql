@@ -1120,7 +1120,7 @@ int PgSQL_Session::handler_again___status_RESYNCHRONIZING_CONNECTION() {
 		return 0;
 	} else {
 		if (rc == -1) {
-			const char* code = PgSQL_Error_Helper::get_error_code(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION);;
+			const char* code = PgSQL_Error_Helper::get_error_code(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION);
 			const char* msg = "Failed to synchronize connection";
 
 			if (myconn->is_error_present() == true) {
@@ -5434,7 +5434,7 @@ void PgSQL_Session::unable_to_parse_set_statement(bool* lock_hostgroup) {
 
 void PgSQL_Session::detected_broken_connection(const char* file, unsigned int line, const char* func, const char* action, PgSQL_Connection* myconn, bool verbose) {
 	
-	const char* code = PgSQL_Error_Helper::get_error_code(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION);;
+	const char* code = PgSQL_Error_Helper::get_error_code(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION);
 	const char* msg = "Detected offline server prior to statement execution";
 
 	if (myconn->is_error_present() == true) {

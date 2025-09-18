@@ -533,7 +533,7 @@ handler_again:
 					// received an extended query immediately after an error was triggered by a previous query (before sync).
 					// In ProxySQL this should never happen, since the extended query frame is reset after an error.
 					// However, it may rarely occur if an error is raised during the "describe portal" phase (while executing).
-					// In that case, we continue until PGRES_PIPELINE_SYNC (Ready for Query state) is received, then safely exit pipeline mode.					NEXT_IMMEDIATE(ASYNC_USE_RESULT_CONT);
+					// In that case, we continue until PGRES_PIPELINE_SYNC (Ready for Query state) is received, then safely exit pipeline mode.
 					NEXT_IMMEDIATE(ASYNC_USE_RESULT_CONT);
 					break;
 				case PGRES_BAD_RESPONSE:
