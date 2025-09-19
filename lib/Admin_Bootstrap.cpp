@@ -830,6 +830,12 @@ bool ProxySQL_Admin::init(const bootstrap_info_t& bootstrap_info) {
 		}
 	}
 
+	if (admindb_file_exists && GloVars.config_file) {
+		proxy_info("Ignoring configuration file at %s\n", GloVars.config_file);
+		proxy_info("Loading configuration from the config DB (%s) as it has higher precedence over the config file.\n", GloVars.admindb);
+		proxy_info("NOTE: Changes to %s will be ignored while the config DB exists. For more information, refer: https://proxysql.com/documentation/configuring-proxysql\n", GloVars.config_file);
+	}
+
 	/**
 	 * @brief Inserts a default 'mysql_group_replication_hostgroup'.
 	 * @details Uses the following defaults:
