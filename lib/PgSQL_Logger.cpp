@@ -691,21 +691,22 @@ void PgSQL_Logger::log_request(PgSQL_Session *sess, PgSQL_Data_Stream *myds) {
 			let = PGSQL_LOG_EVENT_TYPE::STMT_DESCRIBE;
 			break;
 		case WAITING_CLIENT_DATA:
-			{
-				/*unsigned char cmd = *(static_cast<unsigned char*>(sess->pkt.ptr));
-				switch (cmd) {
-					case 'P':
-						// proxysql is responding to PARSE without
-						// preparing on any backend
-						let = PGSQL_LOG_EVENT_TYPE::STMT_PREPARE;
-						break;
-					default:
-						break;
-				}*/
-
-				if (sess->pkt.ptr == nullptr)
-					let = PGSQL_LOG_EVENT_TYPE::STMT_PREPARE;
+		case PROCESSING_EXTENDED_QUERY_SYNC:
+		{
+			switch (sess->get_extended_query_phase() & EXTQ_PHASE_PROCESSING_MASK) {
+			case EXTQ_PHASE_PROCESSING_PARSE:
+				let = PGSQL_LOG_EVENT_TYPE::STMT_PREPARE;
+				break;
+			case EXTQ_PHASE_PROCESSING_DESCRIBE:
+				let = PGSQL_LOG_EVENT_TYPE::STMT_DESCRIBE;
+				break;
+			case EXTQ_PHASE_PROCESSING_EXECUTE:
+				let = PGSQL_LOG_EVENT_TYPE::STMT_EXECUTE;
+				break;
+			default:
+				break;
 			}
+		}
 			break;
 		default:
 			break;
@@ -713,7 +714,7 @@ void PgSQL_Logger::log_request(PgSQL_Session *sess, PgSQL_Data_Stream *myds) {
 
 	uint64_t query_digest = 0;
 
-	if (sess->status != PROCESSING_STMT_EXECUTE && sess->status != PROCESSING_STMT_DESCRIBE) {
+	if (let != PGSQL_LOG_EVENT_TYPE::STMT_EXECUTE && let != PGSQL_LOG_EVENT_TYPE::STMT_DESCRIBE) {
 		query_digest = GloPgQPro->get_digest(&sess->CurrentQuery.QueryParserArgs);
 	} else {
 		query_digest = sess->CurrentQuery.extended_query_info.stmt_info->digest;
@@ -728,14 +729,14 @@ void PgSQL_Logger::log_request(PgSQL_Session *sess, PgSQL_Data_Stream *myds) {
 	);
 	char *c = NULL;
 	int ql = 0;
-	switch (sess->status) {
-		case PROCESSING_STMT_DESCRIBE:
-		case PROCESSING_STMT_EXECUTE:
+	switch (let) {
+		case PGSQL_LOG_EVENT_TYPE::STMT_DESCRIBE:
+		case PGSQL_LOG_EVENT_TYPE::STMT_EXECUTE:
 			c = sess->CurrentQuery.extended_query_info.stmt_info->query;
 			ql = sess->CurrentQuery.extended_query_info.stmt_info->query_length;
 			me.set_client_stmt_name((char*)sess->CurrentQuery.extended_query_info.stmt_client_name);
 			break;
-		case PROCESSING_STMT_PREPARE:
+		case PGSQL_LOG_EVENT_TYPE::STMT_PREPARE:
 		default:
 			c = (char *)sess->CurrentQuery.QueryPointer;
 			ql = sess->CurrentQuery.QueryLength;

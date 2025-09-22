@@ -452,6 +452,7 @@ void PgSQL_Session::reset() {
 	if (client_myds && client_myds->myconn) {
 		client_myds->myconn->reset();
 	}
+	extended_query_phase = EXTQ_PHASE_IDLE;
 }
 
 PgSQL_Session::~PgSQL_Session() {
@@ -2140,6 +2141,7 @@ __implicit_sync:
 						switch (command) {
 						case 'Q':
 						{
+							extended_query_phase = EXTQ_PHASE_IDLE;
 							__sync_add_and_fetch(&thread->status_variables.stvar[st_var_queries], 1);
 							if (session_type == PROXYSQL_SESSION_PGSQL) {
 								bool rc_break = false;
@@ -2590,7 +2592,6 @@ void PgSQL_Session::handler_minus1_GenerateErrorMessage(PgSQL_Data_Stream* myds,
 
 	switch (status) {
 	case PROCESSING_STMT_PREPARE:
-		GloPgSQL_Logger->log_audit_entry(PGSQL_LOG_EVENT_TYPE::AUTH_CLOSE, this, NULL);
 		if (previous_status.size()) {
 			// an STMT_PREPARE failed
 			// we have a previous status, probably STMT_DESCRIBE or STMT_EXECUTE,
@@ -2598,13 +2599,9 @@ void PgSQL_Session::handler_minus1_GenerateErrorMessage(PgSQL_Data_Stream* myds,
 			// for this reason we exit immediately
 			wrong_pass = true;
 		}
-		PgSQL_Result_to_PgSQL_wire(myconn, myds);
-		break;
+		// fall through
 	case PROCESSING_STMT_DESCRIBE:
 	case PROCESSING_STMT_EXECUTE:
-		PgSQL_Result_to_PgSQL_wire(myconn, myds);
-		LogQuery(myds);
-		break;
 	case PROCESSING_QUERY:
 		PgSQL_Result_to_PgSQL_wire(myconn, myds);
 		break;
@@ -2755,6 +2752,7 @@ handler_again:
 			proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Extended query sync completed for session %p\n", this);
 			// we are done with extended query sync
 			bind_waiting_for_execute.reset(nullptr);
+			extended_query_phase = EXTQ_PHASE_IDLE;
 
 			if (PgSQL_Backend* _mybe = find_backend(current_hostgroup)) {
 				if (PgSQL_Data_Stream* myds = _mybe->server_myds) {
@@ -3060,9 +3058,6 @@ handler_again:
 					// fall through
 				case PROCESSING_STMT_DESCRIBE:
 				case PROCESSING_STMT_EXECUTE:
-					PgSQL_Result_to_PgSQL_wire(myconn, myconn->myds);
-					LogQuery(myds);
-					break;
 				case PROCESSING_QUERY:
 					PgSQL_Result_to_PgSQL_wire(myconn, myconn->myds);
 					break;
@@ -3080,15 +3075,6 @@ handler_again:
 					// LCOV_EXCL_STOP
 				}
 
-				// Handle edge case: Since libpq automatically sends a Sync after Execute,
-				// the Bind message is no longer pending on the backend. We must reset
-				// bind_waiting_for_execute in case the client sends a sequence like
-				// Bind/Describe/Execute/Describe/Sync, so that a subsequent Describe Portal
-				// does not incorrectly assume a pending Bind.
-				if (status == PROCESSING_STMT_EXECUTE) {
-					bind_waiting_for_execute.reset(nullptr);
-				}
-
 				// if we are in extended query mode, we need to check if we have a pending extended query messages
 				bool has_pending_messages = false;
 				if (processing_extended_query) {
@@ -3097,11 +3083,6 @@ handler_again:
 					proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5, "Session=%p client_myds=%p server_myds=%p myconn=%p Remaining extended query messages '%lu'."
 						"Sticky Backend='%s'\n",
 						this, client_myds, myds, myconn, extended_query_frame.size(), (has_pending_messages ? "yes" : "no"));
-
-					if (!has_pending_messages) {
-						proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Extended query sync completed for session %p\n", this);
-						bind_waiting_for_execute.reset(nullptr);
-					}
 #ifdef DEBUG
 					if (dbg_extended_query_backend_conn)
 						assert(dbg_extended_query_backend_conn == myconn);
@@ -3112,14 +3093,29 @@ handler_again:
 #endif
 				} 
 
+				enum session_status old_status = status;
+
 				RequestEnd(myds, false);
 				finishQuery(myds, myconn, has_pending_messages);
 
-				if (has_pending_messages) {
-					// check if there are messages remaining in extended_query_frame, 
-					// if yes, send response to client and process pending messages
-					writeout();
-					NEXT_IMMEDIATE(PROCESSING_EXTENDED_QUERY_SYNC);
+				if (processing_extended_query) {
+					if (!has_pending_messages) {
+						proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Extended query sync completed for session %p\n", this);
+						bind_waiting_for_execute.reset(nullptr);
+					} else if (old_status == PROCESSING_STMT_EXECUTE) {
+						// Handle edge case: After Execute, the Bind message is no longer valid on the backend. 
+						// We must reset bind_waiting_for_execute, in case the client sends a sequence like
+						// Bind/Describe/Execute/Describe/Sync, so that a subsequent Describe Portal
+						// does not incorrectly assume a pending Bind.
+						bind_waiting_for_execute.reset(nullptr);
+					}
+					if (has_pending_messages) {
+						// check if there are messages remaining in extended_query_frame, 
+						// if yes, send response to client and process pending messages
+						writeout();
+						NEXT_IMMEDIATE(PROCESSING_EXTENDED_QUERY_SYNC);
+					}
+					extended_query_phase = EXTQ_PHASE_IDLE;
 				}
 			} else {
 				if (rc == -1) {
@@ -5071,16 +5067,7 @@ void PgSQL_Session::RequestEnd(PgSQL_Data_Stream* myds, bool called_on_failure) 
 		}
 	}
 
-	switch (status)
-	{
-	case PROCESSING_STMT_PREPARE:
-	case PROCESSING_STMT_DESCRIBE:
-	case PROCESSING_STMT_EXECUTE:
-		// already logged
-		break;
-	default:
-		LogQuery(myds);
-	}
+	LogQuery(myds);
 
 __cleanup:
 
@@ -5519,6 +5506,7 @@ void PgSQL_Session::switch_normal_to_fast_forward_mode(PtrSize_t& pkt, std::stri
 	// as we are in FAST_FORWARD mode, we directly send the packet to the backend.
 	// need to reset mysql_real_query
 	mybe->server_myds->pgsql_real_query.reset();
+	CurrentQuery.end();
 }
 
 void PgSQL_Session::switch_fast_forward_to_normal_mode() {
@@ -6185,6 +6173,7 @@ int  PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___PGSQL_S
 		client_myds->myprot.generate_ready_for_query_packet(true, txn_state);
 		client_myds->DSS = STATE_SLEEP;
 		status = WAITING_CLIENT_DATA;
+		extended_query_phase = EXTQ_PHASE_IDLE;
 		return 0;
 	}
 
@@ -6200,14 +6189,19 @@ int PgSQL_Session::handler___status_PROCESSING_EXTENDED_QUERY_SYNC() {
 	int rc = -1;
 
 	if (const std::unique_ptr<PgSQL_Parse_Message>* parse_msg = std::get_if<std::unique_ptr<PgSQL_Parse_Message>>(&packet)) {
+		extended_query_phase = (extended_query_phase & ~EXTQ_PHASE_PROCESSING_MASK) | EXTQ_PHASE_PROCESSING_PARSE;
 		rc = handle_post_sync_parse_message(parse_msg->get());
 	} else if (const std::unique_ptr<PgSQL_Describe_Message>* describe_msg = std::get_if<std::unique_ptr<PgSQL_Describe_Message>>(&packet)) {
+		extended_query_phase = (extended_query_phase & ~EXTQ_PHASE_PROCESSING_MASK) | EXTQ_PHASE_PROCESSING_DESCRIBE;
 		rc = handle_post_sync_describe_message(describe_msg->get());
 	} else if (const std::unique_ptr<PgSQL_Close_Message>* close_msg = std::get_if<std::unique_ptr<PgSQL_Close_Message>>(&packet)) {
+		extended_query_phase = (extended_query_phase & ~EXTQ_PHASE_PROCESSING_MASK) | EXTQ_PHASE_PROCESSING_CLOSE;
 		rc = handle_post_sync_close_message(close_msg->get());
 	} else if (const std::unique_ptr<PgSQL_Bind_Message>* bind_msg = std::get_if<std::unique_ptr<PgSQL_Bind_Message>>(&packet)) {
+		extended_query_phase = (extended_query_phase & ~EXTQ_PHASE_PROCESSING_MASK) | EXTQ_PHASE_PROCESSING_BIND;
 		rc = handle_post_sync_bind_message(bind_msg->get());
 	} else if (const std::unique_ptr<PgSQL_Execute_Message>* execute_msg = std::get_if<std::unique_ptr<PgSQL_Execute_Message>>(&packet)) {
+		extended_query_phase = (extended_query_phase & ~EXTQ_PHASE_PROCESSING_MASK) | EXTQ_PHASE_PROCESSING_EXECUTE;
 		rc = handle_post_sync_execute_message(execute_msg->get());
 	} else {
 		proxy_error("Unknown extended query message\n");
