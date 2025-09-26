@@ -5587,21 +5587,19 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 
 	extended_query_info.stmt_client_name = parse_data.stmt_name;
 
-	if (extended_query_exec_qp) {
-		timespec begint;
-		timespec endt;
-		if (thread->variables.stats_time_query_processor) {
-			clock_gettime(CLOCK_THREAD_CPUTIME_ID, &begint);
-		}
-		qpo = GloPgQPro->process_query(this, (unsigned char*)parse_data.query_string, strlen(parse_data.query_string) + 1, &CurrentQuery);
-		if (thread->variables.stats_time_query_processor) {
-			clock_gettime(CLOCK_THREAD_CPUTIME_ID, &endt);
-			thread->status_variables.stvar[st_var_query_processor_time] = thread->status_variables.stvar[st_var_query_processor_time] +
-				(endt.tv_sec * 1000000000 + endt.tv_nsec) -
-				(begint.tv_sec * 1000000000 + begint.tv_nsec);
-		}
-		assert(qpo);	// GloPgQPro->process_mysql_query() should always return a qpo
+	timespec begint;
+	timespec endt;
+	if (thread->variables.stats_time_query_processor) {
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &begint);
 	}
+	qpo = GloPgQPro->process_query(this, (unsigned char*)parse_data.query_string, strlen(parse_data.query_string) + 1, &CurrentQuery);
+	if (thread->variables.stats_time_query_processor) {
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &endt);
+		thread->status_variables.stvar[st_var_query_processor_time] = thread->status_variables.stvar[st_var_query_processor_time] +
+			(endt.tv_sec * 1000000000 + endt.tv_nsec) -
+			(begint.tv_sec * 1000000000 + begint.tv_nsec);
+	}
+	assert(qpo);	// GloPgQPro->process_mysql_query() should always return a qpo
 
 	if (parse_data.num_param_types > 0) {
 		Parse_Param_Types parse_param_type;
@@ -5627,6 +5625,21 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 		}
 		extended_query_exec_qp = false; // reset the flag, we have processed the query and destination_hostgroup is set
 	} else {
+
+		if (qpo->new_query) {
+			handler_WCD_SS_MCQ_qpo_QueryRewrite(&parse_pkt);
+		}
+
+		if (parse_pkt.size > (unsigned int)pgsql_thread___max_allowed_packet) {
+			handler_WCD_SS_MCQ_qpo_LargePacket(&parse_pkt);
+			return 0;
+		}
+
+		if (qpo->error_msg) {
+			handler_WCD_SS_MCQ_qpo_error_msg(&parse_pkt);
+			return 0;
+		}
+
 		assert(previous_hostgroup != -1); // previous_hostgroup should be set before 
 		current_hostgroup = previous_hostgroup; // reset current hostgroup to previous hostgroup
 		proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Session=%p client_myds=%p. Using previous hostgroup '%d'\n",
@@ -5802,24 +5815,22 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 	extended_query_info.stmt_type = stmt_type;
 	CurrentQuery.start_time = thread->curtime;
 
-	if (extended_query_exec_qp) {
-		timespec begint;
-		timespec endt;
-		if (thread->variables.stats_time_query_processor) {
-			clock_gettime(CLOCK_THREAD_CPUTIME_ID, &begint);
-		}
-		qpo = GloPgQPro->process_query(this, nullptr, 0, &CurrentQuery);
-		assert(qpo);	// GloPgQPro->process_mysql_query() should always return a qpo
+	timespec begint;
+	timespec endt;
+	if (thread->variables.stats_time_query_processor) {
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &begint);
+	}
+	qpo = GloPgQPro->process_query(this, nullptr, 0, &CurrentQuery);
+	assert(qpo);	// GloPgQPro->process_mysql_query() should always return a qpo
 
-		if (qpo->max_lag_ms >= 0) {
-			thread->status_variables.stvar[st_var_queries_with_max_lag_ms]++;
-		}
-		if (thread->variables.stats_time_query_processor) {
-			clock_gettime(CLOCK_THREAD_CPUTIME_ID, &endt);
-			thread->status_variables.stvar[st_var_query_processor_time] = thread->status_variables.stvar[st_var_query_processor_time] +
-				(endt.tv_sec * 1000000000 + endt.tv_nsec) -
-				(begint.tv_sec * 1000000000 + begint.tv_nsec);
-		}
+	if (qpo->max_lag_ms >= 0) {
+		thread->status_variables.stvar[st_var_queries_with_max_lag_ms]++;
+	}
+	if (thread->variables.stats_time_query_processor) {
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &endt);
+		thread->status_variables.stvar[st_var_query_processor_time] = thread->status_variables.stvar[st_var_query_processor_time] +
+			(endt.tv_sec * 1000000000 + endt.tv_nsec) -
+			(begint.tv_sec * 1000000000 + begint.tv_nsec);
 	}
 
 	// setting 'prepared' to prevent fetching results from the cache if the digest matches
@@ -6062,23 +6073,22 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 	timespec begint;
 	timespec endt;
 
-	if (extended_query_exec_qp) {
-		if (thread->variables.stats_time_query_processor) {
-			clock_gettime(CLOCK_THREAD_CPUTIME_ID, &begint);
-		}
-		qpo = GloPgQPro->process_query(this, nullptr, 0, &CurrentQuery);
-		assert(qpo);	// GloPgQPro->process_mysql_query() should always return a qpo
-
-		if (qpo->max_lag_ms >= 0) {
-			thread->status_variables.stvar[st_var_queries_with_max_lag_ms]++;
-		}
-		if (thread->variables.stats_time_query_processor) {
-			clock_gettime(CLOCK_THREAD_CPUTIME_ID, &endt);
-			thread->status_variables.stvar[st_var_query_processor_time] = thread->status_variables.stvar[st_var_query_processor_time] +
-				(endt.tv_sec * 1000000000 + endt.tv_nsec) -
-				(begint.tv_sec * 1000000000 + begint.tv_nsec);
-		}
+	if (thread->variables.stats_time_query_processor) {
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &begint);
 	}
+	qpo = GloPgQPro->process_query(this, nullptr, 0, &CurrentQuery);
+	assert(qpo);	// GloPgQPro->process_mysql_query() should always return a qpo
+
+	if (qpo->max_lag_ms >= 0) {
+		thread->status_variables.stvar[st_var_queries_with_max_lag_ms]++;
+	}
+	if (thread->variables.stats_time_query_processor) {
+		clock_gettime(CLOCK_THREAD_CPUTIME_ID, &endt);
+		thread->status_variables.stvar[st_var_query_processor_time] = thread->status_variables.stvar[st_var_query_processor_time] +
+			(endt.tv_sec * 1000000000 + endt.tv_nsec) -
+			(begint.tv_sec * 1000000000 + begint.tv_nsec);
+	}
+
 	// required for SET statement parsing
 	CurrentQuery.QueryPointer = (unsigned char*)stmt_info->query;
 	CurrentQuery.QueryLength = stmt_info->query_length;
@@ -6099,6 +6109,13 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 		}
 		extended_query_exec_qp = false;
 	} else {
+		
+		if (qpo->OK_msg) {
+			auto execute_pkt = execute_msg->detach(); // detach the packet from the describe message
+			handler_WCD_SS_MCQ_qpo_OK_msg(&execute_pkt);
+			return 0;
+		}
+
 		assert(previous_hostgroup != -1); // previous_hostgroup should be set before 
 		if (CurrentQuery.QueryParserArgs.digest_text) {
 			const char* dig = CurrentQuery.QueryParserArgs.digest_text;
