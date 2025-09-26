@@ -169,10 +169,10 @@ void PgSQL_Event::write_auth(std::fstream *f, PgSQL_Session *sess) {
 	}
 	switch (et) {
 		case PGSQL_LOG_EVENT_TYPE::AUTH_OK:
-			j["event"]="PgSQL_Client_Connect_OK";
+			j["event"]="PGSQL_Client_Connect_OK";
 			break;
 		case PGSQL_LOG_EVENT_TYPE::AUTH_ERR:
-			j["event"]="PgSQL_Client_Connect_ERR";
+			j["event"]="PGSQL_Client_Connect_ERR";
 			break;
 		case PGSQL_LOG_EVENT_TYPE::AUTH_CLOSE:
 			j["event"]="PGSQL_Client_Close";
