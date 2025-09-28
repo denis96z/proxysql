@@ -317,8 +317,40 @@ public:
      */
     void stmt_execute_cont(short event);
 
-	void reset_session_start();
-	void reset_session_cont(short event);
+    /**
+     * @brief Initiates the asynchronous reset of the PostgreSQL connection.
+     *
+     * Starts the internal state machine that resets connection to a clean,
+     * reusable state so it can safely re-enter the multiplexing pool.
+     *
+     */
+    void reset_session_start();
+
+    /**
+     * @brief Continues the asynchronous reset of the PostgreSQL session.
+     *
+     * This method advances the state machine initiated by reset_session_start()
+     * to asynchronously reset the backend connection to a clean, reusable state.
+     *
+     * @param event The event flag indicating the current I/O event.
+     */
+    void reset_session_cont(short event);
+
+    /**
+     * @brief Start a resynchronization attempt for the current backend connection.
+     *
+     * Send protocol-level Sync (or otherwise trigger the backend to reach
+     * ReadyForQuery) and transition the connection into the resynchronizing state.
+     *
+     */
+    void resync_start();
+
+    /**
+	 * @brief Continue a previously started resynchronization in response to an event.
+	 *
+	 * @param event The event flag indicating the current I/O event.
+	 */
+    void resync_cont(short event);
 	
 	int async_connect(short event);
 	int async_query(short event, const char* stmt, unsigned long length, const char* backend_stmt_name = nullptr, 
@@ -326,6 +358,7 @@ public:
 	int async_ping(short event);
 	int async_reset_session(short event);
 	int async_send_simple_command(short event, char* stmt, unsigned long length); // no result set expected
+	int async_perform_resync(short event);
 
 	void next_event(PG_ASYNC_ST new_st);
 	bool is_connected() const;
@@ -436,6 +469,7 @@ public:
 	void reset_error() { reset_error_info(error_info, false); }
 
 	bool reset_session_in_txn = false;
+	bool reset_session_in_pipeline = false;
 
 	PGresult* get_result();
 	void next_multi_statement_result(PGresult* result);
@@ -473,9 +507,8 @@ public:
 	const char* get_pg_transaction_status_str();
 	unsigned int get_memory_usage() const;
 	char get_transaction_status_char();
-
-	inline
-	int get_backend_pid() { return (pgsql_conn) ? get_pg_backend_pid() : -1; }
+	inline int get_backend_pid() { return (pgsql_conn) ? get_pg_backend_pid() : -1; }
+	bool is_pipeline_active() { return (PQpipelineStatus(pgsql_conn) != PQ_PIPELINE_OFF); }
 
 	static int char_to_encoding(const char* name) {
 		return pg_char_to_encoding(name);
@@ -602,6 +635,8 @@ public:
 	bool processing_multi_statement;
 	bool multiplex_delayed;
 	bool is_client_connection; // true if this is a client connection, false if it is a server connection
+	bool exit_pipeline_mode; // true if it is safe to exit pipeline mode
+	bool resync_failed; // true if the last resync attempt failed
 
 	PgSQL_STMTs_local_v14* local_stmts;
 	PgSQL_SrvC *parent;
@@ -623,7 +658,8 @@ private:
 	ASYNC_ST fetch_result_end_st = ASYNC_QUERY_END;
 	inline void set_fetch_result_end_state(ASYNC_ST st) {
 		assert(st == ASYNC_QUERY_END || st == ASYNC_STMT_EXECUTE_END || 
-			st == ASYNC_STMT_DESCRIBE_END || st == ASYNC_STMT_PREPARE_END);
+			st == ASYNC_STMT_DESCRIBE_END || st == ASYNC_STMT_PREPARE_END ||
+			st == ASYNC_RESYNC_END);
 		fetch_result_end_st = st;
 	}
 	// Handles the COPY OUT response from the server.

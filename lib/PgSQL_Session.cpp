@@ -998,7 +998,8 @@ int PgSQL_Session::handler_again___status_PINGING_SERVER() {
 		myconn->compute_unknown_transaction_status();
 		//if (pgsql_thread___multiplexing && (myconn->reusable==true) && myds->myconn->IsActiveTransaction()==false && myds->myconn->MultiplexDisabled()==false) {
 		// due to issue #2096 we disable the global check on pgsql_thread___multiplexing
-		if ((myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false) {
+		if ((myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false &&
+			myds->myconn->is_pipeline_active() == false) {
 			myds->return_MySQL_Connection_To_Pool();
 		} else {
 			myds->destroy_MySQL_Connection_From_Pool(true);
@@ -1097,6 +1098,49 @@ int PgSQL_Session::handler_again___status_RESETTING_CONNECTION() {
 			if (myds->mypolls == NULL) {
 				thread->mypolls.add(POLLIN | POLLOUT, myds->fd, myds, thread->curtime);
 			}
+		}
+	}
+	return 0;
+}
+
+int PgSQL_Session::handler_again___status_RESYNCHRONIZING_CONNECTION() {
+	assert(mybe->server_myds->myconn);
+	PgSQL_Data_Stream* myds = mybe->server_myds;
+	PgSQL_Connection* myconn = myds->myconn;
+	if (myds->mypolls == NULL) {
+		thread->mypolls.add(POLLIN | POLLOUT, myds->fd, myds, thread->curtime);
+	}
+	myds->DSS = STATE_MARIADB_QUERY;
+	int rc = myconn->async_perform_resync(myds->revents);
+	if (rc == 0) {
+		myconn->async_state_machine = ASYNC_IDLE;
+		myds->DSS = STATE_MARIADB_GENERIC;
+		RequestEnd(myds, false); // we close the session gracefully
+		finishQuery(myds, myds->myconn, false);
+		return 0;
+	} else {
+		if (rc == -1) {
+			const char* code = PgSQL_Error_Helper::get_error_code(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION);
+			const char* msg = "Failed to synchronize connection";
+
+			if (myconn->is_error_present() == true) {
+				code = myconn->get_error_code_str();
+				msg = myconn->get_error_message().c_str();
+			}
+			proxy_error("Detected an error during Resynchronization on (%d,%s,%d) , FD (Conn:%d , MyDS:%d) : %s , %s\n", 
+				myconn->parent->myhgc->hid, myconn->parent->address, myconn->parent->port, myds->fd, myds->myconn->fd, code, msg);
+
+			PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::pgsql, myconn->parent->myhgc->hid, myconn->parent->address, myconn->parent->port, 9999);
+
+			myds->destroy_MySQL_Connection_From_Pool(false);
+			myds->fd = 0;
+			RequestEnd(myds, true);
+			return -1;
+		} 
+			
+		// rc==1 , nothing to do for now
+		if (myds->mypolls == NULL) {
+			thread->mypolls.add(POLLIN | POLLOUT, myds->fd, myds, thread->curtime);
 		}
 	}
 	return 0;
@@ -1215,7 +1259,8 @@ bool PgSQL_Session::handler_again___status_SETTING_INIT_CONNECT(int* _rc) {
 				detected_broken_connection(__FILE__, __LINE__, __func__, "while setting INIT CONNECT", myconn);
 				//if ((myds->myconn->reusable==true) && ((myds->myprot.prot_status & SERVER_STATUS_IN_TRANS)==0)) {
 				if (rc != -2) { // see PMC-10003
-					if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false) {
+					if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false &&
+						myds->myconn->is_pipeline_active() == false) {
 						retry_conn = true;
 					}
 				}
@@ -1337,7 +1382,8 @@ bool PgSQL_Session::handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, co
 				bool retry_conn = false;
 				// client error, serious
 				detected_broken_connection(__FILE__, __LINE__, __func__, "while setting ", myconn);
-				if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false) {
+				if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false &&
+					myds->myconn->is_pipeline_active() == false) {
 					retry_conn = true;
 				}
 				myds->destroy_MySQL_Connection_From_Pool(false);
@@ -1644,7 +1690,8 @@ bool PgSQL_Session::handler_again___status_RESETTING_CONNECTION(int* _rc) {
 				bool retry_conn = false;
 				// client error, serious
 				detected_broken_connection(__FILE__, __LINE__, __func__, "during Resetting Connection", myconn);
-				if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false) {
+				if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false &&
+					myds->myconn->is_pipeline_active() == false) {
 					retry_conn = true;
 				}
 				myds->destroy_MySQL_Connection_From_Pool(false);
@@ -1670,7 +1717,8 @@ bool PgSQL_Session::handler_again___status_RESETTING_CONNECTION(int* _rc) {
 				bool retry_conn = false;
 				proxy_error("Timeout during Resetting Connection on %s , %d\n", myconn->parent->address, myconn->parent->port);
 				PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::pgsql, myconn->parent->myhgc->hid, myconn->parent->address, myconn->parent->port, ER_PROXYSQL_CHANGE_USER_TIMEOUT);
-				if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false) {
+				if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false &&
+					myds->myconn->is_pipeline_active() == false) {
 					retry_conn = true;
 				}
 				myds->destroy_MySQL_Connection_From_Pool(false);
@@ -2434,7 +2482,8 @@ int PgSQL_Session::handler_ProcessingQueryError_CheckBackendConnectionStatus(PgS
 		// Retry the query if retries are allowed and conditions permit
 		if (myds->query_retries_on_failure > 0) {
 			myds->query_retries_on_failure--;
-			if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false) {
+			if ((myds->myconn->reusable == true) && myds->myconn->IsActiveTransaction() == false && myds->myconn->MultiplexDisabled() == false &&
+				myds->myconn->is_pipeline_active() == false) {
 				if (myds->myconn->query_result && myds->myconn->query_result->is_transfer_started()) {
 					// transfer to frontend has started, we cannot retry
 				} else {
@@ -2485,7 +2534,8 @@ bool PgSQL_Session::handler_minus1_ClientLibraryError(PgSQL_Data_Stream* myds) {
 	detected_broken_connection(__FILE__, __LINE__, __func__, "running query", myconn, true);
 	if (myds->query_retries_on_failure > 0) {
 		myds->query_retries_on_failure--;
-		if ((myconn->reusable == true) && myconn->IsActiveTransaction() == false && myconn->MultiplexDisabled() == false) {
+		if ((myconn->reusable == true) && myconn->IsActiveTransaction() == false && myconn->MultiplexDisabled() == false &&
+			myconn->is_pipeline_active() == false) {
 			if (myconn->query_result && myconn->query_result->is_transfer_started()) {
 				// transfer to frontend has started, we cannot retry
 			} else {
@@ -2552,7 +2602,8 @@ bool PgSQL_Session::handler_minus1_HandleErrorCodes(PgSQL_Data_Stream* myds, int
 		myconn->parent->connect_error(9999);
 		if (myds->query_retries_on_failure > 0) {
 			myds->query_retries_on_failure--;
-			if ((myconn->reusable == true) && myconn->IsActiveTransaction() == false && myconn->MultiplexDisabled() == false) {
+			if ((myconn->reusable == true) && myconn->IsActiveTransaction() == false && myconn->MultiplexDisabled() == false &&
+				myconn->is_pipeline_active() == false) {
 				retry_conn = true;
 				proxy_warning("Retrying query.\n");
 			}
@@ -2615,9 +2666,14 @@ void PgSQL_Session::handler_minus1_HandleBackendConnection(PgSQL_Data_Stream* my
 	PgSQL_Connection* myconn = myds->myconn;
 	if (myconn) {
 		myconn->reduce_auto_increment_delay_token();
-		if (pgsql_thread___multiplexing && (myconn->reusable == true) && myconn->IsActiveTransaction() == false && myconn->MultiplexDisabled() == false) {
+		if (pgsql_thread___multiplexing && (myconn->reusable == true) && myconn->IsActiveTransaction() == false && 
+			myconn->MultiplexDisabled() == false) {
 			myds->DSS = STATE_NOT_INITIALIZED;
-			myds->return_MySQL_Connection_To_Pool();
+			if (myconn->is_pipeline_active() == true) {
+				create_new_session_and_reset_connection(myds);
+			} else {
+				myds->return_MySQL_Connection_To_Pool();
+			}
 		} else {
 			myconn->async_state_machine = ASYNC_IDLE;
 			myds->DSS = STATE_MARIADB_GENERIC;
@@ -2739,7 +2795,15 @@ __handler_again_get_pkts_from_client:
 handler_again:
 
 	switch (status) {
-		// FIXME: move it to bottom
+	case RESYNCHRONIZING_CONNECTION:
+	{
+		int rc = handler_again___status_RESYNCHRONIZING_CONNECTION();
+		if (rc == -1) { // if the sync fails, we destroy the session
+			handler_ret = -1;
+			return handler_ret;
+		}
+	}
+		break;
 	case PROCESSING_EXTENDED_QUERY_SYNC:
 	{
 		int rc = handler___status_PROCESSING_EXTENDED_QUERY_SYNC();
@@ -2765,6 +2829,10 @@ handler_again:
 #ifdef DEBUG
 						assert(dbg_extended_query_backend_conn == myds->myconn);
 #endif
+						if (myds->myconn->is_pipeline_active() == true) {
+							NEXT_IMMEDIATE(RESYNCHRONIZING_CONNECTION);
+						}
+
 						// Return to pool if connection is reusable
 						finishQuery(myds, myds->myconn, false);
 					}
@@ -2857,7 +2925,7 @@ handler_again:
 			(killed == true) // session was killed by admin
 			) {
 			// we only log in case on timing out here. Logging for 'killed' is done in the places that hold that contextual information.
-			if (mybe->server_myds->myconn && (mybe->server_myds->myconn->async_state_machine != ASYNC_IDLE) && mybe->server_myds->wait_until && (thread->curtime >= mybe->server_myds->wait_until)) {
+			if (killed == false) {
 				std::string query{};
 
 				if (CurrentQuery.extended_query_info.stmt_info == NULL) { // text protocol
@@ -2978,6 +3046,7 @@ handler_again:
 								PROXY_TRACE();
 								assert(0);
 							}
+							CurrentQuery.extended_query_info.flags |= PGSQL_EXTENDED_QUERY_FLAG_IMPLICIT_PREPARE;
 							previous_status.push(status);
 							NEXT_IMMEDIATE(PROCESSING_STMT_PREPARE);
 						}
@@ -5285,7 +5354,11 @@ void PgSQL_Session::finishQuery(PgSQL_Data_Stream* myds, PgSQL_Connection* mycon
 			myconn->multiplex_delayed = false;
 			myds->wait_until = 0;
 			myds->DSS = STATE_NOT_INITIALIZED;
-			myds->return_MySQL_Connection_To_Pool();
+			if (myconn->is_pipeline_active() == true) {
+				create_new_session_and_reset_connection(myds);
+			} else {
+				myds->return_MySQL_Connection_To_Pool();
+			}
 		}
 		if (transaction_persistent == true) {
 			transaction_persistent_hostgroup = -1;
@@ -5361,7 +5434,7 @@ void PgSQL_Session::unable_to_parse_set_statement(bool* lock_hostgroup) {
 
 void PgSQL_Session::detected_broken_connection(const char* file, unsigned int line, const char* func, const char* action, PgSQL_Connection* myconn, bool verbose) {
 	
-	const char* code = PgSQL_Error_Helper::get_error_code(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION);;
+	const char* code = PgSQL_Error_Helper::get_error_code(PGSQL_ERROR_CODES::ERRCODE_RAISE_EXCEPTION);
 	const char* msg = "Detected offline server prior to statement execution";
 
 	if (myconn->is_error_present() == true) {
@@ -5628,7 +5701,7 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 			this, client_myds, previous_hostgroup);
 	}
 
-	if (pgsql_thread___set_query_lock_on_hostgroup == 1) { 
+	if (pgsql_thread___set_query_lock_on_hostgroup == 1) {
 		if (locked_on_hostgroup < 0) {
 			if (lock_hostgroup) {
 				// we are locking on hostgroup now
@@ -5701,10 +5774,13 @@ int PgSQL_Session::handle_post_sync_parse_message(PgSQL_Parse_Message* parse_msg
 	}
 	GloPgStmt->unlock();
 
+	if (extended_query_frame.empty() == true) {
+		extended_query_info.flags |= PGSQL_EXTENDED_QUERY_FLAG_SYNC;
+	}
+
 	// Fallback: forward to backend
 	mybe = find_or_create_backend(current_hostgroup);
 	status = PROCESSING_STMT_PREPARE;
-
 	mybe->server_myds->connect_retries_on_failure = pgsql_thread___connect_retries_on_failure;
 	mybe->server_myds->wait_until = 0;
 	mybe->server_myds->killed_at = 0;
@@ -5851,6 +5927,10 @@ int PgSQL_Session::handle_post_sync_describe_message(PgSQL_Describe_Message* des
 		}
 	}
 	
+	if (extended_query_frame.empty() == true) {
+		extended_query_info.flags |= PGSQL_EXTENDED_QUERY_FLAG_SYNC;
+	}
+
 	mybe = find_or_create_backend(current_hostgroup);
 	status = PROCESSING_STMT_DESCRIBE;
 	mybe->server_myds->connect_retries_on_failure = pgsql_thread___connect_retries_on_failure;
@@ -6122,6 +6202,11 @@ int PgSQL_Session::handle_post_sync_execute_message(PgSQL_Execute_Message* execu
 			}
 		}
 	}
+
+	if (extended_query_frame.empty() == true) {
+		extended_query_info.flags |= PGSQL_EXTENDED_QUERY_FLAG_SYNC;
+	}
+
 	mybe = find_or_create_backend(current_hostgroup);
 	status = PROCESSING_STMT_EXECUTE;
 	mybe->server_myds->connect_retries_on_failure = pgsql_thread___connect_retries_on_failure;
@@ -6361,6 +6446,7 @@ bool PgSQL_Session::handler___rc0_PROCESSING_STMT_PREPARE(enum session_status& s
 	st = status;
 	
 	if (previous_status.empty() == false) {
+		CurrentQuery.extended_query_info.flags &= ~PGSQL_EXTENDED_QUERY_FLAG_IMPLICIT_PREPARE;
 		myds->myconn->async_state_machine = ASYNC_IDLE;
 		myds->DSS = STATE_MARIADB_GENERIC;
 		st = previous_status.top();

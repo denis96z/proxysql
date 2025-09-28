@@ -513,7 +513,11 @@ void Base_Session<S,DS,B,T>::housekeeping_before_pkts() {
 						myds->return_MySQL_Connection_To_Pool();
 					}
 				} else if constexpr (std::is_same_v<S, PgSQL_Session>) {
-					myds->return_MySQL_Connection_To_Pool();
+					if (myds->myconn->is_pipeline_active() == true) {
+						create_new_session_and_reset_connection(myds);
+					} else {
+						myds->return_MySQL_Connection_To_Pool();
+					}
 				} else {
 					assert(0);
 				}

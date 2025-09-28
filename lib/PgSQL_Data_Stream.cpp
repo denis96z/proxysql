@@ -1201,7 +1201,8 @@ bool PgSQL_Data_Stream::data_in_rbio() {
 void PgSQL_Data_Stream::reset_connection() {
 	if (myconn) {
 		if (pgsql_thread___multiplexing && (DSS == STATE_MARIADB_GENERIC || DSS == STATE_READY) && myconn->reusable == true &&
-			myconn->IsActiveTransaction() == false && myconn->MultiplexDisabled() == false && myconn->async_state_machine == ASYNC_IDLE) {
+			myconn->IsActiveTransaction() == false && myconn->MultiplexDisabled() == false && myconn->async_state_machine == ASYNC_IDLE &&
+			myconn->is_pipeline_active() == false) {
 			myconn->last_time_used = sess->thread->curtime;
 			return_MySQL_Connection_To_Pool();
 		} else {
