@@ -4771,7 +4771,7 @@ void PgSQL_Session::handler___client_DSS_QUERY_SENT___server_DSS_NOT_INITIALIZED
 #ifdef STRESSTESTPOOL_MEASURE
 	timespec begint;
 	timespec endt;
-	clock_gettime(CLOCK_MONOTONIC, &begint);
+	clock_gettime(PROXYSQL_CLOCK_MONOTONIC, &begint);
 #endif // STRESSTESTPOOL_MEASURE
 	for (unsigned int loops = 0; loops < NUM_SLOW_LOOPS; loops++) {
 #endif // STRESSTEST_POOL
@@ -4799,7 +4799,7 @@ void PgSQL_Session::handler___client_DSS_QUERY_SENT___server_DSS_NOT_INITIALIZED
 		}
 #ifdef STRESSTEST_POOL
 #ifdef STRESSTESTPOOL_MEASURE
-		clock_gettime(CLOCK_MONOTONIC, &endt);
+		clock_gettime(PROXYSQL_CLOCK_MONOTONIC, &endt);
 		thread->status_variables.query_processor_time = thread->status_variables.query_processor_time +
 			(endt.tv_sec * 1000000000 + endt.tv_nsec) -
 			(begint.tv_sec * 1000000000 + begint.tv_nsec);
@@ -5083,7 +5083,7 @@ unsigned long long PgSQL_Session::IdleTime() {
 void PgSQL_Session::LogQuery(PgSQL_Data_Stream* myds) {
 	// we need to access statistics before calling CurrentQuery.end()
 	// so we track the time here
-	CurrentQuery.end_time = thread->curtime;
+	CurrentQuery.set_end_time(thread->curtime);
 
 	if (qpo) {
 		if (qpo->log == 1) {

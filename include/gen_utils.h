@@ -272,6 +272,11 @@ public:
 #endif /* __CLASS_PTR_ARRAY_H */
 
 
+#ifdef CLOCK_MONOTONIC_RAW
+#define PROXYSQL_CLOCK_MONOTONIC CLOCK_MONOTONIC_RAW
+#else
+#define PROXYSQL_CLOCK_MONOTONIC CLOCK_MONOTONIC
+#endif
 
 #ifndef __GEN_FUNCTIONS
 #define __GEN_FUNCTIONS
@@ -304,7 +309,7 @@ static void clock_gettime(int clk_id, struct timespec *tp) {
 
 inline unsigned long long monotonic_time() {
   struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(PROXYSQL_CLOCK_MONOTONIC, &ts);
   return (((unsigned long long) ts.tv_sec) * 1000000) + (ts.tv_nsec / 1000);
 }
 

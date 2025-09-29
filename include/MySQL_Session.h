@@ -96,7 +96,32 @@ class Query_Info {
 	void end();
 	char *get_digest_text();
 	bool is_select_NOT_for_update();
+	void set_end_time(unsigned long long time);
 };
+
+/**
+ * @brief Assigns query end time.
+ * @details In addition to being a setter for end_time member variable, this
+ * method ensures that end_time is always greater than or equal to start_time.
+ * Refer https://github.com/sysown/proxysql/issues/4950 for more details.
+ * @param time query end time
+ */
+inline void Query_Info::set_end_time(unsigned long long time) {
+	end_time = time;
+
+#ifndef CLOCK_MONOTONIC_RAW
+	if (start_time <= end_time)
+		return;
+
+	// If start_time is greater than end_time, assign current monotonic time
+	end_time = monotonic_time();
+	if (start_time <= end_time)
+		return;
+
+	// If start_time is still greater than end_time, set the difference to 0
+	end_time = start_time;
+#endif // CLOCK_MONOTONIC_RAW
+}
 
 /**
  * @class MySQL_Session

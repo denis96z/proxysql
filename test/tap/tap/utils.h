@@ -9,6 +9,7 @@
 #include <fstream>
 #include <unistd.h>
 #include <utility>
+#include <time.h>
 
 #include "curl/curl.h"
 #include "mysql.h"
@@ -17,6 +18,12 @@
 
 #include "command_line.h"
 #include "mysql.h"
+
+#ifdef CLOCK_MONOTONIC_RAW
+#define PROXYSQL_CLOCK_MONOTONIC CLOCK_MONOTONIC_RAW
+#else
+#define PROXYSQL_CLOCK_MONOTONIC CLOCK_MONOTONIC
+#endif
 
 template <typename T>
 using rc_t = std::pair<int,T>;
