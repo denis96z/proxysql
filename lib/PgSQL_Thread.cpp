@@ -2646,7 +2646,7 @@ PgSQL_Thread::~PgSQL_Thread() {
 			if (sess->session_type == PROXYSQL_SESSION_ADMIN || sess->session_type == PROXYSQL_SESSION_STATS) {
 				char _buf[1024];
 				sprintf(_buf, "%s:%d:%s()", __FILE__, __LINE__, __func__);
-				if (GloPgSQL_Logger) { GloPgSQL_Logger->log_audit_entry(PROXYSQL_MYSQL_AUTH_CLOSE, sess, NULL, _buf); }
+				if (GloPgSQL_Logger) { GloPgSQL_Logger->log_audit_entry(PGSQL_LOG_EVENT_TYPE::AUTH_CLOSE, sess, NULL, _buf); }
 			}
 			delete sess;
 		}
@@ -3690,7 +3690,7 @@ void PgSQL_Thread::process_all_sessions() {
 				}
 			}
 			sprintf(_buf, "%s:%d:%s()", __FILE__, __LINE__, __func__);
-			GloPgSQL_Logger->log_audit_entry(PROXYSQL_MYSQL_AUTH_CLOSE, sess, NULL, _buf);
+			GloPgSQL_Logger->log_audit_entry(PGSQL_LOG_EVENT_TYPE::AUTH_CLOSE, sess, NULL, _buf);
 			unregister_session(n);
 			n--;
 			delete sess;
@@ -3705,7 +3705,7 @@ void PgSQL_Thread::process_all_sessions() {
 						if (sess->client_myds && sess->killed)
 							proxy_warning("Closing killed client connection %s:%d\n", sess->client_myds->addr.addr, sess->client_myds->addr.port);
 						sprintf(_buf, "%s:%d:%s()", __FILE__, __LINE__, __func__);
-						GloPgSQL_Logger->log_audit_entry(PROXYSQL_MYSQL_AUTH_CLOSE, sess, NULL, _buf);
+						GloPgSQL_Logger->log_audit_entry(PGSQL_LOG_EVENT_TYPE::AUTH_CLOSE, sess, NULL, _buf);
 						unregister_session(n);
 						n--;
 						delete sess;
@@ -3720,7 +3720,7 @@ void PgSQL_Thread::process_all_sessions() {
 					if (sess->client_myds)
 						proxy_warning("Closing killed client connection %s:%d\n", sess->client_myds->addr.addr, sess->client_myds->addr.port);
 					sprintf(_buf, "%s:%d:%s()", __FILE__, __LINE__, __func__);
-					GloPgSQL_Logger->log_audit_entry(PROXYSQL_MYSQL_AUTH_CLOSE, sess, NULL, _buf);
+					GloPgSQL_Logger->log_audit_entry(PGSQL_LOG_EVENT_TYPE::AUTH_CLOSE, sess, NULL, _buf);
 					unregister_session(n);
 					n--;
 					delete sess;

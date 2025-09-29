@@ -144,6 +144,23 @@ enum PgSQL_Extended_Query_Flags : uint8_t {
 	PGSQL_EXTENDED_QUERY_FLAG_IMPLICIT_PREPARE  = 0x04,
 };
 
+enum ExtendedQueryPhase : uint8_t {
+	EXTQ_PHASE_IDLE						= 0x00,	// No extended query activity
+	EXTQ_PHASE_BUILDING					= 0x01,	// Collecting extended query messages (Parse/Bind/etc.)
+	EXTQ_PHASE_EXECUTING_SYNC_CLIENT	= 0x02,	// Executing after client-initiated Sync
+	EXTQ_PHASE_EXECUTING_SYNC_IMPLICIT	= 0x04,	// Executing after implicit Sync (injected)
+	EXTQ_PHASE_PROCESSING_PARSE			= 0x08,	// Processing Parse message after Sync
+	EXTQ_PHASE_PROCESSING_DESCRIBE		= 0x10,	// Processing Describe message after Sync
+	EXTQ_PHASE_PROCESSING_CLOSE			= 0x20,	// Processing Close message after Sync
+	EXTQ_PHASE_PROCESSING_BIND			= 0x40,	// Processing Bind message after Sync
+	EXTQ_PHASE_PROCESSING_EXECUTE		= 0x80	// Processing Execute message after Sync
+};
+
+#define EXTQ_PHASE_PROCESSING_MASK \
+    (EXTQ_PHASE_PROCESSING_PARSE | EXTQ_PHASE_PROCESSING_DESCRIBE | \
+     EXTQ_PHASE_PROCESSING_CLOSE | EXTQ_PHASE_PROCESSING_BIND | \
+     EXTQ_PHASE_PROCESSING_EXECUTE)
+
 struct PgSQL_Extended_Query_Info {
 	const char* stmt_client_name;
 	const char* stmt_client_portal_name;
@@ -194,18 +211,11 @@ private:
 
 class PgSQL_Session : public Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread> {
 private:
-	typedef enum ExtendedQueryPhase {
-		EXTQ_PHASE_IDLE = 0,				// No extended query activity
-		EXTQ_PHASE_BUILDING,				// Collecting extended query messages (Parse/Bind/etc.)
-		EXTQ_PHASE_EXECUTING_SYNC_CLIENT,	// Executing after client-initiated Sync
-		EXTQ_PHASE_EXECUTING_SYNC_IMPLICIT	// Executing after implicit Sync (injected)
-	} ExtendedQueryPhase;
-
 	using PktType = std::variant<std::unique_ptr<PgSQL_Parse_Message>,std::unique_ptr<PgSQL_Describe_Message>,
 		std::unique_ptr<PgSQL_Close_Message>, std::unique_ptr<PgSQL_Bind_Message>, std::unique_ptr<PgSQL_Execute_Message>>;
 
-	bool extended_query_exec_qp = false;
-	ExtendedQueryPhase extended_query_phase{ EXTQ_PHASE_IDLE };
+	bool extended_query_exec_qp { false };
+	uint8_t extended_query_phase { EXTQ_PHASE_IDLE };
 	std::queue<PktType> extended_query_frame;
 	std::unique_ptr<const PgSQL_Bind_Message> bind_waiting_for_execute;
 
@@ -417,9 +427,13 @@ public:
 		return extended_query_frame.empty();
 	}
 
+	inline uint8_t get_extended_query_phase() const {
+		return extended_query_phase;
+	}
+
 	inline bool is_extended_query_ready_for_query() const {
 		return extended_query_frame.empty() &&
-			extended_query_phase != EXTQ_PHASE_EXECUTING_SYNC_IMPLICIT;
+			((extended_query_phase & EXTQ_PHASE_EXECUTING_SYNC_IMPLICIT) == 0);
 	}
 
 	bool handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, const char* var_name, const char* var_value, bool no_quote = false, bool set_transaction = false);
