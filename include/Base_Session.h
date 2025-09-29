@@ -1,5 +1,3 @@
-template<typename S, typename DSi, typename B, typename T> class Base_Session;
-
 //// avoid loading definition of MySQL_Session and PgSQL_Session
 //#define __CLASS_MYSQL_SESSION_H
 //#define __CLASS_PGSQL_SESSION_H

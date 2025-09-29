@@ -606,7 +606,12 @@ public:
 	void generate_status_one_hostgroup(int hid, std::string& s);
 	void set_previous_status_mode3(bool allow_execute = true);
 
+#if defined(__clang__)
+	template<typename SESS, typename DS, typename BE, typename THD>
+	friend class Base_Session;
+#else
 	friend class Base_Session<PgSQL_Session, PgSQL_Data_Stream, PgSQL_Backend, PgSQL_Thread>;
+#endif
 };
 
 
