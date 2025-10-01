@@ -471,6 +471,7 @@ public:
 	PtrSize_t pkt;
 	std::string untracked_option_parameters;
 	PgSQL_DateStyle_t current_datestyle = {};
+	uint32_t cancel_secret_key;
 
 #ifdef DEBUG
 	PgSQL_Connection* dbg_extended_query_backend_conn = nullptr;

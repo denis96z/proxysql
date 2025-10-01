@@ -9,7 +9,7 @@ extern "C" {
 #include "usual/time.h"
 }
 //#include "usual/time.c"
-
+extern PgSQL_Threads_Handler* GloPTH;
 extern PgSQL_Authentication* GloPgAuth;
 
 /*
@@ -196,7 +196,8 @@ void PG_pkt::write_RowDescription(const char *tupdesc, ...) {
 	finish_packet();
 }
 
-void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error, int affected_rows, const char *query_type, char txn_state) {
+void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error, int affected_rows, const char *query_type, bool send_ready_for_query,
+	char txn_state) {
 	assert(psa != NULL);
 	const char *fs = strchr(query_type, ' ');
 	int qtlen = strlen(query_type);
@@ -256,7 +257,7 @@ void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error,
 			pkt.write_CommandComplete(buf);
 		}
 		pkt.to_PtrSizeArray(psa);
-		pkt.write_ReadyForQuery(txn_state);
+		if (send_ready_for_query) pkt.write_ReadyForQuery(txn_state);
 		pkt.to_PtrSizeArray(psa);
 	} else { // no resultset
 		PG_pkt pkt(64);
@@ -624,6 +625,62 @@ bool PgSQL_Protocol::process_startup_packet(unsigned char* pkt, unsigned int len
 		ssl_request = true;
 		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 8, "Session=%p , DS=%p. SSL_REQUEST:'%c'\n", (*myds)->sess, (*myds), have_ssl ? 'S' : 'N');
 		return true;
+	}
+
+	if (hdr.type == PG_PKT_CANCEL) {	
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 8, "Session=%p , DS=%p. CANCEL_REQUEST packet received. len=%u\n", (*myds)->sess, (*myds), len);
+
+		/*
+		 * CancelRequest Message Format
+		 *
+		 * Int32 (16)
+		 *   - Length of message contents in bytes (includes self).
+		 *
+		 * Int32 (80877102)
+		 *   - Cancel request code.
+		 *   - Encodes 1234 in the high 16 bits and 5678 in the low 16 bits.
+		 *   - Must not match any protocol version number.
+		 *
+		 * Int32
+		 *   - Process ID of the target backend.
+		 *
+		 * Byten
+		 *   - Secret key for the target backend.
+		 *   - Runs until the end of the message (length field defines size).
+		 *   - Maximum length: 256 bytes.
+		 */
+		if (len < 16 || len > 268) { // 16 = min length, 268 = max length (12 + 256)
+			proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5,
+				"Session=%p , DS=%p. malformed cancel request packet (len=%u)\n",
+				(*myds)->sess, (*myds), len);
+			return false;
+		}
+		
+		// --- Parse fields from payload ---
+		int offset = 0;
+		uint32 pid = 0;
+		uint32 key = 0;
+
+		// Backend PID
+		if (!get_uint32be((unsigned char*)hdr.data.ptr + offset, &pid)) {
+			return false;
+		}
+		offset += 4;
+		
+		// Secret key
+		if (!get_uint32be((unsigned char*)hdr.data.ptr + offset, &key)) {
+			return false;
+		}
+		offset += 4;
+
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 8,
+			"Session=%p , DS=%p. Cancel request for pid=%u key=%u\n",
+			(*myds)->sess, (*myds), pid, key);
+
+		GloPTH->kill_connection_or_query(pid, key, nullptr, true);
+		
+		// close connection
+		return false;
 	}
 
 	//PG_PKT_STARTUP_V2 not supported
@@ -1257,6 +1314,26 @@ void PgSQL_Protocol::welcome_client() {
 	if (pgsql_thread___server_encoding)
 		pgpkt.write_ParameterStatus("server_encoding", pgsql_thread___server_encoding);
 
+	// Backend Key Data
+	uint8_t backend_key_data[8];
+	uint32_t backend_pid = (*myds)->sess->thread_session_id;
+	uint32_t cancel_key = -1;
+	if (RAND_bytes((unsigned char*)&cancel_key, sizeof(cancel_key)) != 1) {
+		// Fallback method: using a basic pseudo-random generator
+		srand((unsigned int)time(NULL));
+		auto rand_val = rand() % 256;
+		memcpy(&cancel_key, &rand_val, sizeof(cancel_key));
+	}
+	(*myds)->sess->cancel_secret_key = cancel_key;
+
+	// we store pid and key in network byte order
+	uint32_t net_backend_pid = htonl(backend_pid);
+	uint32_t net_cancel_key = htonl(cancel_key);
+
+	memcpy(&backend_key_data[0], &net_backend_pid, sizeof(net_backend_pid));
+	memcpy(&backend_key_data[4], &net_cancel_key, sizeof(net_cancel_key));
+
+	pgpkt.write_BackendKeyData(backend_key_data);
 	pgpkt.write_ReadyForQuery();
 	pgpkt.set_multi_pkt_mode(false);
 
@@ -2612,7 +2689,7 @@ unsigned int PgSQL_Query_Result::add_error(const PGresult* result) {
 				PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::proxysql, conn->parent->myhgc->hid, conn->parent->address, conn->parent->port, 1907);
 			} else {
 				proto->generate_error_packet(false, false, (char*)"Query execution was interrupted",
-					PGSQL_ERROR_CODES::ERRCODE_QUERY_CANCELED, false, false, &pkt);
+					PGSQL_ERROR_CODES::ERRCODE_CONNECTION_FAILURE, false, false, &pkt);
 				PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::proxysql, conn->parent->myhgc->hid, conn->parent->address, conn->parent->port, 1317);
 			}
 		} else if (conn->is_error_present()) {

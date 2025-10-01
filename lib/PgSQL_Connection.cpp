@@ -2891,47 +2891,161 @@ void PgSQL_Connection::init_query_result() {
 	new_result = true;
 }
 
-PgSQL_CancelQueryArgs::PgSQL_CancelQueryArgs(PGconn* _conn, const char* user, const char* host,
-	unsigned int _port, unsigned int _hid, int _backend_pid, PgSQL_Thread* _mt) {
-	conn = _conn;
+PgSQL_Backend_Kill_Args::PgSQL_Backend_Kill_Args(PGconn* conn, const char* user, const char* pass, const char* db, const char* host,
+	unsigned int p, unsigned int hid, bool ssl, TYPE typ, PgSQL_Thread* thd) {
+
+	if (typ == TYPE::CANCEL_QUERY)
+		cancel_conn = PQgetCancel(conn);
+	else {
+		cancel_conn = nullptr;
+	}
 	username = strdup(user);
+	password = strdup(pass);
 	hostname = strdup(host);
-	port = _port;
-	hid = _hid;
-	backend_pid = _backend_pid;
-	mt = _mt;
-}
-
-PgSQL_CancelQueryArgs::~PgSQL_CancelQueryArgs() {
-	free(username);
-	free(hostname);
-}
-
-void* PgSQL_cancel_query_thread(void* arg) {
-	assert(arg);
-	PgSQL_CancelQueryArgs* ka = static_cast<PgSQL_CancelQueryArgs*>(arg);
-
-	PGcancel* cancel = PQgetCancel(ka->conn);
-
-	if (!cancel) {
-		proxy_error("Failed to cancel query on %s:%d with backend PID %d\n", ka->hostname, ka->port, ka->backend_pid);
-		PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::pgsql, ka->hid, ka->hostname, ka->port, 999);
-		goto __exit_cancel_query_thread;
-	}
-
-	if (ka->mt) ka->mt->status_variables.stvar[st_var_killed_queries]++;
-
-	char errbuf[256];
-	if (!PQcancel(cancel, errbuf, sizeof(errbuf))) {
-		proxy_error("Failed to cancel query on %s:%d with backend PID %d: %s\n", ka->hostname, ka->port,
-			ka->backend_pid, errbuf);
-		PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::pgsql, ka->hid, ka->hostname, ka->port, 999);
+	dbname = strdup(db);
+	port = p;
+	hostgroup_id = hid;
+	type = typ;
+	pgsql_thd = thd;
+	backend_pid = PQbackendPID(conn);
+	ssl_config.use_ssl = ssl;
+	if (ssl) {
+		ssl_config.sslkey = pgsql_thread___ssl_p2s_key ? strdup(pgsql_thread___ssl_p2s_key) : nullptr;
+		ssl_config.sslcert = pgsql_thread___ssl_p2s_cert ? strdup(pgsql_thread___ssl_p2s_cert) : nullptr;
+		ssl_config.sslrootcert = pgsql_thread___ssl_p2s_ca ? strdup(pgsql_thread___ssl_p2s_ca) : nullptr;
+		ssl_config.sslcrl = pgsql_thread___ssl_p2s_crl ? strdup(pgsql_thread___ssl_p2s_crl) : nullptr;
+		ssl_config.sslcrldir = pgsql_thread___ssl_p2s_crlpath ? strdup(pgsql_thread___ssl_p2s_crlpath) : nullptr;
 	} else {
-		proxy_warning("Canceled query on %s:%d with backend PID %d successfully\n", ka->hostname, ka->port, ka->backend_pid);
+		ssl_config.sslkey = nullptr;
+		ssl_config.sslcert = nullptr;
+		ssl_config.sslrootcert = nullptr;
+		ssl_config.sslcrl = nullptr;
+		ssl_config.sslcrldir = nullptr;
 	}
+}
 
-__exit_cancel_query_thread:
-	if (cancel) PQfreeCancel(cancel);
-	delete ka;
+PgSQL_Backend_Kill_Args::~PgSQL_Backend_Kill_Args() {
+	free(username);
+	free(password);
+	free(hostname);
+	free(dbname);
+	free(ssl_config.sslkey);
+	free(ssl_config.sslcert);
+	free(ssl_config.sslrootcert);
+	free(ssl_config.sslcrl);
+	free(ssl_config.sslcrldir);
+	if (cancel_conn) 
+		PQfreeCancel(cancel_conn);
+}
+
+void* PgSQL_backend_kill_thread(void* arg) {
+	assert(arg);
+	PgSQL_Backend_Kill_Args* backend_kill_args = static_cast<PgSQL_Backend_Kill_Args*>(arg);
+
+	if (backend_kill_args->type == PgSQL_Backend_Kill_Args::TYPE::CANCEL_QUERY) {
+		if (!backend_kill_args->cancel_conn) {
+			proxy_error("Failed to cancel query on %s:%d with backend PID %d\n", backend_kill_args->hostname, 
+				backend_kill_args->port, backend_kill_args->backend_pid);
+			PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::pgsql, backend_kill_args->hostgroup_id, 
+				backend_kill_args->hostname, backend_kill_args->port, 999);
+			goto __exit;
+		}
+
+		if (backend_kill_args->pgsql_thd) backend_kill_args->pgsql_thd->status_variables.stvar[st_var_killed_queries]++;
+
+		char errbuf[256];
+		if (!PQcancel(backend_kill_args->cancel_conn, errbuf, sizeof(errbuf))) {
+			proxy_error("Failed to cancel query on %s:%d with backend PID %d: %s\n", backend_kill_args->hostname, 
+				backend_kill_args->port, backend_kill_args->backend_pid, errbuf);
+			PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::pgsql, backend_kill_args->hostgroup_id, 
+				backend_kill_args->hostname, backend_kill_args->port, 999);
+		} else {
+			proxy_warning("Canceled query on %s:%d with backend PID %d successfully\n", backend_kill_args->hostname,
+				backend_kill_args->port, backend_kill_args->backend_pid);
+		}
+	} else if (backend_kill_args->type == PgSQL_Backend_Kill_Args::TYPE::TERMINATE_CONNECTION) {
+
+		std::ostringstream conninfo;
+		char* escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->username, false);
+		conninfo << "user='" << escaped_str << "' "; // username
+		if (escaped_str != backend_kill_args->username)
+			free(escaped_str);
+
+		escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->password, false);
+		conninfo << "password='" << escaped_str << "' "; // password
+		if (escaped_str != backend_kill_args->password)
+			free(escaped_str);
+
+		escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->dbname, false);
+		conninfo << "dbname='" << escaped_str << "' ";
+		if (escaped_str != backend_kill_args->dbname)
+			free(escaped_str);
+
+		conninfo << "host='" << backend_kill_args->hostname << "' "; // backend address
+		conninfo << "port=" << backend_kill_args->port << " "; // backend port
+		conninfo << "application_name=proxysql "; // application name
+		
+		if (backend_kill_args->ssl_config.use_ssl) {
+			conninfo << "sslmode=require "; // SSL required
+			if (backend_kill_args->ssl_config.sslkey) {
+				escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->ssl_config.sslkey, false);
+				conninfo << "sslkey='" << escaped_str << "' ";
+				if (escaped_str != backend_kill_args->ssl_config.sslkey)
+					free(escaped_str);
+			}
+			if (backend_kill_args->ssl_config.sslcert) {
+				escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->ssl_config.sslcert, false);
+				conninfo << "sslcert='" << escaped_str << "' ";
+				if (escaped_str != backend_kill_args->ssl_config.sslcert)
+					free(escaped_str);
+			}
+			if (backend_kill_args->ssl_config.sslrootcert) {
+				escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->ssl_config.sslrootcert, false);
+				conninfo << "sslrootcert='" << escaped_str << "' ";
+				if (escaped_str != backend_kill_args->ssl_config.sslrootcert)
+					free(escaped_str);
+			}
+			if (backend_kill_args->ssl_config.sslcrl) {
+				escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->ssl_config.sslcrl, false);
+				conninfo << "sslcrl='" << escaped_str << "' ";
+				if (escaped_str != backend_kill_args->ssl_config.sslcrl)
+					free(escaped_str);
+			}
+			if (backend_kill_args->ssl_config.sslcrldir) {
+				escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->ssl_config.sslcrldir, false);
+				conninfo << "sslcrldir='" << escaped_str << "' ";
+				if (escaped_str != backend_kill_args->ssl_config.sslcrldir)
+					free(escaped_str);
+			}
+		}
+		else {
+			conninfo << "sslmode='disable' "; // not supporting SSL
+		}
+
+		const std::string& conninfo_str = conninfo.str();
+		PGconn* kill_conn = PQconnectdb(conninfo_str.c_str());
+
+		if (PQstatus(kill_conn) != CONNECTION_OK) {
+			proxy_error("Connection failed: %s\n", PQerrorMessage(kill_conn));
+			PQfinish(kill_conn);
+			goto __exit;
+		}
+
+		if (backend_kill_args->pgsql_thd) backend_kill_args->pgsql_thd->status_variables.stvar[st_var_killed_connections]++;
+
+		char query[128];
+		snprintf(query, sizeof(query), "SELECT pg_terminate_backend(%d)", backend_kill_args->backend_pid);
+
+		PGresult* res = PQexec(kill_conn, query);
+		if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+			proxy_error("Terminate failed: %s\n", PQerrorMessage(kill_conn));
+		}
+		PQclear(res);
+
+
+		//proxy_warning("Terminating connection on %s:%d with backend PID %d\n", ka->hostname, ka->port, ka->backend_pid);
+	}
+__exit:
+	delete backend_kill_args;
 	return NULL;
 }

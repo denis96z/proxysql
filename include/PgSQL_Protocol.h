@@ -281,7 +281,7 @@ private:
 	std::vector<unsigned int> pkt_offset;
 	bool multiple_pkt_mode = false;
 	bool ownership = true;
-	friend void SQLite3_to_Postgres(PtrSizeArray* psa, SQLite3_result* result, char* error, int affected_rows, const char* query_type, char txn_state);
+	friend void SQLite3_to_Postgres(PtrSizeArray* psa, SQLite3_result* result, char* error, int affected_rows, const char* query_type, bool send_ready_for_query, char txn_state);
 };
 
 class PgSQL_Protocol;
@@ -1210,6 +1210,6 @@ private:
 	friend void admin_session_handler(S* sess, void* _pa, PtrSize_t* pkt);
 };
 
-void SQLite3_to_Postgres(PtrSizeArray* psa, SQLite3_result* result, char* error, int affected_rows, const char* query_type, char txn_state = 'I');
+void SQLite3_to_Postgres(PtrSizeArray* psa, SQLite3_result* result, char* error, int affected_rows, const char* query_type, bool send_ready_for_query = true, char txn_state = 'I');
 
 #endif // __POSTGRES_PROTOCOL_H

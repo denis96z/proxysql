@@ -235,6 +235,7 @@ PgSQL_Data_Stream::PgSQL_Data_Stream() {
 	wait_until = 0;
 	pause_until = 0;
 	kill_type = 0;
+	cancel_query = false;
 	connect_tries = 0;
 	poll_fds_idx = -1;
 	//resultset_length = 0;
@@ -1231,7 +1232,6 @@ int PgSQL_Data_Stream::buffer2array() {
 	if ((queueIN.pkt.size == 0) && queue_data(queueIN) >= sizeof(header)) {
 		proxy_debug(PROXY_DEBUG_PKT_ARRAY, 5, "Session=%p . Reading the header of a new packet\n", sess);
 		memcpy(header, queue_r_ptr(queueIN), sizeof(header));
-		//pkt_sid=queueIN.hdr.pkt_id;
 		queue_r(queueIN, sizeof(header));
 		uint32_t pkgsize = 0;
 

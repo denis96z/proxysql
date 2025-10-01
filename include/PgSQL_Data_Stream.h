@@ -169,8 +169,7 @@ public:
 
 	bool encrypted;
 	bool net_failure;
-
-	uint8_t pkt_sid;
+	bool cancel_query;
 
 	bool com_field_list;
 	char* com_field_wild;
