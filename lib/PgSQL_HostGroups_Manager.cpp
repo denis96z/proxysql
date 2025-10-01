@@ -2540,40 +2540,29 @@ void PgSQL_HostGroups_Manager::destroy_MyConn_from_pool(PgSQL_Connection *c, boo
 			// probably because there is a long running query
 			// therefore we will try to kill the connection
 
-			/* KILL BACKEND CONNECTION IS NOT IMPLEMENTED YET
 			if (pgsql_thread___kill_backend_connection_when_disconnect) {
-				 
-				int myerr = mysql_errno(c->pgsql);
-				switch (myerr) {
-					case 1231:
-						break;
-					default:
-					if (c->pgsql->thread_id) {
-						PgSQL_Connection_userinfo *ui=c->userinfo;
-						char *auth_password=NULL;
-						if (ui->password) {
-							if (ui->password[0]=='*') { // we don't have the real password, let's pass sha1
-								auth_password=ui->sha1_pass;
-							} else {
-								auth_password=ui->password;
-							}
-						}
-						KillArgs *ka = new KillArgs(ui->username, auth_password, c->parent->address, c->parent->port, c->parent->myhgc->hid, c->pgsql->thread_id, KILL_CONNECTION, c->parent->use_ssl, NULL, c->connected_host_details.ip);
-						pthread_attr_t attr;
-						pthread_attr_init(&attr);
-						pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-						pthread_attr_setstacksize (&attr, 256*1024);
-						pthread_t pt;
-						if (pthread_create(&pt, &attr, &kill_query_thread, ka) != 0) {
-							// LCOV_EXCL_START
-							proxy_error("Thread creation\n");
-							assert(0);
-							// LCOV_EXCL_STOP
-						}
+				if (c->is_connected()) {
+					const PgSQL_Connection_userinfo* ui = c->userinfo;
+
+					std::unique_ptr<PgSQL_Backend_Kill_Args> backend_kill_args = std::make_unique<PgSQL_Backend_Kill_Args>(
+						(PGconn*)c->get_pg_connection(), ui->username, ui->password, ui->dbname, c->parent->address,
+						c->parent->port, c->parent->myhgc->hid, c->parent->use_ssl,
+						PgSQL_Backend_Kill_Args::TYPE::TERMINATE_CONNECTION, nullptr
+					);
+
+					pthread_attr_t attr;
+					pthread_attr_init(&attr);
+					pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+					pthread_attr_setstacksize(&attr, 256 * 1024);
+					pthread_t pt;
+					if (pthread_create(&pt, &attr, &PgSQL_backend_kill_thread, backend_kill_args.release()) != 0) {
+						// LCOV_EXCL_START
+						proxy_error("Thread creation\n");
+						assert(0);
+						// LCOV_EXCL_STOP
 					}
-						break;
 				}
-			}*/
+			}
 		}
 	}
 	if (to_del) {
