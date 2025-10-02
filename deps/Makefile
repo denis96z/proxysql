@@ -340,6 +340,7 @@ cleanpart:
 	cd jemalloc && rm -rf jemalloc-*/ || true
 	cd sqlite3 && rm -rf sqlite-amalgamation-*/ || true
 	cd postgresql && rm -rf postgresql-*/ || true
+	cd postgresql && rm -rf postgres-*/ || true
 .PHONY: cleanpart
 
 cleanall:
@@ -362,6 +363,7 @@ cleanall:
 	cd cityhash && rm -rf cityhash-*/ || true
 	cd coredumper && rm -rf coredumper-*/ || true
 	cd postgresql && rm -rf postgresql-*/ || true
+	cd postgresql && rm -rf postgres-*/ || true
 	cd libusual && rm -rf libusual-*/ || true
 	cd libscram && rm -rf lib/* obj/* || true
 .PHONY: cleanall
