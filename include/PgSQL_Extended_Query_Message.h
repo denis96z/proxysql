@@ -158,12 +158,18 @@ public:
 			}
 			current += sizeof(uint32_t);
 
-			out->len = (len == 0xFFFFFFFF) ? -1 : static_cast<int32_t>(len);
-			out->value = (len == 0xFFFFFFFF) ? nullptr : current;
+			constexpr uint32_t PGSQL_PARAM_NULL = 0xFFFFFFFF;
+
+			if (len != PGSQL_PARAM_NULL && len > INT32_MAX) {
+				return false; // malformed
+			}
+
+			out->len = (len == PGSQL_PARAM_NULL) ? -1 : static_cast<int32_t>(len);
+			out->value = (out->len > 0) ? current : nullptr;
 
 			// Advance pointer if not NULL
 			if (out->len > 0) {
-				current += len;
+				current += out->len;
 			}
 		}
 		remaining--;
