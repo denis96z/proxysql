@@ -51,7 +51,7 @@ services:
   centos10_build:
     extends:
       service: _build
-    image: proxysql/packaging:build-centos10-v3.0.2
+    image: proxysql/packaging:build-centos10-v3.0.3
     volumes:
       - ./docker/images/proxysql/rhel-compliant/rpmmacros/rpmbuild/:/root/rpmbuild/
       - ./docker/images/proxysql/rhel-compliant/rpmmacros/.rpmmacros:/root/.rpmmacros
@@ -64,7 +64,7 @@ services:
   centos10_clang_build:
     extends:
       service: centos10_build
-    image: proxysql/packaging:build-clang-centos10-v3.0.2
+    image: proxysql/packaging:build-clang-centos10-v3.0.3
     environment:
       - PKG_RELEASE=centos10-clang
 
@@ -333,7 +333,7 @@ services:
   almalinux10_build:
     extends:
       service: _build
-    image: proxysql/packaging:build-almalinux10-v3.0.2
+    image: proxysql/packaging:build-almalinux10-v3.0.3
     volumes:
       - ./docker/images/proxysql/rhel-compliant/rpmmacros/rpmbuild/:/root/rpmbuild/
       - ./docker/images/proxysql/rhel-compliant/rpmmacros/.rpmmacros:/root/.rpmmacros
@@ -346,7 +346,7 @@ services:
   almalinux10_clang_build:
     extends:
       service: almalinux10_build
-    image: proxysql/packaging:build-clang-almalinux10-v3.0.2
+    image: proxysql/packaging:build-clang-almalinux10-v3.0.3
     environment:
       - PKG_RELEASE=almalinux10-clang
 
