@@ -1319,10 +1319,8 @@ void PgSQL_Protocol::welcome_client() {
 	uint32_t backend_pid = (*myds)->sess->thread_session_id;
 	uint32_t cancel_key = -1;
 	if (RAND_bytes((unsigned char*)&cancel_key, sizeof(cancel_key)) != 1) {
-		// Fallback method: using a basic pseudo-random generator
-		srand((unsigned int)time(NULL));
-		auto rand_val = rand() % 256;
-		memcpy(&cancel_key, &rand_val, sizeof(cancel_key));
+		// Fallback: use libc PRNG
+		cancel_key = (uint32_t)random();
 	}
 	(*myds)->sess->cancel_secret_key = cancel_key;
 
