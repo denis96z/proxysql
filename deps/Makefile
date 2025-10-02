@@ -252,13 +252,14 @@ sqlite3/sqlite3/sqlite3.o:
 
 sqlite3: sqlite3/sqlite3/sqlite3.o
 
-libconfig/libconfig/lib/.libs/libconfig++.a:
+
+libconfig/libconfig/out/libconfig++.a:
 	cd libconfig && rm -rf libconfig-*/ || true
 	cd libconfig && tar -zxf libconfig-*.tar.gz
-	cd libconfig/libconfig && ./configure --disable-examples
+	cd libconfig/libconfig && cmake -DBUILD_SHARED_LIBS=0 -DBUILD_EXAMPLES=0 -DBUILD_TESTS=0 -DBUILD_FUZZERS=0 .
 	cd libconfig/libconfig && CC=${CC} CXX=${CXX} ${MAKE}
 
-libconfig: libconfig/libconfig/lib/.libs/libconfig++.a
+libconfig: libconfig/libconfig/out/libconfig++.a
 
 
 prometheus-cpp/prometheus-cpp/lib/libprometheus-cpp-core.a:
