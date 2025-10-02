@@ -916,6 +916,15 @@ handler_again:
 	return async_state_machine;
 }
 
+static void append_conninfo_param(std::ostringstream& conninfo, const char* key, char* val) {
+	if (!val) return;
+	char* escaped_str = escape_string_single_quotes_and_backslashes(val, false);
+	conninfo << key << "='" << escaped_str << "' ";
+	if (escaped_str != val) {
+		free(escaped_str);
+	}
+}
+
 void PgSQL_Connection::connect_start() {
 	PROXY_TRACE();
 	assert(pgsql_conn == NULL); // already there is a connection
@@ -923,57 +932,20 @@ void PgSQL_Connection::connect_start() {
 	async_exit_status = PG_EVENT_NONE;
 
 	std::ostringstream conninfo;
-	char* escaped_str = escape_string_single_quotes_and_backslashes(userinfo->username, false);
-	conninfo << "user='" << escaped_str << "' "; // username
-	if (escaped_str != userinfo->username)
-		free(escaped_str);
-
-	escaped_str = escape_string_single_quotes_and_backslashes(userinfo->password, false);
-	conninfo << "password='" << escaped_str << "' "; // password
-	if (escaped_str != userinfo->password)
-		free(escaped_str);
-
-	escaped_str = escape_string_single_quotes_and_backslashes(userinfo->dbname, false);
-	conninfo << "dbname='" << escaped_str << "' ";
-	if (escaped_str != userinfo->dbname)
-		free(escaped_str);
-
-	conninfo << "host='" << parent->address << "' "; // backend address
+	append_conninfo_param(conninfo, "user", userinfo->username); // username
+	append_conninfo_param(conninfo, "password", userinfo->password); // password
+	append_conninfo_param(conninfo, "dbname", userinfo->dbname); // dbname
+	append_conninfo_param(conninfo, "host", parent->address); // backend address
 	conninfo << "port=" << parent->port << " "; // backend port
 	conninfo << "application_name=proxysql "; // application name
 	//conninfo << "require_auth=" << AUTHENTICATION_METHOD_STR[pgsql_thread___authentication_method]; // authentication method
 	if (parent->use_ssl) {
-		conninfo << "sslmode=require "; // SSL required
-		if (pgsql_thread___ssl_p2s_key) {
-			escaped_str = escape_string_single_quotes_and_backslashes(pgsql_thread___ssl_p2s_key, false);
-			conninfo << "sslkey='" << escaped_str << "' ";
-			if (escaped_str != pgsql_thread___ssl_p2s_key)
-				free(escaped_str);
-		}
-		if (pgsql_thread___ssl_p2s_cert) {
-			escaped_str = escape_string_single_quotes_and_backslashes(pgsql_thread___ssl_p2s_cert, false);
-			conninfo << "sslcert='" << escaped_str << "' ";
-			if (escaped_str != pgsql_thread___ssl_p2s_cert)
-				free(escaped_str);
-		}
-		if (pgsql_thread___ssl_p2s_ca) {
-			escaped_str = escape_string_single_quotes_and_backslashes(pgsql_thread___ssl_p2s_ca, false);
-			conninfo << "sslrootcert='" << escaped_str << "' ";
-			if (escaped_str != pgsql_thread___ssl_p2s_ca)
-				free(escaped_str);
-		}
-		if (pgsql_thread___ssl_p2s_crl) {
-			escaped_str = escape_string_single_quotes_and_backslashes(pgsql_thread___ssl_p2s_crl, false);
-			conninfo << "sslcrl='" << escaped_str << "' ";
-			if (escaped_str != pgsql_thread___ssl_p2s_crl)
-				free(escaped_str);
-		}
-		if (pgsql_thread___ssl_p2s_crlpath) {
-			escaped_str = escape_string_single_quotes_and_backslashes(pgsql_thread___ssl_p2s_crlpath, false);
-			conninfo << "sslcrldir='" << escaped_str << "' ";
-			if (escaped_str != pgsql_thread___ssl_p2s_crlpath)
-				free(escaped_str);
-		}
+		conninfo << "sslmode='require' "; // SSL required
+		append_conninfo_param(conninfo, "sslkey", pgsql_thread___ssl_p2s_key);
+		append_conninfo_param(conninfo, "sslcert", pgsql_thread___ssl_p2s_cert);
+		append_conninfo_param(conninfo, "sslrootcert", pgsql_thread___ssl_p2s_ca);
+		append_conninfo_param(conninfo, "sslcrl", pgsql_thread___ssl_p2s_crl);
+		append_conninfo_param(conninfo, "sslcrldir", pgsql_thread___ssl_p2s_crlpath);
 		// Only supported in PostgreSQL Server
 		// if (pgsql_thread___ssl_p2s_cipher)
 		//	  conninfo << "sslcipher=" << pgsql_thread___ssl_p2s_cipher << " ";
@@ -2966,59 +2938,21 @@ void* PgSQL_backend_kill_thread(void* arg) {
 	} else if (backend_kill_args->type == PgSQL_Backend_Kill_Args::TYPE::TERMINATE_CONNECTION) {
 
 		std::ostringstream conninfo;
-		char* escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->username, false);
-		conninfo << "user='" << escaped_str << "' "; // username
-		if (escaped_str != backend_kill_args->username)
-			free(escaped_str);
-
-		escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->password, false);
-		conninfo << "password='" << escaped_str << "' "; // password
-		if (escaped_str != backend_kill_args->password)
-			free(escaped_str);
-
-		escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->dbname, false);
-		conninfo << "dbname='" << escaped_str << "' ";
-		if (escaped_str != backend_kill_args->dbname)
-			free(escaped_str);
-
-		conninfo << "host='" << backend_kill_args->hostname << "' "; // backend address
+		append_conninfo_param(conninfo, "user", backend_kill_args->username); // username
+		append_conninfo_param(conninfo, "password", backend_kill_args->password); // password
+		append_conninfo_param(conninfo, "dbname", backend_kill_args->dbname); // dbname
+		append_conninfo_param(conninfo, "host", backend_kill_args->hostname); // backend address
 		conninfo << "port=" << backend_kill_args->port << " "; // backend port
 		conninfo << "application_name=proxysql "; // application name
 		
 		if (backend_kill_args->ssl_config.use_ssl) {
-			conninfo << "sslmode=require "; // SSL required
-			if (backend_kill_args->ssl_config.sslkey) {
-				escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->ssl_config.sslkey, false);
-				conninfo << "sslkey='" << escaped_str << "' ";
-				if (escaped_str != backend_kill_args->ssl_config.sslkey)
-					free(escaped_str);
-			}
-			if (backend_kill_args->ssl_config.sslcert) {
-				escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->ssl_config.sslcert, false);
-				conninfo << "sslcert='" << escaped_str << "' ";
-				if (escaped_str != backend_kill_args->ssl_config.sslcert)
-					free(escaped_str);
-			}
-			if (backend_kill_args->ssl_config.sslrootcert) {
-				escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->ssl_config.sslrootcert, false);
-				conninfo << "sslrootcert='" << escaped_str << "' ";
-				if (escaped_str != backend_kill_args->ssl_config.sslrootcert)
-					free(escaped_str);
-			}
-			if (backend_kill_args->ssl_config.sslcrl) {
-				escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->ssl_config.sslcrl, false);
-				conninfo << "sslcrl='" << escaped_str << "' ";
-				if (escaped_str != backend_kill_args->ssl_config.sslcrl)
-					free(escaped_str);
-			}
-			if (backend_kill_args->ssl_config.sslcrldir) {
-				escaped_str = escape_string_single_quotes_and_backslashes(backend_kill_args->ssl_config.sslcrldir, false);
-				conninfo << "sslcrldir='" << escaped_str << "' ";
-				if (escaped_str != backend_kill_args->ssl_config.sslcrldir)
-					free(escaped_str);
-			}
-		}
-		else {
+			conninfo << "sslmode='require' "; // SSL required
+			append_conninfo_param(conninfo, "sslkey", backend_kill_args->ssl_config.sslkey);
+			append_conninfo_param(conninfo, "sslcert", backend_kill_args->ssl_config.sslcert);
+			append_conninfo_param(conninfo, "sslrootcert", backend_kill_args->ssl_config.sslrootcert);
+			append_conninfo_param(conninfo, "sslcrl", backend_kill_args->ssl_config.sslcrl);
+			append_conninfo_param(conninfo, "sslcrldir", backend_kill_args->ssl_config.sslcrldir);
+		} else {
 			conninfo << "sslmode='disable' "; // not supporting SSL
 		}
 
