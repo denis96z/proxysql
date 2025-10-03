@@ -4,6 +4,7 @@
 #include "proxysql.h"
 #include "cpp.h"
 
+constexpr uint32_t PGSQL_PARAM_NULL = 0xFFFFFFFFu;
 
 /**
  * @brief Base class for handling PostgreSQL extended query messages.
@@ -171,8 +172,6 @@ public:
 				return false;
 			}
 			current += sizeof(uint32_t);
-
-			constexpr uint32_t PGSQL_PARAM_NULL = 0xFFFFFFFF;
 
 			if (len != PGSQL_PARAM_NULL && len > INT32_MAX) {
 				return false; // Malformed: length does not fit into int32_t
