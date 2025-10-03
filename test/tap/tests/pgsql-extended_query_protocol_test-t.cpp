@@ -4992,6 +4992,61 @@ void test_explicit_txn_success_then_rollback_extended() {
 	}
 }
 
+void test_empty_query_describe_portal_returns_no_data() {
+	diag("Test %d: Describe Portal Returns No Data for empty query", test_count++);
+	auto conn = create_connection();
+	if (!conn) return;
+	try{
+		conn->prepareStatement("empty_query_stmt", "", false);
+		conn->bindStatement("empty_query_stmt", "", {}, {}, false);
+		conn->describePortal("", false);
+		conn->executeStatement(0, false);
+		conn->sendSync();
+
+		char type;
+		std::vector<uint8_t> buffer;
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::PARSE_COMPLETE, "Received ParseComplete for empty query");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::BIND_COMPLETE, "Received BindComplete for empty query");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::NO_DATA, "Received NoData for empty query");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::EMPTY_QUERY_RESPONSE, "Received EmptyQueryResponse for empty query");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ReadyForQuery after all commands");
+	}
+	catch (const PgException& e) {
+		ok(false, "Describe Portal Returns No Data for empty query failed with error:%s", e.what());
+	}
+}
+
+void test_empty_query_without_describe_portal() {
+	diag("Test %d: Execute empty query without Describe Portal", test_count++);
+	auto conn = create_connection();
+	if (!conn) return;
+	try {
+		conn->prepareStatement("empty_query2_stmt", "", false);
+		conn->bindStatement("empty_query2_stmt", "", {}, {}, false);
+		conn->executeStatement(0, false);
+		conn->sendSync();
+
+		char type;
+		std::vector<uint8_t> buffer;
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::PARSE_COMPLETE, "Received ParseComplete for empty query");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::BIND_COMPLETE, "Received BindComplete for empty query");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::EMPTY_QUERY_RESPONSE, "Received EmptyQueryResponse for empty query");
+		conn->readMessage(type, buffer);
+		ok(type == PgConnection::READY_FOR_QUERY, "Received ReadyForQuery after all commands");
+	}
+	catch (const PgException& e) {
+		ok(false, "Execute empty query without Describe Portal failed with error:%s", e.what());
+	}
+}
+
 int main(int argc, char** argv) {
 	if (cl.getEnv())
 		return exit_status();
@@ -5002,7 +5057,7 @@ int main(int argc, char** argv) {
 		return exit_status();
 	}
 
-	plan(1052); // Adjust based on number of tests
+	plan(1061); // Adjust based on number of tests
 
 	auto admin_conn = createNewConnection(ConnType::ADMIN, "", false);
 
@@ -5127,6 +5182,10 @@ int main(int argc, char** argv) {
 		test_explicit_txn_error_with_rollback_extended();
 		test_explicit_txn_error_with_commit_extended();
 		test_explicit_txn_success_then_rollback_extended();
+
+		// Empty query tests
+		test_empty_query_describe_portal_returns_no_data();
+		test_empty_query_without_describe_portal();
 	}
 	catch (const std::exception& e) {
 		diag("Fatal error: %s",e.what());
