@@ -1864,7 +1864,6 @@ void PgSQL_Connection::stmt_execute_start() {
 				set_error(PGSQL_ERROR_CODES::ERRCODE_INVALID_PARAMETER_VALUE,
 					"Failed to read param format", false);
 				return;
-				return;
 			}
 			param_formats[i] = format;
 		}
