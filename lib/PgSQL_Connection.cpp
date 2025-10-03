@@ -495,7 +495,14 @@ handler_again:
 					break;
 				case PGRES_EMPTY_QUERY:
 					{
-						const unsigned int bytes_recv = query_result->add_empty_query_response(result.get());
+						unsigned int bytes_recv = 0;
+
+						if (fetch_result_end_st == ASYNC_STMT_EXECUTE_END) {
+							if ((query.extended_query_info->flags & PGSQL_EXTENDED_QUERY_FLAG_DESCRIBE_PORTAL) != 0) {
+								bytes_recv = query_result->add_no_data();
+							}
+						}
+						bytes_recv += query_result->add_empty_query_response(result.get());
 						update_bytes_recv(bytes_recv);
 					}
 					NEXT_IMMEDIATE(ASYNC_USE_RESULT_CONT);
