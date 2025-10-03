@@ -1,7 +1,7 @@
 /**
  * @file pgsql-reg_test_5140_bind_param_fmt_mix-t.cpp
  * @brief Regression test to check libpq's handling of mixed text and binary parameter.
- * 
+ *
  */
 
 #include <unistd.h>
@@ -26,7 +26,7 @@ enum ConnType {
 };
 
 PGConnPtr createNewConnection(ConnType conn_type, const std::string& options = "", bool with_ssl = false) {
-    
+
     const char* host = (conn_type == BACKEND) ? cl.pgsql_host : cl.pgsql_admin_host;
     int port = (conn_type == BACKEND) ? cl.pgsql_port : cl.pgsql_admin_port;
     const char* username = (conn_type == BACKEND) ? cl.pgsql_username : cl.admin_username;
@@ -39,7 +39,7 @@ PGConnPtr createNewConnection(ConnType conn_type, const std::string& options = "
     ss << (with_ssl ? " sslmode=require" : " sslmode=disable");
 
     if (options.empty() == false) {
-		ss << " options='" << options << "'";
+        ss << " options='" << options << "'";
     }
 
     PGconn* conn = PQconnectdb(ss.str().c_str());
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
     if (cl.getEnv())
         return exit_status();
 
-    plan(2);
+    plan(4);
 
     auto conn = createNewConnection(BACKEND);
     if (!conn) {
@@ -64,23 +64,22 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-
     // Ensure we have a test table
     PGresult* res = PQexec(conn.get(),
-        "CREATE TEMP TABLE reg_test_5140 (col1 text,col2 int)"
+        "CREATE TEMP TABLE reg_test_5140 (col1 text,col2 int, col3 text, col4 text)"
     );
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        diag(PQerrorMessage(conn.get()));
+        diag("Error: %s", PQerrorMessage(conn.get()));
         PQclear(res);
         return 1;
     }
     PQclear(res);
 
-    // Prepare a statement with 2 parameters
+    // Prepare a statement with 4 parameters
     res = PQprepare(conn.get(), "stmt_test_bind_5140",
-        "INSERT INTO reg_test_5140 VALUES ($1, $2)", 2, nullptr);
+        "INSERT INTO reg_test_5140 VALUES ($1, $2, $3, $4)", 4, nullptr);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        diag(PQerrorMessage(conn.get()));
+        diag("Error: %s", PQerrorMessage(conn.get()));
         PQclear(res);
         return 1;
     }
@@ -88,10 +87,12 @@ int main(int argc, char** argv) {
 
     // Parameter values: 
     // col1 = "ABCDEFGHIJKLMN" (length 14)
-    // col3 = NULL (-1)
-    const char* values[2];
-    int lengths[2];
-    int formats[2];
+    // col2 = NULL (-1)
+    // col3 = empty string (length 0)
+    // col4 = binary data (length 0)
+    const char* values[4];
+    int lengths[4];
+    int formats[4];
 
     values[0] = "ABCDEFGHIJKLMN";  // 14 chars
     lengths[0] = 14;
@@ -101,27 +102,40 @@ int main(int argc, char** argv) {
     lengths[1] = -1;
     formats[1] = 1; // Binary Format
 
-    res = PQexecPrepared(conn.get(), "stmt_test_bind_5140", 2, values, lengths, formats, 0);
+    values[2] = ""; // empty string
+    lengths[2] = 0;
+    formats[2] = 0; // Text Format
+
+    values[3] = ""; // empty binary
+    lengths[3] = 0;
+    formats[3] = 1; // Binary Format
+
+    res = PQexecPrepared(conn.get(), "stmt_test_bind_5140", 4, values, lengths, formats, 0);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        diag(PQerrorMessage(conn.get()));
+        diag("Error: %s", PQerrorMessage(conn.get()));
         PQclear(res);
         return 1;
     }
     PQclear(res);
 
     // Verify row inserted as expected
-    res = PQexec(conn.get(), "SELECT col1, col2 FROM reg_test_5140");
+    res = PQexec(conn.get(), "SELECT col1, col2, col3, col4 FROM reg_test_5140");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        diag(PQerrorMessage(conn.get()));
+        diag("Error: %s", PQerrorMessage(conn.get()));
         PQclear(res);
         return 1;
     }
 
     char const* c1 = PQgetvalue(res, 0, 0);
-    bool isnull_c2 = PQgetisnull(res, 0, 2);
+    bool isnull_c2 = PQgetisnull(res, 0, 1);
+    char const* c3 = PQgetvalue(res, 0, 2);
+    bool isnull_c4 = PQgetisnull(res, 0, 3);
+    int len_c4 = PQgetlength(res, 0, 3);
 
     ok(std::string(c1) == "ABCDEFGHIJKLMN", "col1 length 14 parsed correctly");
-    ok(isnull_c2, "col3 NULL parsed correctly");
+    ok(isnull_c2, "col2 NULL parsed correctly");
+    ok(std::string(c3) == "", "col3 empty string parsed correctly");
+    ok(!isnull_c4 && len_c4 == 0, "col4 empty binary parsed correctly");
 
     PQclear(res);
 
