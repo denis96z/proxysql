@@ -6613,7 +6613,7 @@ PgSQL_DateStyle_t PgSQL_DateStyle_Util::parse_datestyle(std::string_view input) 
             newDateStyle = DATESTYLE_FORMAT_SQL;
             have_style = true;
         }
-        else if (strcasecmp(tok, "POSTGRES") == 0) {
+        else if (strncasecmp(tok, "POSTGRES", sizeof("POSTGRES") - 1) == 0) {
             if (have_style && newDateStyle != DATESTYLE_FORMAT_POSTGRES)
                 ok = false;     /* conflicting styles */
             newDateStyle = DATESTYLE_FORMAT_POSTGRES;
@@ -6634,8 +6634,8 @@ PgSQL_DateStyle_t PgSQL_DateStyle_Util::parse_datestyle(std::string_view input) 
             newDateOrder = DATESTYLE_ORDER_YMD;
             have_order = true;
         }
-        else if (strcasecmp(tok, "DMY") == 0 ||
-			strcasecmp(tok, "EURO") == 0) {
+        else if (strcasecmp(tok, "DMY") == 0 || 
+			strncasecmp(tok, "EURO", sizeof("EURO") - 1) == 0) {
             if (have_order && newDateOrder != DATESTYLE_ORDER_DMY)
                 ok = false;     /* conflicting orders */
             newDateOrder = DATESTYLE_ORDER_DMY;
@@ -6643,7 +6643,7 @@ PgSQL_DateStyle_t PgSQL_DateStyle_Util::parse_datestyle(std::string_view input) 
         }
         else if (strcasecmp(tok, "MDY") == 0 ||
 			strcasecmp(tok, "US") == 0 ||
-			strcasecmp(tok, "NONEURO") == 0) {
+			strncasecmp(tok, "NONEURO", sizeof("NONEURO") - 1) == 0) {
             if (have_order && newDateOrder != DATESTYLE_ORDER_MDY)
                 ok = false;     /* conflicting orders */
             newDateOrder = DATESTYLE_ORDER_MDY;
