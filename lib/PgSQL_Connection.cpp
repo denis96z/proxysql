@@ -129,15 +129,13 @@ bool PgSQL_Connection_userinfo::set_dbname(const char* db) {
 	const int new_db_len = db ? strlen(db) : 0;
 	const int old_db_len = dbname ? strlen(dbname) : 0;
 
-	if (old_db_len == 0 ||
-		old_db_len != new_db_len ||
-		strncmp(db, dbname, new_db_len)) {
+	if (old_db_len == 0 || old_db_len != new_db_len || strcmp(db, dbname)) {
 		if (dbname) {
 			free(dbname);
 		}
 		dbname = (char*)malloc(new_db_len + 1);
-		memcpy(dbname, db, new_db_len);
-		dbname[new_db_len] = 0;
+		// Copy string including null terminator
+		memcpy(dbname, db, new_db_len + 1);
 		compute_hash();
 		return true;
 	}

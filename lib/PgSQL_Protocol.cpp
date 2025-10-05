@@ -1097,8 +1097,7 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 				if (i == PGSQL_NAME_LAST_LOW_WM)
 					continue;
 				// using internal_variable_name because it follows the lowercase naming convention
-				if (strncmp(param_key.c_str(), pgsql_tracked_variables[i].internal_variable_name,
-					strlen(pgsql_tracked_variables[i].internal_variable_name)) == 0) {
+				if (strcmp(param_key.c_str(), pgsql_tracked_variables[i].internal_variable_name) == 0) {
 					idx = i;
 					break;
 				}
