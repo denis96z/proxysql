@@ -36,10 +36,8 @@ PgSQL_Variables::PgSQL_Variables() {
 			assert(strcmp(pgsql_tracked_variables[i].set_variable_name, pgsql_tracked_variables[i - 1].set_variable_name) > 0);
 		}
 
-		// we initialized all the internal_variable_name if set to NULL
-		if (pgsql_tracked_variables[i].internal_variable_name == NULL) {
-			pgsql_tracked_variables[i].internal_variable_name = pgsql_tracked_variables[i].set_variable_name;
-		}
+		// internal_variable_name should not be null
+		assert(pgsql_tracked_variables[i].internal_variable_name != NULL);
 
 		PgSQL_Variables::verifiers[i] = verify_server_variable;
 		PgSQL_Variables::updaters[i] = update_server_variable;

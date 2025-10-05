@@ -20,11 +20,11 @@ extern char * binary_sha1;
 #include "proxysql_find_charset.h"
 
 void PgSQL_Variable::fill_server_internal_session(json &j, int conn_num, int idx) {
-	j[conn_num]["conn"][pgsql_tracked_variables[idx].internal_variable_name] = std::string(value?value:"");
+	j[conn_num]["conn"][pgsql_tracked_variables[idx].set_variable_name] = std::string(value?value:"");
 }
 
 void PgSQL_Variable::fill_client_internal_session(json &j, int idx) {
-	j["conn"][pgsql_tracked_variables[idx].internal_variable_name] = value?value:"";
+	j["conn"][pgsql_tracked_variables[idx].set_variable_name] = value?value:"";
 }
 
 PgSQL_Connection_userinfo::PgSQL_Connection_userinfo() {
