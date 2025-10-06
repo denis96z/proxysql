@@ -189,6 +189,33 @@ services:
       - PROXYSQL_BUILD_TYPE=debug
 
 ####################################################################################################
+  debian13_build:
+    extends:
+      service: _build
+    image: proxysql/packaging:build-debian13-v3.0.3
+    volumes:
+      - ./docker/images/proxysql/deb-compliant/ctl/:/root/ctl/
+      - ./docker/images/proxysql/deb-compliant/entrypoint/:/opt/entrypoint/
+      - ./:/opt/proxysql/
+    environment:
+      - PKG_RELEASE=debian13
+      - PROXYSQL_BUILD_TYPE=clickhouse
+
+  debian13_clang_build:
+    extends:
+      service: debian13_build
+    image: proxysql/packaging:build-clang-debian13-v3.0.3
+    environment:
+      - PKG_RELEASE=debian13-clang
+
+  debian13_dbg_build:
+    extends:
+      service: debian13_build
+    environment:
+      - PKG_RELEASE=dbg-debian13
+      - PROXYSQL_BUILD_TYPE=debug
+
+####################################################################################################
 ####################################################################################################
   ubuntu22_build:
     extends:
@@ -270,6 +297,34 @@ services:
       service: opensuse15_build
     environment:
       - PKG_RELEASE=dbg-opensuse15
+      - PROXYSQL_BUILD_TYPE=debug
+
+####################################################################################################
+  opensuse16_build:
+    extends:
+      service: _build
+    image: proxysql/packaging:build-opensuse16-v3.0.3
+    volumes:
+      - ./docker/images/proxysql/suse-compliant/rpmmacros/rpmbuild/:/root/rpmbuild/
+      - ./docker/images/proxysql/suse-compliant/rpmmacros/.rpmmacros:/root/.rpmmacros
+      - ./docker/images/proxysql/suse-compliant/entrypoint/:/opt/entrypoint/
+      - ./:/opt/proxysql/
+    environment:
+      - PKG_RELEASE=opensuse16
+      - PROXYSQL_BUILD_TYPE=clickhouse
+
+  opensuse16_clang_build:
+    extends:
+      service: opensuse16_build
+    image: proxysql/packaging:build-clang-opensuse16-v3.0.3
+    environment:
+      - PKG_RELEASE=opensuse16-clang
+
+  opensuse16_dbg_build:
+    extends:
+      service: opensuse16_build
+    environment:
+      - PKG_RELEASE=dbg-opensuse16
       - PROXYSQL_BUILD_TYPE=debug
 
 ####################################################################################################
