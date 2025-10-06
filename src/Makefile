@@ -40,7 +40,7 @@ JEMALLOC_LDIR := $(JEMALLOC_PATH)/lib
 
 LIBCONFIG_PATH := $(DEPS_PATH)/libconfig/libconfig
 LIBCONFIG_IDIR := $(LIBCONFIG_PATH)/lib
-LIBCONFIG_LDIR := $(LIBCONFIG_PATH)/lib/.libs
+LIBCONFIG_LDIR := $(LIBCONFIG_PATH)/out
 
 PROMETHEUS_PATH := $(DEPS_PATH)/prometheus-cpp/prometheus-cpp
 PROMETHEUS_IDIR := $(PROMETHEUS_PATH)/pull/include -I$(PROMETHEUS_PATH)/core/include

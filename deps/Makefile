@@ -234,6 +234,9 @@ endif
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../mariadb_rpl.patch
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../cmakelists.txt.patch
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../mariadb_lib.c.metadata_column_check.patch
+	# new compilers fix
+	cd mariadb-client-library/mariadb_client && patch -p0 < ../bool_keyword.patch
+
 	cd mariadb-client-library/mariadb_client && CC=${CC} CXX=${CXX} ${MAKE} mariadbclient
 #	cd mariadb-client-library/mariadb_client/include && make my_config.h
 
@@ -252,13 +255,14 @@ sqlite3/sqlite3/sqlite3.o:
 
 sqlite3: sqlite3/sqlite3/sqlite3.o
 
-libconfig/libconfig/lib/.libs/libconfig++.a:
+
+libconfig/libconfig/out/libconfig++.a:
 	cd libconfig && rm -rf libconfig-*/ || true
 	cd libconfig && tar -zxf libconfig-*.tar.gz
-	cd libconfig/libconfig && ./configure --disable-examples
+	cd libconfig/libconfig && cmake -DBUILD_SHARED_LIBS=0 -DBUILD_EXAMPLES=0 -DBUILD_TESTS=0 -DBUILD_FUZZERS=0 .
 	cd libconfig/libconfig && CC=${CC} CXX=${CXX} ${MAKE}
 
-libconfig: libconfig/libconfig/lib/.libs/libconfig++.a
+libconfig: libconfig/libconfig/out/libconfig++.a
 
 
 prometheus-cpp/prometheus-cpp/lib/libprometheus-cpp-core.a:
@@ -336,6 +340,7 @@ cleanpart:
 	cd jemalloc && rm -rf jemalloc-*/ || true
 	cd sqlite3 && rm -rf sqlite-amalgamation-*/ || true
 	cd postgresql && rm -rf postgresql-*/ || true
+	cd postgresql && rm -rf postgres-*/ || true
 .PHONY: cleanpart
 
 cleanall:
@@ -358,6 +363,7 @@ cleanall:
 	cd cityhash && rm -rf cityhash-*/ || true
 	cd coredumper && rm -rf coredumper-*/ || true
 	cd postgresql && rm -rf postgresql-*/ || true
+	cd postgresql && rm -rf postgres-*/ || true
 	cd libusual && rm -rf libusual-*/ || true
 	cd libscram && rm -rf lib/* obj/* || true
 .PHONY: cleanall
