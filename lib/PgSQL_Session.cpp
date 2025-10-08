@@ -3936,19 +3936,6 @@ bool PgSQL_Session::is_multi_statement_command(const char* cmd) {
 	return false;
 }
 
-static void remove_quotes(string& v) {
-	if (v.length() > 2) {
-		char firstChar = v[0];
-		char lastChar = v[v.length() - 1];
-		if (firstChar == lastChar) {
-			if (firstChar == '\'' || firstChar == '"' || firstChar == '`') {
-				v.erase(v.length() - 1, 1);
-				v.erase(0, 1);
-			}
-		}
-	}
-}
-
 bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_SET_command(const char* dig, bool* lock_hostgroup) {
 	// this code is executed only if locked_on_hostgroup is not set yet
 	// if locked_on_hostgroup is set, we do not try to parse the SET statement
@@ -4013,11 +4000,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 				if (idx != PGSQL_NAME_LAST_HIGH_WM) {
 
 					if (IS_PGTRACKED_VAR_OPTION_SET_NO_STRIP_VALUE(pgsql_tracked_variables[idx]) == 0) {
-						if (value1 == "''" || value1 == "\"\"") {
-							value1.clear();
-						} else {
-							remove_quotes(value1);
-						}
+						PgSQL_Set_Stmt_Parser::unquote_if_quoted(value1);
 					}
 
 					uint32_t current_hash = pgsql_variables.client_get_hash(this, idx);

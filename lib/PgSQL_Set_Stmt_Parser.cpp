@@ -20,19 +20,6 @@
 
 using namespace std;
 
-static void remove_quotes(string& v) {
-	if (v.length() > 2) {
-		char firstChar = v[0];
-		char lastChar = v[v.length()-1];
-		if (firstChar == lastChar) {
-			if (firstChar == '\'' || firstChar == '"' || firstChar == '`') {
-				v.erase(v.length()-1, 1);
-				v.erase(0, 1);
-			}
-		}
-	}
-}
-
 #ifdef PARSERDEBUG
 PgSQL_Set_Stmt_Parser::PgSQL_Set_Stmt_Parser(std::string nq, int verb) {
 	verbosity = verb;
@@ -93,6 +80,18 @@ VALGRIND_DISABLE_ERROR_REPORTING;
 	parse1v2_init = true;
 }
 
+void PgSQL_Set_Stmt_Parser::unquote_if_quoted(std::string& v) {
+	if (v.length() >= 2) {
+		char firstChar = v[0];
+		char lastChar = v[v.length() - 1];
+		if (firstChar == lastChar) {
+			if (firstChar == '\'' || firstChar == '"' || firstChar == '`') {
+				v.erase(v.length() - 1, 1);
+				v.erase(0, 1);
+			}
+		}
+	}
+}
 
 std::map<std::string,std::vector<std::string>> PgSQL_Set_Stmt_Parser::parse1v2() {
 
@@ -123,32 +122,24 @@ VALGRIND_ENABLE_ERROR_REPORTING;
 		else oper = "";
 		proxy_debug(PROXY_DEBUG_MYSQL_QUERY_PROCESSOR, 4, "SET parsing: scope='%s', parameter name='%s' , operator='%s' , parameter value='%s' , parameter_value_func='%s' , parameter_value_func_args='%s'\n", scope.c_str(), param_name.c_str(), oper.c_str(), param_val.c_str(), param_val_func.c_str(), param_val_func_args.c_str());
 #endif // DEBUG
-		std::string key;
 
 		if (param_val_func.empty() == false) return {};
+
+		unquote_if_quoted(param_name);
+
+		size_t pos = param_val.find_last_not_of(" \n\r\t,");
+		if (pos != param_val.npos) {
+			param_val.erase(pos + 1);
+		}
 
 		if (param_name.empty() || param_val.empty()) {
 			continue;
 		}
 		
-		key = param_name;
-		remove_quotes(key);
-		size_t pos = param_val.find_last_not_of(" \n\r\t,");
-		if (pos != param_val.npos) {
-			param_val.erase(pos+1);
-		}
-
-		/*
-		if (param_val == "''" || param_val == "\"\"") {
-			op.emplace_back("");
-		} else {
-			remove_quotes(param_val);
-			op.emplace_back(param_val);
-		}*/
 		op.emplace_back(param_val);
 
-		std::transform(key.begin(), key.end(), key.begin(), ::tolower);
-		result[key] = op;
+		std::transform(param_name.begin(), param_name.end(), param_name.begin(), ::tolower);
+		result[param_name] = op;
 	}
 	if (input.size() != 0) {
 #ifdef PARSERDEBUG

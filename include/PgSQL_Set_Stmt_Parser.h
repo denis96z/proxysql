@@ -36,6 +36,7 @@ class PgSQL_Set_Stmt_Parser {
 	std::map<std::string, std::vector<std::string>> parse1v2();
 	void generateRE_parse1v2();
 	std::string remove_comments(const std::string& q);
+	static void unquote_if_quoted(std::string& v);
 };
 
 #endif /* __CLASS_PGSQL_SET_STMT_PARSER_H */
