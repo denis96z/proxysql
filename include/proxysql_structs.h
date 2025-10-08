@@ -272,6 +272,7 @@ enum pgsql_variable_name {
 	PGSQL_ESCAPE_STRING_WARNING,
 	PGSQL_EXTRA_FLOAT_DIGITS,
 	PGSQL_MAINTENANCE_WORK_MEM,
+	PGSQL_SEARCH_PATH,
 	PGSQL_SYNCHRONOUS_COMMIT,
 	PGSQL_NAME_LAST_HIGH_WM
 };
@@ -334,7 +335,7 @@ enum pgsql_tracked_variables_options {
 	PGTRACKED_VAR_OPT_QUOTE				= 0x01, // if the variable needs to be quoted
 	PGTRACKED_VAR_OPT_SET_TRANSACTION	= 0x02, // if related to SET TRANSACTION statement . if false , it will be execute "SET varname = varvalue" . If true, "SET varname varvalue"
 	PGTRACKED_VAR_OPT_PARAM_STATUS		= 0x04, // send parameter status if set
-	PGTRACKED_VAR_OPT_RESERVED_1		= 0x08, // Unused
+	PGTRACKED_VAR_OPT_NO_STRIP_VALUE	= 0x08, // don't remove quotes from value
 	PGTRACKED_VAR_OPT_RESERVED_2		= 0x10, // Unused
 	PGTRACKED_VAR_OPT_RESERVED_3		= 0x20  // Unused
 };
@@ -358,6 +359,7 @@ struct pgsql_variable_st {
 #define IS_PGTRACKED_VAR_OPTION_SET_QUOTE(opt)			 IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_QUOTE)
 #define IS_PGTRACKED_VAR_OPTION_SET_SET_TRANSACTION(opt) IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_SET_TRANSACTION)
 #define IS_PGTRACKED_VAR_OPTION_SET_PARAM_STATUS(opt)	 IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_PARAM_STATUS)
+#define IS_PGTRACKED_VAR_OPTION_SET_NO_STRIP_VALUE(opt)	 IS_PGTRACKED_VAR_OPTION_SET(opt.options, PGTRACKED_VAR_OPT_NO_STRIP_VALUE)
 
 inline bool variable_name_exists(const pgsql_variable_st& var, const char* variable_name) {
 	
@@ -1814,6 +1816,7 @@ extern const pgsql_variable_validator pgsql_variable_validator_bytea_output;
 extern const pgsql_variable_validator pgsql_variable_validator_extra_float_digits;
 extern const pgsql_variable_validator pgsql_variable_validator_maintenance_work_mem;
 extern const pgsql_variable_validator pgsql_variable_validator_client_encoding;
+extern const pgsql_variable_validator pgsql_variable_validator_search_path;
 
 pgsql_variable_st pgsql_tracked_variables[]{
 	{ PGSQL_CLIENT_ENCODING,       SETTING_VARIABLE,	"client_encoding", "client_encoding", "UTF8", (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_client_encoding, { "names", nullptr } },
@@ -1834,6 +1837,7 @@ pgsql_variable_st pgsql_tracked_variables[]{
 	{ PGSQL_ESCAPE_STRING_WARNING, SETTING_VARIABLE,    "escape_string_warning", "escape_string_warning", "on", (0), &pgsql_variable_validator_bool, nullptr },
 	{ PGSQL_EXTRA_FLOAT_DIGITS,	   SETTING_VARIABLE,    "extra_float_digits", "extra_float_digits", "1", (0), &pgsql_variable_validator_extra_float_digits, nullptr },
 	{ PGSQL_MAINTENANCE_WORK_MEM,  SETTING_VARIABLE,    "maintenance_work_mem", "maintenance_work_mem", "64MB", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_maintenance_work_mem, nullptr },
+	{ PGSQL_SEARCH_PATH,		   SETTING_VARIABLE,    "search_path", "search_path", "\"$user\", public", (PGTRACKED_VAR_OPT_NO_STRIP_VALUE), &pgsql_variable_validator_search_path, nullptr },
 	{ PGSQL_SYNCHRONOUS_COMMIT,	   SETTING_VARIABLE,	"synchronous_commit", "synchronous_commit", "on", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_synchronous_commit, nullptr},
 };
 

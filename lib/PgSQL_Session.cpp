@@ -93,6 +93,7 @@ static const std::set<std::string> pgsql_other_variables = {
 	"escape_string_warning",
 	"extra_float_digits",
 	"maintenance_work_mem",
+	"search_path",
 	"synchronous_commit"
 };
 
@@ -1351,7 +1352,7 @@ bool PgSQL_Session::handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, co
 		query = NULL;
 	}
 	if (rc == 0) {
-		if (strncasecmp(var_name, "client_encoding", sizeof("client_encoding")-1) == 0) {
+		if (strcasecmp(var_name, "client_encoding") == 0) {
 			__sync_fetch_and_add(&PgHGM->status.backend_set_client_encoding, 1);
 		}
 		myds->revents |= POLLOUT;	// we also set again POLLOUT to send a query immediately!
@@ -1398,9 +1399,7 @@ bool PgSQL_Session::handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, co
 			} else {
 				proxy_warning("Error while setting %s to \"%s\" on %s:%d hg %d: %s\n", var_name, var_value, myconn->parent->address, myconn->parent->port, current_hostgroup, myconn->get_error_code_with_message().c_str());
 
-				if (myconn->get_error_code() == PGSQL_ERROR_CODES::ERRCODE_SYNTAX_ERROR ||
-					myconn->get_error_code() == PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_PARAMETER ||
-					myconn->get_error_code() == PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_OBJECT) {
+				if (myconn->get_error_code() == PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_OBJECT) {
 					
 					int idx = PGSQL_NAME_LAST_HIGH_WM;
 					for (int i = PGSQL_NAME_LAST_LOW_WM + 1; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
@@ -4027,6 +4026,19 @@ bool PgSQL_Session::is_multi_statement_command(const char* cmd) {
 	return false;
 }
 
+static void remove_quotes(string& v) {
+	if (v.length() > 2) {
+		char firstChar = v[0];
+		char lastChar = v[v.length() - 1];
+		if (firstChar == lastChar) {
+			if (firstChar == '\'' || firstChar == '"' || firstChar == '`') {
+				v.erase(v.length() - 1, 1);
+				v.erase(0, 1);
+			}
+		}
+	}
+}
+
 bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_SET_command(const char* dig, bool* lock_hostgroup) {
 	// this code is executed only if locked_on_hostgroup is not set yet
 	// if locked_on_hostgroup is set, we do not try to parse the SET statement
@@ -4073,10 +4085,10 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 				unable_to_parse_set_statement(lock_hostgroup);
 				return false;
 			}
-			auto values = std::begin(it->second);
+
+			std::string value1 = it->second.front();
 			if (std::find(pgsql_critical_variables.begin(), pgsql_critical_variables.end(), var) != pgsql_critical_variables.end() ||
 				pgsql_other_variables.find(var) != pgsql_other_variables.end()) {
-				std::string value1 = *values;
 
 				int idx = PGSQL_NAME_LAST_HIGH_WM;
 				for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
@@ -4089,6 +4101,15 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 					}
 				}
 				if (idx != PGSQL_NAME_LAST_HIGH_WM) {
+
+					if (IS_PGTRACKED_VAR_OPTION_SET_NO_STRIP_VALUE(pgsql_tracked_variables[idx]) == 0) {
+						if (value1 == "''" || value1 == "\"\"") {
+							value1.clear();
+						} else {
+							remove_quotes(value1);
+						}
+					}
+
 					uint32_t current_hash = pgsql_variables.client_get_hash(this, idx);
 					if ((value1.size() == sizeof("DEFAULT") - 1) && strncasecmp(value1.c_str(), "DEFAULT", sizeof("DEFAULT") - 1) == 0) {
 						auto [value, hash] = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
@@ -4167,7 +4188,6 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 				// this is a variable we parse but ignore
 				// see MySQL_Variables::MySQL_Variables() for a list of ignored variables
 #ifdef DEBUG
-				std::string value1 = *values;
 				proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Processing SET %s value %s\n", var.c_str(), value1.c_str());
 #endif // DEBUG
 			} else {
@@ -4179,7 +4199,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 			}
 
 			if (send_param_status)
-				param_status.emplace_back(var, *values);
+				param_status.emplace_back(var, value1);
 		}
 
 		if (failed_to_parse_var) {
