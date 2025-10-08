@@ -451,47 +451,38 @@ bool pgsql_variable_validate_client_encoding(const char* value, const params_t* 
 bool pgsql_variable_validate_search_path(const char* value, const params_t* params, PgSQL_Session* session, char** transformed_value) {
 	(void)params;
 	(void)session;
-	bool result = true;
+
 	if (transformed_value) *transformed_value = nullptr;
-	if (value == NULL) return false;
+	if (value == nullptr) return false;
 
-	char* copy = strdup(value);
-	if (copy == NULL) return false;
+	// NOSONAR: strlen is safe here 
+	size_t value_len = strlen(value); // NOSONAR
+	if (value_len > SIZE_MAX - 1) return false;
 
-	char* token = copy;
-	while (isspace(*token)) token++;  // trim leading spaces
+	char* normalized = (char*)malloc(value_len + 1);
+	if (normalized == nullptr) return false;
+	normalized[0] = '\0';
 
-	char* end = copy + strlen(copy) - 1;
-	while (end > copy && isspace(*end)) *end-- = '\0';  // trim trailing spaces
-
-	// return on back ticks
-
-	char* normalized = (char*)malloc(strlen(value) * 2 + 3);  // enough space
-	if (normalized == NULL) {
-		free(copy);
-		return false;
-	}
-	*normalized = '\0';
-
+	size_t norm_pos = 0;
 	bool first = true;
+	bool result = true;
+
+	const char* token = value;
+
 	while (*token && result) {
-		while (isspace(*token)) token++;
+		/* skip leading whitespace */
+		while (*token && isspace((unsigned char)*token)) token++;
 		if (*token == '\0') break;
 
-		char* part_start = token;
+		const char* part_start = token;
+		size_t part_len = 0;
+		int effective_len = 0;  // for length check after de-escaping
 
-		int part_len;
-		char effective_len = 0;  // for length check after de-escaping
 		if (*token == '"' || *token == '\'') {
-			// handle quoted identifier
-			char quote = *token;
-			token++;
-			char* search = token;
+			// quoted identifier (preserve quotes in normalized output)
+			char quote = *token++;
+			const char* search = token;
 			while (*search) {
-				if (*search == '\0') {  // check for NUL
-					result = false;
-					break;
-				}
 				if (*search == quote) {
 					if (*(search + 1) == quote) {
 						search += 2;
@@ -504,67 +495,65 @@ bool pgsql_variable_validate_search_path(const char* value, const params_t* para
 				search++;
 				effective_len++;
 			}
+
 			if (*search != quote) {
 				result = false;
 				break;  // unclosed quote
 			}
-			part_len = search - part_start + 1;
+			part_len = (size_t)(search - part_start + 1);
 			token = search + 1;  // skip closing quote
 			if (effective_len > 63) {
 				result = false;
 				break;
 			}
-		}
-		else {
+		} else {
 			// unquoted identifier or $user
 			while (*token && *token != ',' && !isspace(*token)) token++;
-			part_len = token - part_start;
-			if (part_len == 0) {
+			part_len = (size_t)(token - part_start);
+			if (part_len == 0 || part_len > 63) {
 				result = false;
 				break;
 			}
-			char part[64];
-			if (part_len >= 64) {
-				result = false;
-				break;
-			}
-			strncpy(part, part_start, part_len);
-			part[part_len] = '\0';
 
 			// validate as identifier
-			if (!isalpha(part[0]) && part[0] != '_') {
+			if (!isalpha(part_start[0]) && part_start[0] != '_') {
 				result = false;
 				break;
 			}
-			for (int i = 1; i < part_len; ++i) {
-				if (!isalnum(part[i]) && part[i] != '_' && part[i] != '$') {
+			for (size_t i = 1; i < part_len; ++i) {
+				if (!isalnum(part_start[i]) && part_start[i] != '_' && part_start[i] != '$') {
 					result = false;
 					break;
 				}
 			}
-			if (part_len > 63) {
-				result = false;
-				break;
-			}
+			if (!result) break;
 		}
 
 		// add to normalized
-		if (!first) strcat(normalized, ",");
+		if (!first) {
+			normalized[norm_pos++] = ',';
+		}
 		first = false;
-		strncat(normalized, part_start, part_len);
 
-		// skip comma if present
-		while (isspace(*token)) token++;
+		// append the part bytes
+		if (part_len > 0) {
+			memcpy(normalized + norm_pos, part_start, part_len);
+			norm_pos += part_len;
+		}
+		normalized[norm_pos] = '\0';
+
+		// skip whitespace after part
+		while (*token && isspace(*token)) token++;
+
+		// expect comma or end
 		if (*token == ',') {
 			token++;
-		} else if (*token != '\0' && !isspace(*token)) {
+		} else if (*token != '\0') {
 			// if there's more content without comma, invalid
 			result = false;
 			break;
 		}
 	}
-
-	free(copy);
 
 	if (result) {
 		if (transformed_value) {
