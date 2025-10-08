@@ -188,8 +188,6 @@ public:
 	int QueryLength;
 	enum PGSQL_QUERY_command PgQueryCmd;
 
-	bool bool_is_select_NOT_for_update;
-	bool bool_is_select_NOT_for_update_computed;
 	bool have_affected_rows;
 
 	PgSQL_Query_Info();
@@ -202,7 +200,6 @@ public:
 	void begin(unsigned char* _p, int len, bool header = false);
 	void end();
 	char* get_digest_text();
-	bool is_select_NOT_for_update();
 	void set_end_time(unsigned long long time);
 
 private:
