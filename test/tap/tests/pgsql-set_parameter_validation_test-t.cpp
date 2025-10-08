@@ -292,6 +292,48 @@ std::vector<SetTestCase> test_cases = {
         {"SET synchronous_commit = 'maybe'", false, ""},
         {"SET synchronous_commit = 1", false, ""},
         {"SET synchronous_commit = 'sync'", false, ""}
+    }},
+    { "search_path", {
+        // Valid values
+        {"SET search_path TO \"$user\", public", true, "\"$user\", public"},
+        {"SET search_path TO \"$user\",public", true, "\"$user\", public"},
+        {"SET search_path = '\"$user\"   ,    public'", true, "\"\"\"$user\"\" , public\""},
+        {"SET search_path = 'public '", true, "\"public \""},
+        {"SET search_path = \"$user\"", true, "\"$user\""},
+        {"SET search_path = '$user'", true, "\"$user\""},
+        {"SET search_path = ''", true, "\"\""},
+        {"SET search_path = 'public,,schema1'", true, "\"public,,schema1\""},
+        {"SET search_path = 'public , , schema1'", true, "\"public , , schema1\""},
+        {"SET search_path = public", true, "public"},
+        {"SET search_path = unquoted_schema, public", true, "unquoted_schema, public"},
+        {"SET search_path = \"MixedCase\", public", true, "\"MixedCase\", public"},
+        {"SET search_path = pg_catalog, \"$user\"", true, "pg_catalog, \"$user\""},
+        {"SET search_path = 'pg_catalog , \"$user\"'", true, "\"pg_catalog , \"\"$user\"\"\""},
+        {"SET search_path = \"sch-1\", \"sch 2\"", true, "\"sch-1\", \"sch 2\""},
+        {"SET search_path TO \"$USER\"", true, "\"$USER\""}, // quoted USER, case-sensitive
+        {"SET search_path = ',public'", true, "\",public\""},
+        {"SET search_path = public,schema1", true, "public, schema1"},
+        {"SET search_path = ',,'", true, "\",,\""},
+        {"SET search_path = '123schema, public'", true, "\"123schema, public\""},
+        {"SET search_path = ' '", true, "\" \""},
+        {"SET search_path = schema$1", true, "\"schema$1\""},
+        {"SET search_path TO \"123456789012345678901234567890123456789012345678901234567890123\"", true, "\"123456789012345678901234567890123456789012345678901234567890123\""},
+        {"SET search_path TO \"$user\" ,", true, "\"$user\""}, // trailing comma will be stripped
+        // Invalid values
+        {"SET search_path = \"unclosed_quote, public", false, ""},
+        {"SET search_path = ,public", false, ""},
+        {"SET search_path = public,,schema1", false, ""},
+        {"SET search_path = ,,", false, ""},
+        {"SET search_path = \"$user\", \"$invalid\"@schema", false, ""},
+        {"SET search_path = 123schema, public", false, ""},
+        {"SET search_path = $user", false, ""},
+        {"SET search_path = \"unclosed_quote, public", false, ""},
+        {"SET search_path = \"schema1\" \"schema2\"", false, ""},
+        {"SET search_path = \"\\\"unterminated\"", false, ""},
+        {"SET search_path = \"valid\",, \"invalid\"", false, ""},
+        {"SET search_path = $schema1", false, ""},
+        {"SET search_path TO \"1234567890123456789012345678901234567890123456789012345678901234\"", false, ""}, // 63 chars max length
+        {"SET search_path TO `123`", false, ""}  // backticks, invalid characters
     }}
 };
 
