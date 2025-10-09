@@ -133,7 +133,6 @@ curl: curl/curl/lib/.libs/libcurl.a
 libmicrohttpd/libmicrohttpd/src/microhttpd/.libs/libmicrohttpd.a:
 	cd libmicrohttpd && rm -rf libmicrohttpd-*/ || true
 	cd libmicrohttpd && tar -zxf libmicrohttpd-*.tar.gz
-#	cd libmicrohttpd/libmicrohttpd && patch src/microhttpd/connection.c < ../connection.c-snprintf-overflow.patch
 	cd libmicrohttpd/libmicrohttpd && ./configure --enable-https && CC=${CC} CXX=${CXX} ${MAKE}
 
 microhttpd: libmicrohttpd/libmicrohttpd/src/microhttpd/.libs/libmicrohttpd.a
