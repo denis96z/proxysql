@@ -1227,7 +1227,8 @@ bool ProxySQL_Admin::GenericRefreshStatistics(const char *query_no_space, unsign
 	//bool stats_proxysql_servers_status = false; // temporary disabled because not implemented
 
 	if (strcasestr(query_no_space, "pgsql processlist") ||
-		strcasestr(query_no_space, "stats_pgsql_processlist"))
+		strcasestr(query_no_space, "stats_pgsql_processlist") ||
+		strcasestr(query_no_space, "stats_pgsql_stat_activity"))
 		// This will match the following usecases:
 		// SHOW PGSQL PROCESSLIST
 		// SHOW FULL PGSQL PROCESSLIST
@@ -1914,6 +1915,7 @@ void ProxySQL_Admin::vacuum_stats(bool is_admin) {
 		"stats_pgsql_prepared_statements_info",
 		"stats_mysql_processlist",
 		"stats_pgsql_processlist",
+		"stats_pgsql_stat_activity",
 		"stats_mysql_query_digest",
 		"stats_mysql_query_digest_reset",
 		"stats_pgsql_query_digest",
