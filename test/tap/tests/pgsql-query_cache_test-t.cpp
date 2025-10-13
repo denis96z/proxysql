@@ -1012,8 +1012,8 @@ void execute_prepared_test(PGconn* admin_conn, PGconn* conn) {
 
     metrics.swap();
 
-    // 4) Optional: test that a simple (non-prepared) SELECT would create a cache entry here
-    //    (verifies rule is active). Uncomment if you want an extra sanity-check in the same test.
+    // 4) test that a simple (non-prepared) SELECT would create a cache entry here
+    //    (verifies rule is active).
     
     if (!executeQueries(conn, { "SELECT 1" }))
         return;

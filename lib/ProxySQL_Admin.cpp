@@ -2514,7 +2514,7 @@ void update_modules_metrics() {
 	if (GloMyQC) {
 		GloMyQC->p_update_metrics();
 	}
-	/* Turning off Prometheus metrics collection for PostgreSQL modules in ProxySQL
+#if 0 // Turning off Prometheus metrics collection for PostgreSQL modules in ProxySQL
 	// Update pgsql_threads_handler metrics
 	if (GloPTH) {
 		GloPTH->p_update_metrics();
@@ -2527,7 +2527,7 @@ void update_modules_metrics() {
 	if (GloPgQC) {
 		GloPgQC->p_update_metrics();
 	}
-	*/
+#endif
 	// Update cluster metrics
 	if (GloProxyCluster) {
 		GloProxyCluster->p_update_metrics();

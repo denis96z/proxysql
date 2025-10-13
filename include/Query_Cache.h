@@ -79,7 +79,7 @@ class Query_Cache {
 		 *
 		 * @param entry_size The size of each entry in the key-value store.
 		 */
-		KV_BtreeArray(unsigned int entry_size);
+		explicit KV_BtreeArray(unsigned int entry_size);
 
 		/**
 		 * Destructs the KV_BtreeArray object.
