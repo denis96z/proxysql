@@ -79,6 +79,10 @@ std::vector<SetTestCase> test_cases = {
         {"SET datestyle = 'German, YMD'", true, "German, YMD"},
         {"SET datestyle = 'DMY'", true, "German, DMY"},
         {"SET datestyle = 'SQL, YMD'", true, "SQL, YMD"},
+        {"SET datestyle TO 'PostgreSQL, DMY'", true, "Postgres, DMY"},
+        {"SET datestyle TO 'PostgreSQL, NONEUROPEAN'", true, "Postgres, MDY"},
+        {"SET datestyle TO 'PostgreSQL, US'", true, "Postgres, MDY"},
+        {"SET datestyle TO 'PostgreSQL, European'", true, "Postgres, DMY"},
         // Invalid combinations
         {"SET datestyle = 'INVALID'", false, ""},
         {"SET datestyle = 'ISO, INVALID'", false, ""},
