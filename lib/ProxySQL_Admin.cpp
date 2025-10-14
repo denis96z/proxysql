@@ -2491,10 +2491,6 @@ void update_modules_metrics() {
 	if (GloMTH) {
 		GloMTH->p_update_metrics();
 	}
-	// Update pgsql_threads_handler metrics
-	if (GloPTH) {
-		GloPTH->p_update_metrics();
-	}
 	// Update mysql_hostgroups_manager metrics
 	if (MyHGM) {
 		MyHGM->p_update_metrics();
@@ -2507,10 +2503,20 @@ void update_modules_metrics() {
 	if (GloMyQC) {
 		GloMyQC->p_update_metrics();
 	}
+#if 0 // Turning off Prometheus metrics collection for PostgreSQL modules in ProxySQL
+	// Update pgsql_threads_handler metrics
+	if (GloPTH) {
+		GloPTH->p_update_metrics();
+	}
+	// Update pgsql_hostgroups_manager metrics
+	if (PgHGM) {
+		PgHGM->p_update_metrics();
+	}
 	// Update pgsql query_cache metrics
 	if (GloPgQC) {
 		GloPgQC->p_update_metrics();
 	}
+#endif
 	// Update cluster metrics
 	if (GloProxyCluster) {
 		GloProxyCluster->p_update_metrics();
@@ -2519,7 +2525,6 @@ void update_modules_metrics() {
 	if (GloMyLogger) {
 		GloMyLogger->p_update_metrics();
 	}
-
 	// Update admin metrics
 	GloAdmin->p_update_metrics();
 }

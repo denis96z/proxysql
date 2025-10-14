@@ -263,6 +263,9 @@ void PgSQL_Session::set_status(enum session_status e) {
 
 
 PgSQL_Session::PgSQL_Session() {
+	thread = nullptr;
+	user_max_connections = 0;
+	previous_hostgroup = -1;
 	thread_session_id = 0;
 	//handler_ret = 0;
 	pause_until = 0;
@@ -367,12 +370,12 @@ PgSQL_Session::~PgSQL_Session() {
 				break;
 #endif /* PROXYSQLCLICKHOUSE */
 			default:
-				if (use_ldap_auth == false) {
-					GloPgAuth->decrease_frontend_user_connections(client_myds->myconn->userinfo->username);
-				}
-				else {
-					GloMyLdapAuth->decrease_frontend_user_connections(client_myds->myconn->userinfo->fe_username);
-				}
+				//if (use_ldap_auth == false) {
+				GloPgAuth->decrease_frontend_user_connections(client_myds->myconn->userinfo->username);
+				//}
+				//else {
+				//	GloMyLdapAuth->decrease_frontend_user_connections(client_myds->myconn->userinfo->fe_username);
+				//}
 				break;
 			}
 		}
