@@ -525,7 +525,6 @@ public:
 	unsigned int active_transactions;
 	int transaction_persistent_hostgroup;
 	int to_process;
-	int pending_connect;
 	enum proxysql_session_type session_type;
 	
 
