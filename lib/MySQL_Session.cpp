@@ -98,7 +98,6 @@ static const std::set<std::string> mysql_variables_numeric = {
 	"auto_increment_increment",
 	"auto_increment_offset",
 	"group_concat_max_len",
-	"information_schema_stats_expiry",
 	"innodb_lock_wait_timeout",
 	"join_buffer_size",
 	"lock_wait_timeout",
