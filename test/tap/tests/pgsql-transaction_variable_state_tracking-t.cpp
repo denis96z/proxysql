@@ -109,51 +109,92 @@ bool test_transaction_rollback(const TestVariable& var) {
     auto conn = createNewConnection(ConnType::BACKEND, "", false);
     const auto original = getVariable(conn.get(), var.name);
 
-    executeQuery(conn.get(), "BEGIN");
-    executeQuery(conn.get(), "SET " + var.name + " = " + var.test_values[0]);
-    executeQuery(conn.get(), "ROLLBACK");
+    bool success = true;
 
-    const bool success = getVariable(conn.get(), var.name) == original;
+    for (const auto& val : var.test_values) {
+        executeQuery(conn.get(), "BEGIN");
+        executeQuery(conn.get(), "SET " + var.name + " = " + val);
+        executeQuery(conn.get(), "ROLLBACK");
+
+        success = getVariable(conn.get(), var.name) == original;
+        if (!success)
+            break;
+    }
+
+    return success;
+}
+
+bool test_transaction_abort(const TestVariable& var) {
+    auto conn = createNewConnection(ConnType::BACKEND, "", false);
+    const auto original = getVariable(conn.get(), var.name);
+
+    bool success = true;
+
+    for (const auto& val : var.test_values) {
+        executeQuery(conn.get(), "START TRANSACTION");
+        executeQuery(conn.get(), "SET " + var.name + " = " + val);
+        executeQuery(conn.get(), "ABORT");
+
+        success = getVariable(conn.get(), var.name) == original;
+        if (!success)
+            break;
+    }
     return success;
 }
 
 bool test_savepoint_rollback(const TestVariable& var) {
     auto conn = createNewConnection(ConnType::BACKEND, "", false);
     const auto original = getVariable(conn.get(), var.name);
-    executeQuery(conn.get(), "BEGIN");
-    executeQuery(conn.get(), "SAVEPOINT sp1");
-    executeQuery(conn.get(), "SET " + var.name + " = " + var.test_values[0]);
-    executeQuery(conn.get(), "ROLLBACK TO sp1");
-    executeQuery(conn.get(), "COMMIT");
 
-    const bool success = getVariable(conn.get(), var.name) == original;
+    bool success = true;
+
+    for (const auto& val : var.test_values) {
+        executeQuery(conn.get(), "BEGIN");
+        executeQuery(conn.get(), "SAVEPOINT sp1");
+        executeQuery(conn.get(), "SET " + var.name + " = " + val);
+        executeQuery(conn.get(), "ROLLBACK TO sp1");
+        executeQuery(conn.get(), "COMMIT");
+
+        success = getVariable(conn.get(), var.name) == original;
+        if (!success)
+            break;
+    }
     return success;
 }
 
 bool test_transaction_commit(const TestVariable& var, const std::map<std::string, std::string>& original_values) {
     auto conn = createNewConnection(ConnType::BACKEND, "", false);
-    const auto test_value = var.test_values[0];
+    
+    bool success = true;
+    
+    for (const auto& val : var.test_values) {
+        executeQuery(conn.get(), "BEGIN");
+        executeQuery(conn.get(), "SET " + var.name + " = " + val);
+        executeQuery(conn.get(), "COMMIT");
 
-    executeQuery(conn.get(), "BEGIN");
-    executeQuery(conn.get(), "SET " + var.name + " = " + test_value);
-    executeQuery(conn.get(), "COMMIT");
-
-    const bool success = getVariable(conn.get(), var.name) == test_value;
+        success = getVariable(conn.get(), var.name) == val;
+        if (!success)
+            break;
+    }
     reset_variable(conn.get(), var.name, original_values.at(var.name));
     return success;
 }
 
 bool test_savepoint_commit(const TestVariable& var, const std::map<std::string, std::string>& original_values) {
     auto conn = createNewConnection(ConnType::BACKEND, "", false);
-    const auto test_value = var.test_values[0];
+    bool success = true;
 
-    executeQuery(conn.get(), "BEGIN");
-    executeQuery(conn.get(), "SAVEPOINT sp1");
-    executeQuery(conn.get(), "SET " + var.name + " = " + test_value);
-    executeQuery(conn.get(), "RELEASE SAVEPOINT sp1");
-    executeQuery(conn.get(), "COMMIT");
+    for (const auto& val : var.test_values) {
+        executeQuery(conn.get(), "BEGIN");
+        executeQuery(conn.get(), "SAVEPOINT sp1");
+        executeQuery(conn.get(), "SET " + var.name + " = " + val);
+        executeQuery(conn.get(), "RELEASE SAVEPOINT sp1");
+        executeQuery(conn.get(), "COMMIT");
 
-    const bool success = getVariable(conn.get(), var.name) == test_value;
+        success = getVariable(conn.get(), var.name) == val;
+        if (!success)
+            break;
+    }
     reset_variable(conn.get(), var.name, original_values.at(var.name));
     return success;
 }
@@ -169,6 +210,57 @@ bool test_savepoint_release_commit(const TestVariable& var, const std::map<std::
     executeQuery(conn.get(), "COMMIT");
     const bool success = getVariable(conn.get(), var.name) == var.test_values[1];
     reset_variable(conn.get(), var.name, original_values.at(var.name));
+    return success;
+}
+
+bool has_warnings = false;
+
+void notice_processor(void* arg, const char* message) {
+    diag("NOTICE: %s", message);
+	has_warnings = true;
+}
+
+bool test_transaction_rollback_and_chain(const TestVariable& var) {
+    auto conn = createNewConnection(ConnType::BACKEND, "", false);
+    PQsetNoticeProcessor(conn.get(), notice_processor, NULL);
+
+    const auto original = getVariable(conn.get(), var.name);
+
+    bool success = true;
+
+    for (const auto& val : var.test_values) {
+
+        executeQuery(conn.get(), "START TRANSACTION");
+        executeQuery(conn.get(), "SET " + var.name + " = " + val);
+        executeQuery(conn.get(), "ROLLBACK AND CHAIN");
+
+		char tran_stat = PQtransactionStatus(conn.get());
+
+        if (tran_stat != PQTRANS_INTRANS) {
+            diag("Expected transaction status INTRANS after ROLLBACK AND CHAIN, got %d", tran_stat);
+            success = false;
+            break;
+		}
+
+        success = getVariable(conn.get(), var.name) == original;
+        if (success) {
+            executeQuery(conn.get(), "ROLLBACK");
+            tran_stat = PQtransactionStatus(conn.get());
+            if (tran_stat != PQTRANS_IDLE) {
+                diag("Expected transaction status IDLE after ROLLBACK, got %d", tran_stat);
+                success = false;
+                break;
+            }
+
+            if (has_warnings == false)
+                success = getVariable(conn.get(), var.name) == original;
+            else
+                success = false;
+        }
+        if (!success)
+            break;
+    }
+
     return success;
 }
 
@@ -226,6 +318,10 @@ int main(int argc, char** argv) {
             return test_transaction_rollback(var);
             });
 
+		add_test("Abort reverts " + var.name, [var]() {
+            return test_transaction_abort(var);
+			});
+
         add_test("Commit persists " + var.name, [&]() {
             return test_transaction_commit(var, original_values);
             });
@@ -237,6 +333,10 @@ int main(int argc, char** argv) {
         add_test("Savepoint commit for " + var.name, [&]() {
             return test_savepoint_commit(var, original_values);
             });
+
+		add_test("Rollback and chain for " + var.name, [var]() {
+			return test_transaction_rollback_and_chain(var);
+			});
 
         // Multi-value savepoint test
         if (var.test_values.size() > 1) {
@@ -270,6 +370,22 @@ int main(int argc, char** argv) {
             executeQuery(conn.get(), "SET " + var.name + " = " + var.test_values[0]);
         }
         executeQuery(conn.get(), "ROLLBACK");
+
+        for (const auto& [name, var] : tracked_vars) {
+            success = (getVariable(conn.get(), var.name) == original_values.at(var.name));
+        }
+        return success;
+        });
+
+    add_test("Mixed variables in transaction (ROLLBACK AND CHAIN)", [&]() {
+        auto conn = createNewConnection(ConnType::BACKEND, "", false);
+        bool success = true;
+
+        executeQuery(conn.get(), "BEGIN");
+        for (const auto& [name, var] : tracked_vars) {
+            executeQuery(conn.get(), "SET " + var.name + " = " + var.test_values[0]);
+        }
+        executeQuery(conn.get(), "ROLLBACK AND CHAIN");
 
         for (const auto& [name, var] : tracked_vars) {
             success = (getVariable(conn.get(), var.name) == original_values.at(var.name));

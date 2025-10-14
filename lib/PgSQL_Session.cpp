@@ -414,22 +414,17 @@ bool PgSQL_Session::handler_CommitRollback(PtrSize_t* pkt) {
 	if (pkt->size <= 5) { return false; }
 	char c = ((char*)pkt->ptr)[5];
 	bool ret = false;
-	if (c == 'c' || c == 'C') {
-		if (pkt->size >= sizeof("commit") + 5) {
-			if (strncasecmp((char*)"commit", (char*)pkt->ptr + 5, 6) == 0) {
-				__sync_fetch_and_add(&PgHGM->status.commit_cnt, 1);
-				ret = true;
-			}
+	if (c == 'c' || c == 'C' || c == 'e' || c == 'E') {
+		if ((pkt->size >= 5 + 6 && strncasecmp("commit", (char*)pkt->ptr + 5, 6) == 0) ||
+			(pkt->size >= 5 + 3 && strncasecmp("end", (char*)pkt->ptr + 5, 3) == 0)) {
+			__sync_fetch_and_add(&PgHGM->status.commit_cnt, 1);
+			ret = true;
 		}
-	}
-	else {
-		if (c == 'r' || c == 'R') {
-			if (pkt->size >= sizeof("rollback") + 5) {
-				if (strncasecmp((char*)"rollback", (char*)pkt->ptr + 5, 8) == 0) {
-					__sync_fetch_and_add(&PgHGM->status.rollback_cnt, 1);
-					ret = true;
-				}
-			}
+	} else if (c == 'r' || c == 'R' || c == 'a' || c == 'A') {
+		if ((pkt->size >= 5 + 8 && strncasecmp("rollback", (char*)pkt->ptr + 5, 8) == 0) ||
+			(pkt->size >= 5 + 5 && strncasecmp("abort", (char*)pkt->ptr + 5, 5) == 0)) {
+			__sync_fetch_and_add(&PgHGM->status.rollback_cnt, 1);
+			ret = true;
 		}
 	}
 
@@ -465,7 +460,7 @@ bool PgSQL_Session::handler_CommitRollback(PtrSize_t* pkt) {
 			status = WAITING_CLIENT_DATA;
 		}
 		l_free(pkt->size, pkt->ptr);
-		if (c == 'c' || c == 'C') {
+		if (c == 'c' || c == 'C' || c == 'e' || c == 'E') {
 			__sync_fetch_and_add(&PgHGM->status.commit_cnt_filtered, 1);
 		} else {
 			__sync_fetch_and_add(&PgHGM->status.rollback_cnt_filtered, 1);
