@@ -701,21 +701,40 @@ private:
 	static std::map<std::string, std::vector<std::string>> parse_pq_error_message(const std::string& error_str);
 };
 
-class PgSQL_CancelQueryArgs {
+class PgSQL_Backend_Kill_Args {
 public:
-	PGconn* conn;
-	PgSQL_Thread* mt;
-	char* username;
-	char* hostname;
-	unsigned int port;
-	int backend_pid;
-	unsigned int hid;
+	enum class TYPE {
+		CANCEL_QUERY = 0,
+		TERMINATE_CONNECTION
+	};
+	PGcancel* cancel_conn;
+	PgSQL_Thread* pgsql_thd;
 
-	PgSQL_CancelQueryArgs(PGconn* _conn, const char* user, const char* host,
-		unsigned int _port, unsigned int _hid, int _backend_pid, PgSQL_Thread* _mt);
-	~PgSQL_CancelQueryArgs();
+	char* username;
+	char* password;
+	char* hostname;
+	char* dbname;
+	unsigned int port;
+
+	int backend_pid;
+	unsigned int hostgroup_id;
+	TYPE type;
+
+	// SSL options
+	struct SSLConfig {
+		bool use_ssl = false;
+		char* sslkey;
+		char* sslcert;
+		char* sslrootcert;
+		char* sslcrl;
+		char* sslcrldir;
+	} ssl_config;
+
+	PgSQL_Backend_Kill_Args(PGconn* conn, const char* user, const char* pass, const char* db, const char* host,
+		unsigned int port, unsigned int hid, bool ssl, TYPE typ, PgSQL_Thread* thd);
+	~PgSQL_Backend_Kill_Args();
 };
 
-void* PgSQL_cancel_query_thread(void* arg);
+void* PgSQL_backend_kill_thread(void* arg);
 
 #endif /* __CLASS_PGSQL_CONNECTION_H */

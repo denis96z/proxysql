@@ -9,7 +9,7 @@ extern "C" {
 #include "usual/time.h"
 }
 //#include "usual/time.c"
-
+extern PgSQL_Threads_Handler* GloPTH;
 extern PgSQL_Authentication* GloPgAuth;
 
 /*
@@ -196,7 +196,8 @@ void PG_pkt::write_RowDescription(const char *tupdesc, ...) {
 	finish_packet();
 }
 
-void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error, int affected_rows, const char *query_type, char txn_state) {
+void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error, int affected_rows, const char *query_type, bool send_ready_for_query,
+	char txn_state) {
 	assert(psa != NULL);
 	const char *fs = strchr(query_type, ' ');
 	int qtlen = strlen(query_type);
@@ -256,7 +257,7 @@ void SQLite3_to_Postgres(PtrSizeArray *psa, SQLite3_result *result, char *error,
 			pkt.write_CommandComplete(buf);
 		}
 		pkt.to_PtrSizeArray(psa);
-		pkt.write_ReadyForQuery(txn_state);
+		if (send_ready_for_query) pkt.write_ReadyForQuery(txn_state);
 		pkt.to_PtrSizeArray(psa);
 	} else { // no resultset
 		PG_pkt pkt(64);
@@ -626,6 +627,62 @@ bool PgSQL_Protocol::process_startup_packet(unsigned char* pkt, unsigned int len
 		return true;
 	}
 
+	if (hdr.type == PG_PKT_CANCEL) {	
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 8, "Session=%p , DS=%p. CANCEL_REQUEST packet received. len=%u\n", (*myds)->sess, (*myds), len);
+
+		/*
+		 * CancelRequest Message Format
+		 *
+		 * Int32 (16)
+		 *   - Length of message contents in bytes (includes self).
+		 *
+		 * Int32 (80877102)
+		 *   - Cancel request code.
+		 *   - Encodes 1234 in the high 16 bits and 5678 in the low 16 bits.
+		 *   - Must not match any protocol version number.
+		 *
+		 * Int32
+		 *   - Process ID of the target backend.
+		 *
+		 * Byten
+		 *   - Secret key for the target backend.
+		 *   - Runs until the end of the message (length field defines size).
+		 *   - Maximum length: 256 bytes.
+		 */
+		if (len < 16 || len > 268) { // 16 = min length, 268 = max length (12 + 256)
+			proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 5,
+				"Session=%p , DS=%p. malformed cancel request packet (len=%u)\n",
+				(*myds)->sess, (*myds), len);
+			return false;
+		}
+		
+		// --- Parse fields from payload ---
+		int offset = 0;
+		uint32 pid = 0;
+		uint32 key = 0;
+
+		// Backend PID
+		if (!get_uint32be((unsigned char*)hdr.data.ptr + offset, &pid)) {
+			return false;
+		}
+		offset += 4;
+		
+		// Secret key
+		if (!get_uint32be((unsigned char*)hdr.data.ptr + offset, &key)) {
+			return false;
+		}
+		offset += 4;
+
+		proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 8,
+			"Session=%p , DS=%p. Cancel request for pid=%u key=%u\n",
+			(*myds)->sess, (*myds), pid, key);
+
+		GloPTH->kill_connection_or_query(pid, key, nullptr, true);
+		
+		// close connection
+		return false;
+	}
+
 	//PG_PKT_STARTUP_V2 not supported
 	if (hdr.type != PG_PKT_STARTUP) {
 		proxy_error("Unsupported packet type '%u' received from client %s:%d\n", hdr.type, (*myds)->addr.addr, (*myds)->addr.port);
@@ -775,7 +832,7 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 	user = (char*)(*myds)->myconn->conn_params.get_value(PG_USER);
 
 	if (!user || *user == '\0') {
-		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Client password pkt before startup packet.\n", (*myds), (*myds)->sess, user);
+		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Client password pkt before startup packet.\n", (*myds)->sess, (*myds), user);
 		generate_error_packet(true, false, "client password pkt before startup packet", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
 		goto __exit_process_pkt_handshake_response;
 	}
@@ -789,7 +846,7 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 		for (int i = 2; i < lpass - 1; i++) {
 			tmp_pass[i] = '*';
 		}
-		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , username='%s' , password='%s'\n", (*myds), (*myds)->sess, user, tmp_pass);
+		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , username='%s' , password='%s'\n", (*myds)->sess, (*myds), user, tmp_pass);
 		free(tmp_pass);
 #endif // debug
 		(*myds)->sess->default_hostgroup = default_hostgroup;
@@ -827,7 +884,7 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 	}
 
 	if (password) {
-		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s' , auth_method=%s\n", (*myds), (*myds)->sess, user, AUTHENTICATION_METHOD_STR[(int)(*myds)->auth_method]);
+		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s' , auth_method=%s\n", (*myds)->sess, (*myds), user, AUTHENTICATION_METHOD_STR[(int)(*myds)->auth_method]);
 		switch ((*myds)->auth_method) {
 		case AUTHENTICATION_METHOD::MD5_PASSWORD:
 		{
@@ -842,7 +899,7 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 			}
 
 			if (!pass || *pass == '\0') {
-				proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Empty password returned by client.\n", (*myds), (*myds)->sess, user);
+				proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Empty password returned by client.\n", (*myds)->sess, (*myds), user);
 				generate_error_packet(true, false, "empty password returned by client", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
 				break;
 			}
@@ -880,7 +937,7 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 			using_password = (pass_len > 0);
 
 			if (!pass || *pass == '\0') {
-				proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Empty password returned by client.\n", (*myds), (*myds)->sess, user);
+				proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Empty password returned by client.\n", (*myds)->sess, (*myds), user);
 				generate_error_packet(true, false, "empty password returned by client", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
 				break;
 			}
@@ -911,36 +968,36 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 				int pos = get_string((const char*)hdr.data.ptr, hdr.data.size, &mech);
 
 				if (pos == 0) {
-					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SASL mechanism not found.\n", (*myds), (*myds)->sess, user);
+					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SASL mechanism not found.\n", (*myds)->sess, (*myds), user);
 					break;
 				}
 
 				read_pos = pos;
 
-				proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Selected SASL mechanism: %s.\n", (*myds), (*myds)->sess, user, mech);
+				proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Selected SASL mechanism: %s.\n", (*myds)->sess, (*myds), user, mech);
 				if (strcmp(mech, "SCRAM-SHA-256") != 0) {
-					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Client selected an invalid SASL authentication mechanism: %s.\n", (*myds), (*myds)->sess, user, mech);
+					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Client selected an invalid SASL authentication mechanism: %s.\n", (*myds)->sess, (*myds), user, mech);
 					generate_error_packet(true, false, "client selected an invalid SASL authentication mechanism", 
 						PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
 					break;
 				}
 
 				if (get_uint32be(((unsigned char*)hdr.data.ptr) + read_pos, &length) == false) {
-					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Malformed packet.\n", (*myds), (*myds)->sess, user);
+					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Malformed packet.\n", (*myds)->sess, (*myds), user);
 					break;
 				}
 
 				read_pos += 4;
 
 				if ((hdr.data.size - read_pos) < length) {
-					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Malformed packet.\n", (*myds), (*myds)->sess, user);
+					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. Malformed packet.\n", (*myds)->sess, (*myds), user);
 					break;
 				}
 
 				// check mem boundry
 
 				if (!scram_handle_client_first((*myds)->scram_state, &stored_user_info, ((const unsigned char*)hdr.data.ptr) + read_pos, length)) {
-					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SASL authentication failed\n", (*myds), (*myds)->sess, user);
+					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SASL authentication failed\n", (*myds)->sess, (*myds),  user);
 					generate_error_packet(true, false, "SASL authentication failed", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
 					break;
 				}
@@ -976,19 +1033,19 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 					ret = EXECUTION_STATE::SUCCESSFUL;
 				}
 				else {
-					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SASL authentication failed.\n", (*myds), (*myds)->sess, user);
+					proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SASL authentication failed.\n", (*myds)->sess, (*myds), user);
 					//generate_error_packet(false, "SASL authentication failed", NULL, true);
 				}
 			}
 		}
 		break;
 		default:
-			proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s' . goto __exit_process_pkt_handshake_response . Unknown auth method\n", (*myds), (*myds)->sess, user);
+			proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s' . goto __exit_process_pkt_handshake_response . Unknown auth method\n", (*myds)->sess, (*myds), user);
 			//generate_error_packet(true, false, "authentication method not supported", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
 			break;
 		}
 	} else {
-		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. User not found in the database.\n", (*myds), (*myds)->sess, user);
+		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. User not found in the database.\n", (*myds)->sess, (*myds), user);
 		generate_error_packet(true, false, "User not found", PGSQL_ERROR_CODES::ERRCODE_PROTOCOL_VIOLATION, true);
 	}
 
@@ -1257,6 +1314,24 @@ void PgSQL_Protocol::welcome_client() {
 	if (pgsql_thread___server_encoding)
 		pgpkt.write_ParameterStatus("server_encoding", pgsql_thread___server_encoding);
 
+	// Backend Key Data
+	uint8_t backend_key_data[8];
+	uint32_t backend_pid = (*myds)->sess->thread_session_id;
+	uint32_t cancel_key = -1;
+	if (RAND_bytes((unsigned char*)&cancel_key, sizeof(cancel_key)) != 1) {
+		// Fallback: use libc PRNG
+		cancel_key = (uint32_t)random();
+	}
+	(*myds)->sess->cancel_secret_key = cancel_key;
+
+	// we store pid and key in network byte order
+	uint32_t net_backend_pid = htonl(backend_pid);
+	uint32_t net_cancel_key = htonl(cancel_key);
+
+	memcpy(&backend_key_data[0], &net_backend_pid, sizeof(net_backend_pid));
+	memcpy(&backend_key_data[4], &net_cancel_key, sizeof(net_cancel_key));
+
+	pgpkt.write_BackendKeyData(backend_key_data);
 	pgpkt.write_ReadyForQuery();
 	pgpkt.set_multi_pkt_mode(false);
 
@@ -1340,7 +1415,7 @@ bool PgSQL_Protocol::scram_handle_client_first(ScramState* scram_state, PgCreden
 	ibuf[datalen] = '\0';
 
 	input = ibuf;
-	proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SCRAM client-first-message = \"%s\"\n", (*myds), (*myds)->sess, user->name, input);
+	proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SCRAM client-first-message = \"%s\"\n", (*myds)->sess, (*myds), user->name, input);
 	if (!read_client_first_message(input,
 		&scram_state->cbind_flag,
 		&scram_state->client_first_message_bare,
@@ -1348,10 +1423,10 @@ bool PgSQL_Protocol::scram_handle_client_first(ScramState* scram_state, PgCreden
 		goto failed;
 
 	if (!user->mock_auth) {
-		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. stored secret = \"%s\"\n", (*myds), (*myds)->sess, user->name, user->passwd);
+		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. stored secret = \"%s\"\n", (*myds)->sess, (*myds), user->name, user->passwd);
 		switch (get_password_type(user->passwd)) {
 		case PASSWORD_TYPE_MD5:
-			proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SCRAM authentication failed: user has MD5 secret\n", (*myds), (*myds)->sess, user->name);
+			proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SCRAM authentication failed: user has MD5 secret\n", (*myds)->sess, (*myds), user->name);
 			goto failed;
 		case PASSWORD_TYPE_PLAINTEXT:
 		case PASSWORD_TYPE_SCRAM_SHA_256:
@@ -1362,7 +1437,7 @@ bool PgSQL_Protocol::scram_handle_client_first(ScramState* scram_state, PgCreden
 	if (!build_server_first_message(scram_state, user->name, user->mock_auth ? NULL : user->passwd))
 		goto failed;
 
-	proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SCRAM server-first-message = \"%s\"\n", (*myds), (*myds)->sess, user->name, scram_state->server_first_message);
+	proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SCRAM server-first-message = \"%s\"\n", (*myds)->sess, (*myds), user->name, scram_state->server_first_message);
 	{
 		PG_pkt pgpkt{};
 		pgpkt.write_AuthenticationRequest(PG_PKT_AUTH_SASL_CONT, (const uint8_t*)scram_state->server_first_message, strlen(scram_state->server_first_message));
@@ -1394,14 +1469,14 @@ bool PgSQL_Protocol::scram_handle_client_final(ScramState* scram_state, PgCreden
 	ibuf[datalen] = '\0';
 
 	input = ibuf;
-	proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SCRAM client-final-message = \"%s\"\n", (*myds), (*myds)->sess, user->name, input);
+	proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SCRAM client-final-message = \"%s\"\n", (*myds)->sess, (*myds), user->name, input);
 	if (!read_client_final_message(scram_state, data, input,
 		&client_final_nonce,
 		&proof))
 		goto failed;
 
-	proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SCRAM client-final-message-without-proof = \"%s\"\n", (*myds), 
-		(*myds)->sess, user->name, scram_state->client_final_message_without_proof);
+	proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s'. SCRAM client-final-message-without-proof = \"%s\"\n", (*myds)->sess, (*myds),
+		user->name, scram_state->client_final_message_without_proof);
 
 	if (!verify_final_nonce(scram_state, client_final_nonce)) {
 		proxy_error("Invalid SCRAM response (nonce does not match)\n");
@@ -1409,16 +1484,16 @@ bool PgSQL_Protocol::scram_handle_client_final(ScramState* scram_state, PgCreden
 	}
 
 	if (!verify_client_proof(scram_state, proof)) {
-		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s. Password authentication failed\n", (*myds),
-			(*myds)->sess, user->name);
+		proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s. Password authentication failed\n", (*myds)->sess, 
+			(*myds), user->name);
 		goto failed;
 	}
 
 	server_final_message = build_server_final_message(scram_state);
 	if (!server_final_message)
 		goto failed;
-	proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s. SCRAM server-final-message = \"%s\"\n", (*myds),
-		(*myds)->sess, user->name, server_final_message);
+	proxy_debug(PROXY_DEBUG_MYSQL_AUTH, 5, "Session=%p , DS=%p , user='%s. SCRAM server-final-message = \"%s\"\n", (*myds)->sess, 
+		(*myds), user->name, server_final_message);
 
 	{
 		PG_pkt pgpkt{};
@@ -2612,7 +2687,7 @@ unsigned int PgSQL_Query_Result::add_error(const PGresult* result) {
 				PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::proxysql, conn->parent->myhgc->hid, conn->parent->address, conn->parent->port, 1907);
 			} else {
 				proto->generate_error_packet(false, false, (char*)"Query execution was interrupted",
-					PGSQL_ERROR_CODES::ERRCODE_QUERY_CANCELED, false, false, &pkt);
+					PGSQL_ERROR_CODES::ERRCODE_CONNECTION_FAILURE, false, false, &pkt);
 				PgHGM->p_update_pgsql_error_counter(p_pgsql_error_type::proxysql, conn->parent->myhgc->hid, conn->parent->address, conn->parent->port, 1317);
 			}
 		} else if (conn->is_error_present()) {

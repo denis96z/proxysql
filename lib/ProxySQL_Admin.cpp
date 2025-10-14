@@ -1079,23 +1079,6 @@ int ProxySQL_Admin::FlushDigestTableToDisk(SQLite3DB *_db) {
 
 admin_main_loop_listeners S_amll;
 
-
-template <typename S>
-bool admin_handler_command_kill_connection(char *query_no_space, unsigned int query_no_space_length, S* sess, ProxySQL_Admin *pa) {
-	uint32_t id=atoi(query_no_space+16);
-	proxy_debug(PROXY_DEBUG_ADMIN, 4, "Trying to kill session %u\n", id);
-	bool rc=GloMTH->kill_session(id);
-	ProxySQL_Admin *SPA=(ProxySQL_Admin *)pa;
-	if (rc) {
-		SPA->send_ok_msg_to_client(sess, NULL, 0, query_no_space);
-	} else {
-		char buf[1024];
-		sprintf(buf,"Unknown thread id: %u", id);
-		SPA->send_error_msg_to_client(sess, buf);
-	}
-	return false;
-}
-
 void flush_logs_handler() {
 	GloAdmin->flush_logs();
 }

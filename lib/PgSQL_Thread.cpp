@@ -2813,7 +2813,7 @@ bool PgSQL_Thread::init() {
 	}
 #endif // IDLE_THREADS
 
-	pthread_mutex_init(&kq.m, NULL);
+	pthread_mutex_init(&sess_intrpt_queue.m, NULL);
 
 	shutdown = 0;
 	my_idle_conns = (PgSQL_Connection**)malloc(sizeof(PgSQL_Connection*) * SESSIONS_FOR_CONNECTIONS_HANDLER);
@@ -3367,6 +3367,10 @@ bool PgSQL_Thread::process_data_on_data_stream(PgSQL_Data_Stream * myds, unsigne
 				// timeout
 				myds->sess->to_process = 1;
 			}
+		}
+		// If a cancel query is requested and the data stream is a backend, mark the session for processing
+		if (myds->cancel_query && myds->myds_type == MYDS_BACKEND) {
+			myds->sess->to_process = 1;
 		}
 	}
 	if (myds->myds_type == MYDS_BACKEND && myds->sess->status != FAST_FORWARD) {
@@ -4869,38 +4873,42 @@ void PgSQL_Threads_Handler::signal_all_threads(unsigned char _c) {
 #endif // IDLE_THREADS
 }
 
-void PgSQL_Threads_Handler::kill_connection_or_query(uint32_t _thread_session_id, bool query, char* username) {
+void PgSQL_Threads_Handler::kill_connection_or_query(uint32_t sess_thd_id, uint32_t secret_key, const char* username, bool query) {
 	unsigned int i;
 	for (i = 0; i < num_threads; i++) {
-		PgSQL_Thread* thr = (PgSQL_Thread*)pgsql_threads[i].worker;
-		thr_id_usr* tu = (thr_id_usr*)malloc(sizeof(thr_id_usr));
-		tu->id = _thread_session_id;
-		tu->username = strdup(username);
-		pthread_mutex_lock(&thr->kq.m);
+		PgSQL_Thread* thr = static_cast<PgSQL_Thread*>(pgsql_threads[i].worker);
+		pthread_mutex_lock(&thr->sess_intrpt_queue.m);
 		if (query) {
-			thr->kq.query_ids.push_back(tu);
+			// if username is NULL, we use secret_key to identify the connection
+			if (username)
+				thr->sess_intrpt_queue.query_ids.emplace_back(sess_thd_id, username);
+			else
+				thr->sess_intrpt_queue.query_ids.emplace_back(sess_thd_id, secret_key);
+		} else {
+			// if username is NULL, we do nothing, as we cannot identify the connection
+			if (username)
+				thr->sess_intrpt_queue.conn_ids.emplace_back(sess_thd_id, username);
 		}
-		else {
-			thr->kq.conn_ids.push_back(tu);
-		}
-		pthread_mutex_unlock(&thr->kq.m);
+		pthread_mutex_unlock(&thr->sess_intrpt_queue.m);
 
 	}
 #ifdef IDLE_THREADS
 	if (GloVars.global.idle_threads) {
 		for (i = 0; i < num_threads; i++) {
 			PgSQL_Thread* thr = (PgSQL_Thread*)pgsql_threads_idles[i].worker;
-			thr_id_usr* tu = (thr_id_usr*)malloc(sizeof(thr_id_usr));
-			tu->id = _thread_session_id;
-			tu->username = strdup(username);
-			pthread_mutex_lock(&thr->kq.m);
+			pthread_mutex_lock(&thr->sess_intrpt_queue.m);
 			if (query) {
-				thr->kq.query_ids.push_back(tu);
+				// if username is NULL, we use secret_key to identify the connection
+				if (username)
+					thr->sess_intrpt_queue.query_ids.emplace_back(sess_thd_id, username);
+				else
+					thr->sess_intrpt_queue.query_ids.emplace_back(sess_thd_id, secret_key);
+			} else {
+				// if username is NULL, we do nothing, as we cannot identify the connection
+				if (username)
+					thr->sess_intrpt_queue.conn_ids.emplace_back(sess_thd_id, username);
 			}
-			else {
-				thr->kq.conn_ids.push_back(tu);
-			}
-			pthread_mutex_unlock(&thr->kq.m);
+			pthread_mutex_unlock(&thr->sess_intrpt_queue.m);
 		}
 	}
 #endif
@@ -5309,81 +5317,99 @@ void PgSQL_Thread::return_local_connections() {
 }
 
 void PgSQL_Thread::Scan_Sessions_to_Kill_All() {
-	if (kq.conn_ids.size() + kq.query_ids.size()) {
+	if (!sess_intrpt_queue.conn_ids.empty() || !sess_intrpt_queue.query_ids.empty()) {
 		Scan_Sessions_to_Kill(mysql_sessions);
 	}
 #ifdef IDLE_THREADS
 	if (GloVars.global.idle_threads) {
-		if (kq.conn_ids.size() + kq.query_ids.size()) {
+		if (!sess_intrpt_queue.conn_ids.empty() || !sess_intrpt_queue.query_ids.empty()) {
 			Scan_Sessions_to_Kill(idle_mysql_sessions);
 		}
-		if (kq.conn_ids.size() + kq.query_ids.size()) {
+		if (!sess_intrpt_queue.conn_ids.empty() || !sess_intrpt_queue.query_ids.empty()) {
 			Scan_Sessions_to_Kill(resume_mysql_sessions);
 		}
-		if (kq.conn_ids.size() + kq.query_ids.size()) {
+		if (!sess_intrpt_queue.conn_ids.empty() || !sess_intrpt_queue.query_ids.empty()) {
 			pthread_mutex_lock(&myexchange.mutex_idles);
 			Scan_Sessions_to_Kill(myexchange.idle_mysql_sessions);
 			pthread_mutex_unlock(&myexchange.mutex_idles);
 		}
-		if (kq.conn_ids.size() + kq.query_ids.size()) {
+		if (!sess_intrpt_queue.conn_ids.empty() || !sess_intrpt_queue.query_ids.empty()) {
 			pthread_mutex_lock(&myexchange.mutex_resumes);
 			Scan_Sessions_to_Kill(myexchange.resume_mysql_sessions);
 			pthread_mutex_unlock(&myexchange.mutex_resumes);
 		}
 	}
 #endif
-	for (std::vector<thr_id_usr*>::iterator it = kq.conn_ids.begin(); it != kq.conn_ids.end(); ++it) {
-		thr_id_usr* t = *it;
-		free(t->username);
-		free(t);
+	sess_intrpt_queue.conn_ids.clear();
+	sess_intrpt_queue.query_ids.clear();
+}
+
+bool PgSQL_Thread::Scan_Sessions_to_Kill___handle_session_termination(PgSQL_Session* sess) {
+
+	auto& conn_ids = sess_intrpt_queue.conn_ids;
+
+	for (auto it = conn_ids.begin(); it != conn_ids.end(); ++it) {
+
+		if (it->thread_id == sess->thread_session_id) {
+			if (it->username && sess->client_myds && sess->client_myds->myconn) {
+				if (strcmp(it->username.get(), sess->client_myds->myconn->userinfo->username) == 0) {
+					proxy_info("Session termination requested [Session ID=%u]\n", it->thread_id);
+					sess->killed = true;
+				}
+			}
+			conn_ids.erase(it);
+			break;
+		}
 	}
-	for (std::vector<thr_id_usr*>::iterator it = kq.query_ids.begin(); it != kq.query_ids.end(); ++it) {
-		thr_id_usr* t = *it;
-		free(t->username);
-		free(t);
+	return sess->killed;
+}
+
+bool PgSQL_Thread::Scan_Sessions_to_Kill___handle_query_cancellation(PgSQL_Session* sess) {
+	
+	bool canceled_query = false;
+
+	auto& query_ids = sess_intrpt_queue.query_ids;
+
+	for (auto it = query_ids.begin(); it != query_ids.end(); ++it) {
+
+		if (it->thread_id == sess->thread_session_id) {
+			bool should_kill = false;
+
+			if (!it->username) {
+				// we use the secret_key
+				if (it->secret_key == sess->cancel_secret_key) {
+					should_kill = true;
+				}
+			} else {
+				if (sess->client_myds && sess->client_myds->myconn &&
+					strcmp(it->username.get(), sess->client_myds->myconn->userinfo->username) == 0) {
+					should_kill = true;
+				}
+			}
+			if (should_kill && sess->mybe && sess->mybe->server_myds) {
+				proxy_info("Query cancellation requested [Session ID=%u]\n", it->thread_id);
+				sess->mybe->server_myds->cancel_query = true;
+				sess->mybe->server_myds->kill_type = 1;
+				canceled_query = true;
+			}
+			query_ids.erase(it);
+			break;
+		}
 	}
-	kq.conn_ids.clear();
-	kq.query_ids.clear();
+	return canceled_query;
 }
 
 void PgSQL_Thread::Scan_Sessions_to_Kill(PtrArray * mysess) {
-	for (unsigned int n = 0; n < mysess->len && (kq.conn_ids.size() + kq.query_ids.size()); n++) {
+	for (unsigned int n = 0; n < mysess->len && 
+		(!sess_intrpt_queue.conn_ids.empty() || !sess_intrpt_queue.query_ids.empty()); n++) {
 		PgSQL_Session* _sess = (PgSQL_Session*)mysess->index(n);
-		bool cont = true;
-		for (std::vector<thr_id_usr*>::iterator it = kq.conn_ids.begin(); cont && it != kq.conn_ids.end(); ++it) {
-			thr_id_usr* t = *it;
-			if (t->id == _sess->thread_session_id) {
-				if (_sess->client_myds) {
-					if (strcmp(t->username, _sess->client_myds->myconn->userinfo->username) == 0) {
-						_sess->killed = true;
-					}
-				}
-				cont = false;
-				free(t->username);
-				free(t);
-				kq.conn_ids.erase(it);
-			}
+		
+		if (Scan_Sessions_to_Kill___handle_session_termination(_sess) == true) {
+			// we dont need to call handle_query_cancellation() as we have already killed the session
+			continue;
 		}
-		for (std::vector<thr_id_usr*>::iterator it = kq.query_ids.begin(); cont && it != kq.query_ids.end(); ++it) {
-			thr_id_usr* t = *it;
-			if (t->id == _sess->thread_session_id) {
-				proxy_info("Killing query %d\n", t->id);
-				if (_sess->client_myds) {
-					if (strcmp(t->username, _sess->client_myds->myconn->userinfo->username) == 0) {
-						if (_sess->mybe) {
-							if (_sess->mybe->server_myds) {
-								_sess->mybe->server_myds->wait_until = curtime;
-								_sess->mybe->server_myds->kill_type = 1;
-							}
-						}
-					}
-				}
-				cont = false;
-				free(t->username);
-				free(t);
-				kq.query_ids.erase(it);
-			}
-		}
+
+		Scan_Sessions_to_Kill___handle_query_cancellation(_sess);
 	}
 }
 
@@ -5451,10 +5477,10 @@ void PgSQL_Thread::handle_mirror_queue_mysql_sessions() {
 }
 
 void PgSQL_Thread::handle_kill_queues() {
-	pthread_mutex_lock(&kq.m);
-	if (kq.conn_ids.size() + kq.query_ids.size()) {
+	pthread_mutex_lock(&sess_intrpt_queue.m);
+	if (!sess_intrpt_queue.conn_ids.empty() || !sess_intrpt_queue.query_ids.empty()) {
 		Scan_Sessions_to_Kill_All();
 		maintenance_loop = true;
 	}
-	pthread_mutex_unlock(&kq.m);
+	pthread_mutex_unlock(&sess_intrpt_queue.m);
 }

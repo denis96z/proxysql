@@ -323,16 +323,30 @@ bool FlushCommandWrapper(S* sess, const string& modname, char *query_no_space, i
 }
 
 template <typename S>
-bool admin_handler_command_kill_connection(char *query_no_space, unsigned int query_no_space_length, S* sess, ProxySQL_Admin *pa) {
-	uint32_t id=atoi(query_no_space+16);
-	proxy_debug(PROXY_DEBUG_ADMIN, 4, "Trying to kill session %u\n", id);
-	bool rc=GloMTH->kill_session(id);
-	ProxySQL_Admin *SPA=(ProxySQL_Admin *)pa;
+bool admin_handler_command_kill_pgsql_connection(uint32_t session_thd_id, S* sess, ProxySQL_Admin* pa) {
+	proxy_debug(PROXY_DEBUG_ADMIN, 4, "Trying to kill pgsql session %u\n", session_thd_id);
+	bool rc = GloPTH->kill_session(session_thd_id);
+	ProxySQL_Admin* SPA = (ProxySQL_Admin*)pa;
 	if (rc) {
-		SPA->send_ok_msg_to_client(sess, NULL, 0, query_no_space);
+		SPA->send_ok_msg_to_client(sess, NULL, 0, "KILL PGSQL CONNECTION");
 	} else {
 		char buf[1024];
-		sprintf(buf,"Unknown thread id: %u", id);
+		sprintf(buf, "Unknown thread id: %u", session_thd_id);
+		SPA->send_error_msg_to_client(sess, buf);
+	}
+	return false;
+}
+
+template <typename S>
+bool admin_handler_command_kill_mysql_connection(uint32_t session_thd_id, S* sess, ProxySQL_Admin *pa) {
+	proxy_debug(PROXY_DEBUG_ADMIN, 4, "Trying to kill mysql session %u\n", session_thd_id);
+	bool rc=GloMTH->kill_session(session_thd_id);
+	ProxySQL_Admin *SPA=(ProxySQL_Admin *)pa;
+	if (rc) {
+		SPA->send_ok_msg_to_client(sess, NULL, 0, NULL);
+	} else {
+		char buf[1024];
+		sprintf(buf,"Unknown thread id: %u", session_thd_id);
 		SPA->send_error_msg_to_client(sess, buf);
 	}
 	return false;
@@ -2778,9 +2792,26 @@ void admin_session_handler(S* sess, void *_pa, PtrSize_t *pkt) {
 			run_query=admin_handler_command_load_or_save(query_no_space, query_no_space_length, sess, pa, &query, &query_length);
 			goto __run_query;
 		}
-		if ((query_no_space_length>16) && ( (!strncasecmp("KILL CONNECTION ", query_no_space, 16)) || (!strncasecmp("KILL CONNECTION ", query_no_space, 16))) ) {
-			proxy_debug(PROXY_DEBUG_ADMIN, 4, "Received KILL CONNECTION command\n");
-			run_query=admin_handler_command_kill_connection(query_no_space, query_no_space_length, sess, pa);
+
+		if ((query_no_space_length > 22) &&
+			!strncasecmp("KILL PGSQL CONNECTION ", query_no_space, 22))
+		{
+			proxy_debug(PROXY_DEBUG_ADMIN, 4, "Received KILL PGSQL CONNECTION command\n");
+			const char* id_str = query_no_space + 22;
+			run_query = admin_handler_command_kill_pgsql_connection(atoi(id_str), sess, pa);
+			goto __run_query;
+		}
+
+		if ((query_no_space_length > 16) && (
+			!strncasecmp("KILL CONNECTION ", query_no_space, 16) ||
+			!strncasecmp("KILL MYSQL CONNECTION ", query_no_space, 22)
+			)) {
+			proxy_debug(PROXY_DEBUG_ADMIN, 4, "Received KILL MYSQL CONNECTION command\n");
+			// For both "KILL CONNECTION" and "KILL MYSQL CONNECTION"
+			const char* id_str = (tolower(query_no_space[5]) == 'm')    // check MYSQL
+				? query_no_space + 22
+				: query_no_space + 16;
+			run_query=admin_handler_command_kill_mysql_connection(atoi(id_str), sess, pa);
 			goto __run_query;
 		}
 
