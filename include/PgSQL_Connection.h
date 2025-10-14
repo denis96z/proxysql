@@ -509,6 +509,7 @@ public:
 	char get_transaction_status_char();
 	inline int get_backend_pid() { return (pgsql_conn) ? get_pg_backend_pid() : -1; }
 	bool is_pipeline_active() { return (PQpipelineStatus(pgsql_conn) != PQ_PIPELINE_OFF); }
+	const char* get_pg_backend_state() const;
 
 	static int char_to_encoding(const char* name) {
 		return pg_char_to_encoding(name);

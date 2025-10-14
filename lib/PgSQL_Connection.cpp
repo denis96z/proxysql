@@ -2093,6 +2093,25 @@ const char* PgSQL_Connection::get_pg_transaction_status_str() {
 	return "INVALID";
 }
 
+const char* PgSQL_Connection::get_pg_backend_state() const {
+	if (PQstatus(pgsql_conn) != CONNECTION_OK)
+		return "disconnected";
+
+	switch (PQtransactionStatus(pgsql_conn)) {
+	case PQTRANS_IDLE:
+		return "idle";
+	case PQTRANS_ACTIVE:
+		return "active";
+	case PQTRANS_INTRANS:
+		return "idle in transaction";
+	case PQTRANS_INERROR:
+		return "idle in transaction (aborted)";
+	case PQTRANS_UNKNOWN:
+	default:
+		return "unknown";
+	}
+}
+
 bool PgSQL_Connection::handle_copy_out(const PGresult* result, uint64_t* processed_bytes) {
 
 	if (new_result == true) {

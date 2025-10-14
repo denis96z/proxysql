@@ -4540,7 +4540,7 @@ void PgSQL_Threads_Handler::Get_Memory_Stats() {
 }
 
 SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
-	const int colnum = 16;
+	const int colnum = 18;
 	char port[NI_MAXSERV];
 	proxy_debug(PROXY_DEBUG_MYSQL_CONNECTION, 4, "Dumping PgSQL Processlist\n");
 	SQLite3_result* result = new SQLite3_result(colnum);
@@ -4555,6 +4555,8 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 	result->add_column_definition(SQLITE_TEXT, "l_srv_port");
 	result->add_column_definition(SQLITE_TEXT, "srv_host");
 	result->add_column_definition(SQLITE_TEXT, "srv_port");
+	result->add_column_definition(SQLITE_TEXT, "backend_pid");
+	result->add_column_definition(SQLITE_TEXT, "backend_state");
 	result->add_column_definition(SQLITE_TEXT, "command");
 	result->add_column_definition(SQLITE_TEXT, "time_ms");
 	result->add_column_definition(SQLITE_TEXT, "info");
@@ -4575,8 +4577,7 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 		if (i < num_threads && pgsql_threads) {
 			thr = (PgSQL_Thread*)pgsql_threads[i].worker;
 #ifdef IDLE_THREADS
-		}
-		else {
+		} else {
 			if (GloVars.global.idle_threads && pgsql_thread___session_idle_show_processlist && pgsql_threads_idles) {
 				thr = (PgSQL_Thread*)pgsql_threads_idles[i - num_threads].worker;
 			}
@@ -4600,8 +4601,7 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 				if (ui) {
 					if (ui->username) {
 						pta[2] = strdup(ui->username);
-					}
-					else {
+					} else {
 						pta[2] = strdup("unauthenticated user");
 					}
 					if (ui->dbname) {
@@ -4632,8 +4632,7 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 						pta[5] = NULL;
 						break;
 					}
-				}
-				else {
+				} else {
 					pta[4] = strdup("mirror_internal");
 					pta[5] = NULL;
 				}
@@ -4641,8 +4640,6 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 				pta[6] = strdup(buf);
 				if (sess->mybe && sess->mybe->server_myds && sess->mybe->server_myds->myconn) {
 					PgSQL_Connection* mc = sess->mybe->server_myds->myconn;
-
-
 					struct sockaddr addr;
 					socklen_t addr_len = sizeof(struct sockaddr);
 					memset(&addr, 0, addr_len);
@@ -4671,8 +4668,7 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 							pta[8] = NULL;
 							break;
 						}
-					}
-					else {
+					} else {
 						pta[7] = NULL;
 						pta[8] = NULL;
 					}
@@ -4683,126 +4679,107 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 					pta[10] = strdup(buf);
 					if (sess->CurrentQuery.extended_query_info.stmt_info == NULL) { // text protocol
 						if (mc->query.length) {
-							pta[13] = (char*)malloc(mc->query.length + 1);
-							strncpy(pta[13], mc->query.ptr, mc->query.length);
-							pta[13][mc->query.length] = '\0';
+							pta[15] = (char*)malloc(mc->query.length + 1);
+							strncpy(pta[15], mc->query.ptr, mc->query.length);
+							pta[15][mc->query.length] = '\0';
+						} else {
+							pta[15] = NULL;
 						}
-						else {
-							pta[13] = NULL;
-						}
-					}
-					else { // prepared statement
+					} else { // prepared statement
 						const PgSQL_STMT_Global_info* si = sess->CurrentQuery.extended_query_info.stmt_info;
 						if (si->query_length) {
-							pta[13] = (char*)malloc(si->query_length + 1);
-							strncpy(pta[13], si->query, si->query_length);
-							pta[13][si->query_length] = '\0';
-						}
-						else {
-							pta[13] = NULL;
+							pta[15] = (char*)malloc(si->query_length + 1);
+							strncpy(pta[15], si->query, si->query_length);
+							pta[15][si->query_length] = '\0';
+						} else {
+							pta[15] = NULL;
 						}
 					}
 					sprintf(buf, "%d", mc->status_flags);
-					pta[14] = strdup(buf);
+					pta[16] = strdup(buf);
+					sprintf(buf, "%u", mc->get_pg_backend_pid());
+					pta[11] = strdup(buf);
+					sprintf(buf, "%s", mc->get_pg_backend_state());
+					pta[12] = strdup(buf);
 				}
 				else {
 					pta[7] = NULL;
 					pta[8] = NULL;
 					pta[9] = NULL;
 					pta[10] = NULL;
-					pta[13] = NULL;
-					pta[14] = NULL;
+					pta[11] = NULL;
+					pta[12] = NULL;
+					pta[15] = NULL;
+					pta[16] = NULL;
 				}
 				switch (sess->status) {
 				case CONNECTING_SERVER:
-					pta[11] = strdup("Connect");
+					pta[13] = strdup("Connect");
 					break;
 				case PROCESSING_QUERY:
 					if (sess->pause_until > sess->thread->curtime) {
-						pta[11] = strdup("Delay");
-					}
-					else {
-						pta[11] = strdup("Query");
+						pta[13] = strdup("Delay");
+					} else {
+						pta[13] = strdup("Query");
 					}
 					break;
 				case WAITING_CLIENT_DATA:
-					pta[11] = strdup("Sleep");
+					pta[13] = strdup("Sleep");
 					break;
 				case CHANGING_USER_SERVER:
-					pta[11] = strdup("Changing user server");
+					pta[13] = strdup("Changing user server");
 					break;
 				case CHANGING_USER_CLIENT:
-					pta[11] = strdup("Change user client");
+					pta[13] = strdup("Change user client");
 					break;
 				case RESETTING_CONNECTION:
-					pta[11] = strdup("Resetting connection");
+					pta[13] = strdup("Resetting connection");
 					break;
 				case RESETTING_CONNECTION_V2:
-					pta[11] = strdup("Resetting connection V2");
+					pta[13] = strdup("Resetting connection V2");
 					break;
-				//case CHANGING_SCHEMA:
-				//	pta[11] = strdup("InitDB");
-				//	break;
 				case PROCESSING_STMT_EXECUTE:
-					pta[11] = strdup("Execute");
+					pta[13] = strdup("Execute");
 					break;
 				case PROCESSING_STMT_DESCRIBE:
-					pta[11] = strdup("Describe");
+					pta[13] = strdup("Describe");
 					break;
 				case PROCESSING_STMT_PREPARE:
-					pta[11] = strdup("Prepare");
+					pta[13] = strdup("Prepare");
 					break;
 				case CONNECTING_CLIENT:
-					pta[11] = strdup("Connecting client");
+					pta[13] = strdup("Connecting client");
 					break;
 				case PINGING_SERVER:
-					pta[11] = strdup("Pinging server");
+					pta[13] = strdup("Pinging server");
 					break;
 				case WAITING_SERVER_DATA:
-					pta[11] = strdup("Waiting server data");
+					pta[13] = strdup("Waiting server data");
 					break;
-				//case CHANGING_CHARSET:
-				//	pta[11] = strdup("Changing charset");
-				//	break;
-				//case CHANGING_AUTOCOMMIT:
-				//	pta[11] = strdup("Changing autocommit");
-				//	break;
 				case SETTING_INIT_CONNECT:
-					pta[11] = strdup("Setting init connect");
+					pta[13] = strdup("Setting init connect");
 					break;
-					/*
-										case SETTING_SQL_LOG_BIN:
-																	pta[11]=strdup("Set log bin");
-																	break;
-										case SETTING_SQL_MODE:
-																	pta[11]=strdup("Set SQL mode");
-																	break;
-										case SETTING_TIME_ZONE:
-																	pta[11]=strdup("Set TZ");
-																	break;
-					*/
 				case SETTING_VARIABLE:
 				{
 					int idx = sess->changing_variable_idx;
 					if (idx < PGSQL_NAME_LAST_HIGH_WM) {
 						char buf[128];
 						sprintf(buf, "Setting variable %s", pgsql_tracked_variables[idx].set_variable_name);
-						pta[11] = strdup(buf);
-					}
-					else {
-						pta[11] = strdup("Setting variable");
+						pta[13] = strdup(buf);
+					} else {
+						pta[13] = strdup("Setting variable");
 					}
 				}
 				break;
 				case FAST_FORWARD:
-					pta[11] = strdup("Fast forward");
+					pta[13] = strdup("Fast forward");
 					break;
 				case session_status___NONE:
-					pta[11] = strdup("None");
+					pta[13] = strdup("None");
 					break;
 				default:
 					sprintf(buf, "%d", sess->status);
-					pta[11] = strdup(buf);
+					pta[13] = strdup(buf);
 					break;
 				}
 				if (sess->mirror == false) {
@@ -4814,24 +4791,22 @@ SQLite3_result* PgSQL_Threads_Handler::SQL3_Processlist() {
 						last_time = sess->thread->curtime;
 					}
 					sprintf(buf, "%llu", (sess->thread->curtime - last_time) / 1000);
-				}
-				else {
+				} else {
 					// for mirror session we only consider the start time
 					sprintf(buf, "%llu", (sess->thread->curtime - sess->start_time) / 1000);
 				}
-				pta[12] = strdup(buf);
+				pta[14] = strdup(buf);
 
-				pta[15] = NULL;
+				pta[17] = NULL;
 				if (pgsql_thread___show_processlist_extended) {
 					json j;
 					sess->generate_proxysql_internal_session_json(j);
 					if (pgsql_thread___show_processlist_extended == 2) {
 						std::string s = j.dump(4, ' ', false, json::error_handler_t::replace);
-						pta[15] = strdup(s.c_str());
-					}
-					else {
+						pta[17] = strdup(s.c_str());
+					} else {
 						std::string s = j.dump(-1, ' ', false, json::error_handler_t::replace);
-						pta[15] = strdup(s.c_str());
+						pta[17] = strdup(s.c_str());
 					}
 				}
 				result->add_row(pta);
