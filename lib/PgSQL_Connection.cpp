@@ -20,11 +20,11 @@ extern char * binary_sha1;
 #include "proxysql_find_charset.h"
 
 void PgSQL_Variable::fill_server_internal_session(json &j, int conn_num, int idx) {
-	j[conn_num]["conn"][pgsql_tracked_variables[idx].internal_variable_name] = std::string(value?value:"");
+	j[conn_num]["conn"][pgsql_tracked_variables[idx].set_variable_name] = std::string(value?value:"");
 }
 
 void PgSQL_Variable::fill_client_internal_session(json &j, int idx) {
-	j["conn"][pgsql_tracked_variables[idx].internal_variable_name] = value?value:"";
+	j["conn"][pgsql_tracked_variables[idx].set_variable_name] = value?value:"";
 }
 
 PgSQL_Connection_userinfo::PgSQL_Connection_userinfo() {
@@ -129,15 +129,13 @@ bool PgSQL_Connection_userinfo::set_dbname(const char* db) {
 	const int new_db_len = db ? strlen(db) : 0;
 	const int old_db_len = dbname ? strlen(dbname) : 0;
 
-	if (old_db_len == 0 ||
-		old_db_len != new_db_len ||
-		strncmp(db, dbname, new_db_len)) {
+	if (old_db_len == 0 || old_db_len != new_db_len || strcmp(db, dbname)) {
 		if (dbname) {
 			free(dbname);
 		}
 		dbname = (char*)malloc(new_db_len + 1);
-		memcpy(dbname, db, new_db_len);
-		dbname[new_db_len] = 0;
+		// Copy string including null terminator
+		memcpy(dbname, db, new_db_len + 1);
 		compute_hash();
 		return true;
 	}

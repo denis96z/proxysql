@@ -1153,8 +1153,8 @@ EXECUTION_STATE PgSQL_Protocol::process_handshake_response_packet(unsigned char*
 			for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
 				if (i == PGSQL_NAME_LAST_LOW_WM)
 					continue;
-				if (strncmp(param_key.c_str(), pgsql_tracked_variables[i].set_variable_name, 
-					strlen(pgsql_tracked_variables[i].set_variable_name)) == 0) {
+				// using internal_variable_name because it follows the lowercase naming convention
+				if (strcmp(param_key.c_str(), pgsql_tracked_variables[i].internal_variable_name) == 0) {
 					idx = i;
 					break;
 				}
@@ -1305,7 +1305,7 @@ void PgSQL_Protocol::welcome_client() {
 
 		const char* val = pgsql_variables.client_get_value(sess, idx);
 		if (val)
-			pgpkt.write_ParameterStatus(pgsql_tracked_variables[idx].internal_variable_name, val);
+			pgpkt.write_ParameterStatus(pgsql_tracked_variables[idx].set_variable_name, val);
 	}
 
 	if (pgsql_thread___server_version)

@@ -1819,10 +1819,10 @@ extern const pgsql_variable_validator pgsql_variable_validator_client_encoding;
 
 pgsql_variable_st pgsql_tracked_variables[]{
 	{ PGSQL_CLIENT_ENCODING,       SETTING_VARIABLE,	"client_encoding", "client_encoding", "UTF8", (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_client_encoding, { "names", nullptr } },
-	{ PGSQL_DATESTYLE,			   SETTING_VARIABLE,	"datestyle", "datestyle", "ISO, MDY" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_datestyle, nullptr },
-	{ PGSQL_INTERVALSTYLE,		   SETTING_VARIABLE,	"intervalstyle", "intervalstyle", "postgres" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_intervalstyle, nullptr },
+	{ PGSQL_DATESTYLE,			   SETTING_VARIABLE,	"DateStyle", "datestyle", "ISO, MDY" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_datestyle, nullptr },
+	{ PGSQL_INTERVALSTYLE,		   SETTING_VARIABLE,	"IntervalStyle", "intervalstyle", "postgres" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_intervalstyle, nullptr },
 	{ PGSQL_STANDARD_CONFORMING_STRINGS, SETTING_VARIABLE, "standard_conforming_strings", "standard_conforming_strings", "on", (PGTRACKED_VAR_OPT_PARAM_STATUS), &pgsql_variable_validator_bool, nullptr },
-	{ PGSQL_TIMEZONE,			   SETTING_VARIABLE,	"timezone", "timezone", "GMT" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), nullptr, { "TIME ZONE", nullptr } },
+	{ PGSQL_TIMEZONE,			   SETTING_VARIABLE,	"TimeZone", "timezone", "GMT" , (PGTRACKED_VAR_OPT_QUOTE | PGTRACKED_VAR_OPT_PARAM_STATUS), nullptr, { "TIME ZONE", nullptr } },
 	{ PGSQL_NAME_LAST_LOW_WM,      session_status___NONE, "placeholder", "placeholder", "0" , 0, nullptr, nullptr },  // this is just a placeholder to separate the previous index from the next block
 	{ PGSQL_ALLOW_IN_PLACE_TABLESPACES,	   SETTING_VARIABLE,	"allow_in_place_tablespaces", "allow_in_place_tablespaces", "off", (0), &pgsql_variable_validator_bool, nullptr },
 	{ PGSQL_BYTEA_OUTPUT,		   SETTING_VARIABLE,	"bytea_output", "bytea_output", "hex", (PGTRACKED_VAR_OPT_QUOTE), &pgsql_variable_validator_bytea_output,  nullptr },
