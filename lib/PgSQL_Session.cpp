@@ -79,6 +79,7 @@ static const std::set<std::string> pgsql_other_variables = {
 	"escape_string_warning",
 	"extra_float_digits",
 	"maintenance_work_mem",
+	"search_path",
 	"synchronous_commit"
 };
 
@@ -150,8 +151,6 @@ PgSQL_Query_Info::PgSQL_Query_Info() {
 	QueryLength=0;
 	QueryParserArgs.digest_text=NULL;
 	QueryParserArgs.first_comment=NULL;
-	bool_is_select_NOT_for_update=false;
-	bool_is_select_NOT_for_update_computed=false;
 	have_affected_rows=false; // if affected rows is set, last_insert_id is set too
 	waiting_since = 0;
 	affected_rows=0;
@@ -179,8 +178,7 @@ void PgSQL_Query_Info::begin(unsigned char *_p, int len, bool header) {
 		if (pgsql_thread___commands_stats)
 			query_parser_command_type();
 	}
-	bool_is_select_NOT_for_update=false;
-	bool_is_select_NOT_for_update_computed=false;
+
 	have_affected_rows=false; // if affected rows is set, last_insert_id is set too
 	//waiting_since = 0;
 	//affected_rows=0;
@@ -212,8 +210,6 @@ void PgSQL_Query_Info::init(unsigned char *_p, int len, bool header) {
 	QueryLength=(header ? len-5 : len);
 	QueryPointer=(header ? _p+5 : _p);
 	PgQueryCmd = PGSQL_QUERY__UNINITIALIZED;
-	bool_is_select_NOT_for_update=false;
-	bool_is_select_NOT_for_update_computed=false;
 	have_affected_rows=false; // if affected rows is set, last_insert_id is set too
 	waiting_since = 0;
 	affected_rows=0;
@@ -249,91 +245,6 @@ unsigned long long PgSQL_Query_Info::query_parser_update_counters() {
 
 char * PgSQL_Query_Info::get_digest_text() {
 	return GloPgQPro->get_digest_text(&QueryParserArgs);
-}
-
-bool PgSQL_Query_Info::is_select_NOT_for_update() {
-	if (extended_query_info.stmt_info) { // we are processing a prepared statement. We already have the information
-		return extended_query_info.stmt_info->is_select_NOT_for_update;
-	}
-	if (QueryPointer==NULL) {
-		return false;
-	}
-	if (bool_is_select_NOT_for_update_computed) {
-		return bool_is_select_NOT_for_update;
-	}
-	bool_is_select_NOT_for_update_computed=true;
-	if (QueryLength<7) {
-		return false;
-	}
-	char *QP = (char *)QueryPointer;
-	size_t ql = QueryLength;
-	// we try to use the digest, if avaiable
-	if (QueryParserArgs.digest_text) {
-		QP = QueryParserArgs.digest_text;
-		ql = strlen(QP);
-	}
-	if (strncasecmp(QP,(char *)"SELECT ",7)) {
-		return false;
-	}
-	// if we arrive till here, it is a SELECT
-	if (ql>=17) {
-		char *p=QP;
-		p+=ql-11;
-		if (strncasecmp(p," FOR UPDATE",11)==0) {
-			__sync_fetch_and_add(&PgHGM->status.select_for_update_or_equivalent, 1);
-			return false;
-		}
-		p=QP;
-		p+=ql-10;
-		if (strncasecmp(p," FOR SHARE",10)==0) {
-			__sync_fetch_and_add(&PgHGM->status.select_for_update_or_equivalent, 1);
-			return false;
-		}
-		if (ql>=25) {
-			char *p=QP;
-			p+=ql-19;
-			if (strncasecmp(p," LOCK IN SHARE MODE",19)==0) {
-				__sync_fetch_and_add(&PgHGM->status.select_for_update_or_equivalent, 1);
-				return false;
-			}
-			p=QP;
-			p+=ql-7;
-			if (strncasecmp(p," NOWAIT",7)==0) {
-				// let simplify. If NOWAIT is used, we assume FOR UPDATE|SHARE is used
-				__sync_fetch_and_add(&PgHGM->status.select_for_update_or_equivalent, 1);
-				return false;
-			}
-			p=QP;
-			p+=ql-12;
-			if (strncasecmp(p," SKIP LOCKED",12)==0) {
-				// let simplify. If SKIP LOCKED is used, we assume FOR UPDATE|SHARE is used
-				__sync_fetch_and_add(&PgHGM->status.select_for_update_or_equivalent, 1);
-				return false;
-			}
-			p=QP;
-			char buf[129];
-			if (ql>=128) { // for long query, just check the last 128 bytes
-				p+=ql-128;
-				memcpy(buf,p,128);
-				buf[128]=0;
-			} else {
-				memcpy(buf,p,ql);
-				buf[ql]=0;
-			}
-			if (strcasestr(buf," FOR ")) {
-				if (strcasestr(buf," FOR UPDATE ")) {
-					__sync_fetch_and_add(&PgHGM->status.select_for_update_or_equivalent, 1);
-					return false;
-				}
-				if (strcasestr(buf," FOR SHARE ")) {
-					__sync_fetch_and_add(&PgHGM->status.select_for_update_or_equivalent, 1);
-					return false;
-				}
-			}
-		}
-	}
-	bool_is_select_NOT_for_update=true;
-	return true;
 }
 
 void PgSQL_Session::set_status(enum session_status e) {
@@ -1342,7 +1253,7 @@ bool PgSQL_Session::handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, co
 		query = NULL;
 	}
 	if (rc == 0) {
-		if (strncasecmp(var_name, "client_encoding", sizeof("client_encoding")-1) == 0) {
+		if (strcasecmp(var_name, "client_encoding") == 0) {
 			__sync_fetch_and_add(&PgHGM->status.backend_set_client_encoding, 1);
 		}
 		myds->revents |= POLLOUT;	// we also set again POLLOUT to send a query immediately!
@@ -1389,9 +1300,7 @@ bool PgSQL_Session::handler_again___status_SETTING_GENERIC_VARIABLE(int* _rc, co
 			} else {
 				proxy_warning("Error while setting %s to \"%s\" on %s:%d hg %d: %s\n", var_name, var_value, myconn->parent->address, myconn->parent->port, current_hostgroup, myconn->get_error_code_with_message().c_str());
 
-				if (myconn->get_error_code() == PGSQL_ERROR_CODES::ERRCODE_SYNTAX_ERROR ||
-					myconn->get_error_code() == PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_PARAMETER ||
-					myconn->get_error_code() == PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_OBJECT) {
+				if (myconn->get_error_code() == PGSQL_ERROR_CODES::ERRCODE_UNDEFINED_OBJECT) {
 					
 					int idx = PGSQL_NAME_LAST_HIGH_WM;
 					for (int i = PGSQL_NAME_LAST_LOW_WM + 1; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
@@ -4069,10 +3978,10 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 				unable_to_parse_set_statement(lock_hostgroup);
 				return false;
 			}
-			auto values = std::begin(it->second);
+
+			std::string value1 = it->second.front();
 			if (std::find(pgsql_critical_variables.begin(), pgsql_critical_variables.end(), var) != pgsql_critical_variables.end() ||
 				pgsql_other_variables.find(var) != pgsql_other_variables.end()) {
-				std::string value1 = *values;
 
 				int idx = PGSQL_NAME_LAST_HIGH_WM;
 				for (int i = 0; i < PGSQL_NAME_LAST_HIGH_WM; i++) {
@@ -4085,6 +3994,11 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 					}
 				}
 				if (idx != PGSQL_NAME_LAST_HIGH_WM) {
+
+					if (IS_PGTRACKED_VAR_OPTION_SET_NO_STRIP_VALUE(pgsql_tracked_variables[idx]) == 0) {
+						PgSQL_Set_Stmt_Parser::unquote_if_quoted(value1);
+					}
+
 					uint32_t current_hash = pgsql_variables.client_get_hash(this, idx);
 					if ((value1.size() == sizeof("DEFAULT") - 1) && strncasecmp(value1.c_str(), "DEFAULT", sizeof("DEFAULT") - 1) == 0) {
 						auto [value, hash] = client_myds->myconn->get_startup_parameter_and_hash((enum pgsql_variable_name)idx);
@@ -4163,7 +4077,6 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 				// this is a variable we parse but ignore
 				// see MySQL_Variables::MySQL_Variables() for a list of ignored variables
 #ifdef DEBUG
-				std::string value1 = *values;
 				proxy_debug(PROXY_DEBUG_MYSQL_COM, 5, "Processing SET %s value %s\n", var.c_str(), value1.c_str());
 #endif // DEBUG
 			} else {
@@ -4175,7 +4088,7 @@ bool PgSQL_Session::handler___status_WAITING_CLIENT_DATA___STATE_SLEEP___handle_
 			}
 
 			if (send_param_status)
-				param_status.emplace_back(var, *values);
+				param_status.emplace_back(var, value1);
 		}
 
 		if (failed_to_parse_var) {

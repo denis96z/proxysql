@@ -22,7 +22,6 @@ public:
 	uint64_t statement_id;
 	char* first_comment;
 	uint64_t total_mem_usage;
-	bool is_select_NOT_for_update;
 	Parse_Param_Types parse_param_types;// array of parameter types, used for prepared statements
 
 	PgSQL_STMT_Global_info(uint64_t id, char* u, char* d, char* q, unsigned int ql, char* fc, Parse_Param_Types&& ppt, uint64_t _h);
