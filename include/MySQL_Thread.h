@@ -527,6 +527,7 @@ class MySQL_Threads_Handler
 		int poll_timeout_on_failure;
 		int connpoll_reset_queue_length;
 		char *eventslog_filename;
+		bool eventslog_single_file;
 		int eventslog_filesize;
 		int eventslog_buffer_history_size;
 		int eventslog_table_memory_size;

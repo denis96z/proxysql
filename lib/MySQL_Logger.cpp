@@ -1179,6 +1179,7 @@ MySQL_Logger::MySQL_Logger() : metrics{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} {
 #endif
 	events.logfile=NULL;
 	events.log_file_id=0;
+	events.single_file=false;
 	events.max_log_file_size=100*1024*1024;
 	audit.logfile=NULL;
 	audit.log_file_id=0;
@@ -1262,24 +1263,35 @@ void MySQL_Logger::audit_flush_log_unlocked() {
 }
 
 void MySQL_Logger::events_open_log_unlocked() {
-	events.log_file_id=events_find_next_id();
-	if (events.log_file_id!=0) {
-		events.log_file_id=events_find_next_id()+1;
-	} else {
-		events.log_file_id++;
+	if (!events.single_file) {
+		events.log_file_id=events_find_next_id();
+		if (events.log_file_id!=0) {
+			events.log_file_id=events_find_next_id()+1;
+		} else {
+			events.log_file_id++;
+		}
 	}
 	char *filen=NULL;
 	if (events.base_filename[0]=='/') { // absolute path
-		filen=(char *)malloc(strlen(events.base_filename)+11);
-		sprintf(filen,"%s.%08d",events.base_filename,events.log_file_id);
+		if (events.single_file) {
+			filen=(char *)strdup(events.base_filename);
+		} else {
+			filen=(char *)malloc(strlen(events.base_filename)+11);
+			sprintf(filen,"%s.%08d",events.base_filename,events.log_file_id);
+		}
 	} else { // relative path
-		filen=(char *)malloc(strlen(events.datadir)+strlen(events.base_filename)+11);
-		sprintf(filen,"%s/%s.%08d",events.datadir,events.base_filename,events.log_file_id);
+		if (events.single_file) {
+			filen=(char *)malloc(strlen(events.datadir)+strlen(events.base_filename));
+			sprintf(filen,"%s/%s",events.datadir,events.base_filename);
+		} else {
+			filen=(char *)malloc(strlen(events.datadir)+strlen(events.base_filename)+11);
+			sprintf(filen,"%s/%s.%08d",events.datadir,events.base_filename,events.log_file_id);
+		}
 	}
 	events.logfile=new std::fstream();
 	events.logfile->exceptions ( std::ofstream::failbit | std::ofstream::badbit );
 	try {
-		events.logfile->open(filen , std::ios::out | std::ios::binary);
+		events.logfile->open(filen , std::ios::out | std::ios::app | std::ios::binary);
 		proxy_info("Starting new mysql event log file %s\n", filen);
 		if (mysql_thread___eventslog_format == 1) {
 			// create a new event, type PROXYSQL_METADATA, that writes the ProxySQL version as part of the payload
@@ -1342,6 +1354,7 @@ void MySQL_Logger::audit_open_log_unlocked() {
 void MySQL_Logger::events_set_base_filename() {
 	// if filename is the same, return
 	wrlock();
+	events.single_file=mysql_thread___eventslog_single_file;
 	events.max_log_file_size=mysql_thread___eventslog_filesize;
 	if (strcmp(events.base_filename,mysql_thread___eventslog_filename)==0) {
 		wrunlock();
@@ -1533,7 +1546,7 @@ void MySQL_Logger::log_request(MySQL_Session *sess, MySQL_Data_Stream *myds, con
 
 
 		unsigned long curpos=events.logfile->tellp();
-		if (curpos > events.max_log_file_size) {
+		if (!events.single_file && (curpos > events.max_log_file_size)) {
 			events_flush_log_unlocked();
 		}
 		wrunlock();

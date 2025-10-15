@@ -352,6 +352,7 @@ static char * mysql_thread_variables_names[]= {
 	(char *)"enable_server_deprecate_eof",
 	(char *)"enable_load_data_local_infile",
 	(char *)"eventslog_filename",
+	(char *)"eventslog_single_file",
 	(char *)"eventslog_filesize",
 	(char *)"eventslog_buffer_history_size",
 	(char *)"eventslog_table_memory_size",
@@ -1078,6 +1079,7 @@ MySQL_Threads_Handler::MySQL_Threads_Handler() {
 	variables.interfaces=strdup((char *)"");
 	variables.server_version=strdup((char *)"8.0.11"); // changed in 2.6.0 , was 5.5.30
 	variables.eventslog_filename=strdup((char *)""); // proxysql-mysql-eventslog is recommended
+	variables.eventslog_single_file=false;
 	variables.eventslog_filesize=100*1024*1024;
 	variables.eventslog_buffer_history_size=0;
 	variables.eventslog_table_memory_size=10000;
@@ -2145,6 +2147,7 @@ char ** MySQL_Threads_Handler::get_variables_list() {
 		VariablesPointers_bool["enable_server_deprecate_eof"]     = make_tuple(&variables.enable_server_deprecate_eof,     false);
 		VariablesPointers_bool["enable_load_data_local_infile"]   = make_tuple(&variables.enable_load_data_local_infile,   false);
 		VariablesPointers_bool["enforce_autocommit_on_reads"]     = make_tuple(&variables.enforce_autocommit_on_reads,     false);
+		VariablesPointers_bool["eventslog_single_file"] = make_tuple(&variables.eventslog_single_file, false);
 		VariablesPointers_bool["firewall_whitelist_enabled"]      = make_tuple(&variables.firewall_whitelist_enabled,      false);
 		VariablesPointers_bool["kill_backend_connection_when_disconnect"] = make_tuple(&variables.kill_backend_connection_when_disconnect, false);
 		VariablesPointers_bool["log_mysql_warnings_enabled"]      = make_tuple(&variables.log_mysql_warnings_enabled,      false);
@@ -4185,6 +4188,7 @@ void MySQL_Thread::refresh_variables() {
 	}
 
 	REFRESH_VARIABLE_CHAR(server_version);
+	REFRESH_VARIABLE_BOOL(eventslog_single_file);
 	REFRESH_VARIABLE_INT(eventslog_filesize);
 	REFRESH_VARIABLE_INT(eventslog_table_memory_size);
 	REFRESH_VARIABLE_INT(eventslog_buffer_history_size);

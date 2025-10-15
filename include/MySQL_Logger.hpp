@@ -333,6 +333,7 @@ private:
 		char* base_filename;       ///< Base filename for event log files. Memory managed by the class.
 		char* datadir;             ///< Directory for event log files. Memory managed by the class.
 		unsigned int log_file_id;  ///< ID of the current event log file.
+		bool single_file;
 		unsigned int max_log_file_size; ///< Maximum size of an event log file in bytes.
 		std::fstream* logfile;     ///< File stream for event logging.
 	} events;
