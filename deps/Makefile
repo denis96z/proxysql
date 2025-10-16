@@ -26,7 +26,7 @@ ifeq ($(PROXYDEBUG),1)
 	MYCFLAGS := -O0
 	MYJEOPT := --enable-xmalloc --enable-prof --enable-fill --enable-debug
 else
-	MYCFLAGS := -O2
+	MYCFLAGS := -O3
 	MYJEOPT := --enable-xmalloc --enable-prof
 endif
 ifeq ($(and $(IS_ARM),$(IS_CENTOS)),true)
@@ -71,6 +71,7 @@ ifeq ($(UNAME_S),Darwin)
 	sed -i '' 's/CC=/CC?=/' libinjection/libinjection/src/Makefile
 else
 	sed -i -e 's/CC=/CC?=/' libinjection/libinjection/src/Makefile
+	sed -i -e 's/CFLAGS=/CFLAGS=$(EXTRA_CFLAGS) -fPIC /' libinjection/libinjection/src/Makefile
 endif
 	cd libinjection/libinjection && CC=${CC} CXX=${CXX} ${MAKE}
 
@@ -92,7 +93,7 @@ ifeq ($(UNAME_S),FreeBSD)
 	sed -i -e 's/\/bin\/bash/\/usr\/local\/bin\/bash/' libhttpserver/libhttpserver/bootstrap
 endif
 	cd libhttpserver/libhttpserver && ./bootstrap && mkdir build
-	cd libhttpserver/libhttpserver/build && LDFLAGS=-L$(shell pwd)/libmicrohttpd/libmicrohttpd/src/microhttpd/.libs/ CPPFLAGS=-I$(shell pwd)/libmicrohttpd/libmicrohttpd/src/include ../configure --disable-doxygen-doc --disable-doxygen-dot --disable-doxygen-man --disable-doxygen-html --enable-fastopen=false --disable-examples
+	cd libhttpserver/libhttpserver/build && LDFLAGS="-L$(shell pwd)/libmicrohttpd/libmicrohttpd/src/microhttpd/.libs/ $(EXTRA_LDFLAGS)" CPPFLAGS="-I$(shell pwd)/libmicrohttpd/libmicrohttpd/src/include $(EXTRA_CXXFLAGS)" CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" ../configure --disable-doxygen-doc --disable-doxygen-dot --disable-doxygen-man --disable-doxygen-html --enable-fastopen=false --disable-examples --enable-static=yes --enable-shared=no
 	cd libhttpserver/libhttpserver/build && CC=${CC} CXX=${CXX} ${MAKE}
 
 libhttpserver: libhttpserver/libhttpserver/build/src/.libs/libhttpserver.a
@@ -102,7 +103,7 @@ libev/libev/.libs/libev.a:
 	cd libev && rm -rf libev-*/ || true
 	cd libev && tar -zxf libev-*.tar.gz
 	cd libev/libev && patch ev.c < ../ev.c-multiplication-overflow.patch
-	cd libev/libev && ./configure
+	cd libev/libev && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="$(CPPFLAGS) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LDFLAGS) $(EXTRA_LDFLAGS)" ./configure --enable-shared=no --enable-static=yes
 	cd libev/libev && CC=${CC} CXX=${CXX} ${MAKE}
 
 ev: libev/libev/.libs/libev.a
@@ -112,7 +113,7 @@ coredumper/coredumper/src/libcoredumper.a:
 	cd coredumper && rm -rf coredumper-*/ || true
 	cd coredumper && tar -zxf coredumper-*.tar.gz
 	cd coredumper/coredumper && patch -p1 < ../includes.patch
-	cd coredumper/coredumper && cmake . -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Debug
+	cd coredumper/coredumper && cmake . -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$(CMAKE_C_FLAGS) $(EXTRA_CFLAGS)" -DCMAKE_CXX_FLAGS="$(CMAKE_CXX_FLAGS) $(EXTRA_CXXFLAGS)"
 	cd coredumper/coredumper && CC=${CC} CXX=${CXX} ${MAKE}
 coredumper: coredumper/coredumper/src/libcoredumper.a
 
@@ -124,8 +125,8 @@ curl/curl/lib/.libs/libcurl.a:
 ifeq ($(UNAME_S),Darwin)
 	cd curl/curl && patch configure < ../configure.patch
 endif
-	cd curl/curl && CPPFLAGS="-I$(SSL_IDIR)" LDFLAGS="$(LIB_SSL_PATH) $(LIB_CRYPTO_PATH)" ./configure --disable-debug --disable-ftp --disable-ldap --disable-ldaps --disable-rtsp --disable-proxy --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smb --disable-smtp --disable-gopher --disable-manual --disable-ipv6 --disable-sspi --disable-ntlm-wb --disable-tls-srp --without-nghttp2 --without-libidn2 --without-libssh2 --without-brotli --without-librtmp --without-libpsl --without-zstd --with-ssl --enable-shared=yes
-	cd curl/curl && CFLAGS=-fPIC CC=${CC} CXX=${CXX} ${MAKE}
+	cd curl/curl && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="-I$(SSL_IDIR) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LIB_SSL_PATH) $(LIB_CRYPTO_PATH) $(EXTRA_LDFLAGS)" ./configure --disable-debug --disable-ftp --disable-ldap --disable-ldaps --disable-rtsp --disable-proxy --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smb --disable-smtp --disable-gopher --disable-manual --disable-ipv6 --disable-sspi --disable-ntlm-wb --disable-tls-srp --without-nghttp2 --without-libidn2 --without-libssh2 --without-brotli --without-librtmp --without-libpsl --without-zstd --with-ssl --enable-shared=no --enable-static=yes
+	cd curl/curl && CFLAGS="-fPIC $(EXTRA_CFLAGS)" CC=${CC} CXX=${CXX} ${MAKE}
 
 curl: curl/curl/lib/.libs/libcurl.a
 
@@ -134,7 +135,7 @@ libmicrohttpd/libmicrohttpd/src/microhttpd/.libs/libmicrohttpd.a:
 	cd libmicrohttpd && rm -rf libmicrohttpd-*/ || true
 	cd libmicrohttpd && tar -zxf libmicrohttpd-*.tar.gz
 #	cd libmicrohttpd/libmicrohttpd && patch src/microhttpd/connection.c < ../connection.c-snprintf-overflow.patch
-	cd libmicrohttpd/libmicrohttpd && ./configure --enable-https && CC=${CC} CXX=${CXX} ${MAKE}
+	cd libmicrohttpd/libmicrohttpd && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="$(CPPFLAGS) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LDFLAGS) $(EXTRA_LDFLAGS)" ./configure --enable-static=yes --enable-shared=no --enable-https=no && CC=${CC} CXX=${CXX} ${MAKE}
 
 microhttpd: libmicrohttpd/libmicrohttpd/src/microhttpd/.libs/libmicrohttpd.a
 
@@ -143,7 +144,7 @@ cityhash/cityhash/src/.libs/libcityhash.a:
 	cd cityhash && rm -rf cityhash-*/ || true
 	cd cityhash && tar -zxf cityhash-*.tar.gz
 	cd cityhash/cityhash && cp ../config.guess . && chmod +x config.guess && cp ../config.sub . && chmod +x config.sub
-	cd cityhash/cityhash && ./configure && CC=${CC} CXX=${CXX} ${MAKE}
+	cd cityhash/cityhash && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="$(CPPFLAGS) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LDFLAGS) $(EXTRA_LDFLAGS)" ./configure --enable-static=yes --enable-shared=no && CC=${CC} CXX=${CXX} ${MAKE}
 
 cityhash: cityhash/cityhash/src/.libs/libcityhash.a
 
@@ -151,7 +152,7 @@ cityhash: cityhash/cityhash/src/.libs/libcityhash.a
 lz4/lz4/lib/liblz4.a:
 	cd lz4 && rm -rf lz4-*/ || true
 	cd lz4 && tar -zxf lz4-*.tar.gz
-	cd lz4/lz4 && CC=${CC} CXX=${CXX} ${MAKE}
+	cd lz4/lz4 && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="$(CPPFLAGS) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LDFLAGS) $(EXTRA_LDFLAGS)" CC=${CC} CXX=${CXX} ${MAKE} liblz4.a
 
 lz4: lz4/lz4/lib/liblz4.a
 
@@ -161,8 +162,8 @@ clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib-static.a:
 	cd clickhouse-cpp && tar -zxf v2.3.0.tar.gz
 	cd clickhouse-cpp && ln -fs clickhouse-cpp-*/ clickhouse-cpp
 	cd clickhouse-cpp/clickhouse-cpp && patch clickhouse/base/wire_format.h < ../wire_format.patch
-	cd clickhouse-cpp/clickhouse-cpp && cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo .
-	cd clickhouse-cpp/clickhouse-cpp && CC=${CC} CXX=${CXX} ${MAKE}
+	cd clickhouse-cpp/clickhouse-cpp && cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_SHARED_LIBS=OFF -DCMAKE_C_FLAGS="$(CMAKE_C_FLAGS) $(EXTRA_CFLAGS)" -DCMAKE_CXX_FLAGS="$(CMAKE_CXX_FLAGS) $(EXTRA_CXXFLAGS)" .
+	cd clickhouse-cpp/clickhouse-cpp && CC=${CC} CXX=${CXX} ${MAKE} clickhouse-cpp-lib-static
 
 clickhouse-cpp: clickhouse-cpp/clickhouse-cpp/clickhouse/libclickhouse-cpp-lib-static.a
 
@@ -171,7 +172,7 @@ libdaemon/libdaemon/libdaemon/.libs/libdaemon.a:
 	cd libdaemon && rm -rf libdaemon-*/ || true
 	cd libdaemon && tar -zxf libdaemon-0.14.tar.gz
 	cd libdaemon/libdaemon && patch -p0 < ../daemon_fork_umask.patch
-	cd libdaemon/libdaemon && cp ../config.guess . && chmod +x config.guess && cp ../config.sub . && chmod +x config.sub && ./configure --disable-examples
+	cd libdaemon/libdaemon && cp ../config.guess . && chmod +x config.guess && cp ../config.sub . && chmod +x config.sub && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="$(CPPFLAGS) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LDFLAGS) $(EXTRA_LDFLAGS)" ./configure --disable-examples --enable-static=yes --enable-shared=no
 	cd libdaemon/libdaemon && CC=${CC} CXX=${CXX} ${MAKE}
 
 libdaemon: libdaemon/libdaemon/libdaemon/.libs/libdaemon.a
@@ -183,7 +184,7 @@ jemalloc/jemalloc/lib/libjemalloc.a:
 	cd jemalloc/jemalloc && patch src/jemalloc.c < ../issue823.520.patch
 	cd jemalloc/jemalloc && patch src/jemalloc.c < ../issue2358.patch
 	cd jemalloc/jemalloc && patch -p0 < ../nothrow.patch
-	cd jemalloc/jemalloc && ./configure ${MYJEOPT}
+	cd jemalloc/jemalloc && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="$(CPPFLAGS) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LDFLAGS) $(EXTRA_LDFLAGS)" ./configure ${MYJEOPT} --enable-static=yes --enable-shared=no
 #	cd jemalloc/jemalloc && sed -i -e 's/-O3 /-O3 -fPIC /' Makefile
 	cd jemalloc/jemalloc && CC=${CC} CXX=${CXX} ${MAKE}
 
@@ -194,7 +195,7 @@ mariadb-client-library/mariadb_client/libmariadb/libmariadbclient.a:
 	cd mariadb-client-library && rm -rf mariadb-connector-c-*/ || true
 	cd mariadb-client-library && tar -zxf mariadb-connector-c-3.3.8-src.tar.gz
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../plugin_auth_CMakeLists.txt.patch
-	cd mariadb-client-library/mariadb_client && cmake . -Wno-dev -DCMAKE_BUILD_TYPE=RelWithDebInfo -DOPENSSL_ROOT_DIR=$(SSL_IDIR) -DOPENSSL_LIBRARIES=$(SSL_LDIR) -DICONV_LIBRARIES=$(brew --prefix libiconv)/lib -DICONV_INCLUDE=$(brew --prefix libiconv)/include .
+	cd mariadb-client-library/mariadb_client && cmake . -Wno-dev -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$(CMAKE_C_FLAGS) $(EXTRA_CFLAGS) -std=gnu17" -DCMAKE_CXX_FLAGS="$(CMAKE_CXX_FLAGS) $(EXTRA_CXXFLAGS)" -DOPENSSL_ROOT_DIR=$(SSL_IDIR) -DOPENSSL_LIBRARIES=$(SSL_LDIR) -DICONV_LIBRARIES=$(brew --prefix libiconv)/lib -DICONV_INCLUDE=$(brew --prefix libiconv)/include .
 ifeq ($(PROXYDEBUG),1)
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../ma_context.h.patch
 else ifeq ($(USEVALGRIND),1)
@@ -247,15 +248,14 @@ sqlite3/sqlite3/sqlite3.o:
 	cd sqlite3/sqlite3 && patch sqlite3.c < ../sqlite3.c-multiplication-overflow.patch
 	cd sqlite3/sqlite3 && patch -p0 < ../sqlite3_pass_exts.patch
 	cd sqlite3/sqlite3 && patch -p0 < ../throw.patch
-	cd sqlite3/sqlite3 && ${CC} ${MYCFLAGS} -fPIC -c -o sqlite3.o sqlite3.c -DSQLITE_ENABLE_MEMORY_MANAGEMENT -DSQLITE_ENABLE_JSON1 -DSQLITE_DLL=1
-	cd sqlite3/sqlite3 && ${CC} -shared -o libsqlite3.so sqlite3.o
+	cd sqlite3/sqlite3 && ${CC} ${MYCFLAGS} $(EXTRA_CFLAGS) -fPIC -c -o sqlite3.o sqlite3.c -DSQLITE_ENABLE_MEMORY_MANAGEMENT -DSQLITE_ENABLE_JSON1 -DSQLITE_DLL=1
 
 sqlite3: sqlite3/sqlite3/sqlite3.o
 
 libconfig/libconfig/lib/.libs/libconfig++.a:
 	cd libconfig && rm -rf libconfig-*/ || true
 	cd libconfig && tar -zxf libconfig-*.tar.gz
-	cd libconfig/libconfig && ./configure --disable-examples
+	cd libconfig/libconfig && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="$(CPPFLAGS) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LDFLAGS) $(EXTRA_LDFLAGS)" ./configure --disable-examples --enable-static=yes --enable-shared=no
 	cd libconfig/libconfig && CC=${CC} CXX=${CXX} ${MAKE}
 
 libconfig: libconfig/libconfig/lib/.libs/libconfig++.a
@@ -268,7 +268,7 @@ prometheus-cpp/prometheus-cpp/lib/libprometheus-cpp-core.a:
 	cd prometheus-cpp/prometheus-cpp && patch -p1 < ../serial_exposer.patch
 	cd prometheus-cpp/prometheus-cpp && patch -p1 < ../registry_counters_reset.patch
 	cd prometheus-cpp/prometheus-cpp && patch -p1 < ../fix_old_distros.patch
-	cd prometheus-cpp/prometheus-cpp && cmake . -DBUILD_SHARED_LIBS=OFF -DENABLE_TESTING=OFF -DENABLE_PUSH=OFF
+	cd prometheus-cpp/prometheus-cpp && cmake . -DBUILD_SHARED_LIBS=OFF -DENABLE_TESTING=OFF -DENABLE_PUSH=OFF -DCMAKE_C_FLAGS="$(CMAKE_C_FLAGS) $(EXTRA_CFLAGS)" -DCMAKE_CXX_FLAGS="$(CMAKE_CXX_FLAGS) $(EXTRA_CXXFLAGS)"
 	cd prometheus-cpp/prometheus-cpp && CC=${CC} CXX=${CXX} ${MAKE}
 
 prometheus-cpp: prometheus-cpp/prometheus-cpp/lib/libprometheus-cpp-core.a
@@ -281,13 +281,13 @@ re2/re2/obj/libre2.a:
 #	cd re2/re2 && patch util/mutex.h < ../mutex.h.patch
 	cd re2/re2 && patch re2/onepass.cc < ../onepass.cc-multiplication-overflow.patch
 ifeq ($(UNAME_S),Darwin)
-	cd re2/re2 && sed -i '' -e 's/-O3 -g/-O3 -g -${STDCPP} -fPIC -DMEMORY_SANITIZER -DRE2_ON_VALGRIND /' Makefile
+	cd re2/re2 && sed -i '' -e 's/-O3 -g/-O3 -g -${STDCPP} $(EXTRA_CFLAGS) $(EXTRA_CXXFLAGS) -fPIC -DMEMORY_SANITIZER -DRE2_ON_VALGRIND /' Makefile
 #	cd re2/re2 && sed -i '' -e 's/RE2_CXXFLAGS?=-std=c++11 /RE2_CXXFLAGS?=-std=c++11 -fPIC /' Makefile
 else
-	cd re2/re2 && sed -i -e 's/-O3 -g/-O3 -g ${STDCPP} -fPIC -DMEMORY_SANITIZER -DRE2_ON_VALGRIND /' Makefile
+	cd re2/re2 && sed -i -e 's/-O3 -g/-O3 -g ${STDCPP} $(EXTRA_CFLAGS) $(EXTRA_CXXFLAGS) -fPIC -DMEMORY_SANITIZER -DRE2_ON_VALGRIND /' Makefile
 #	cd re2/re2 && sed -i -e 's/RE2_CXXFLAGS?=-std=c++11 /RE2_CXXFLAGS?=-std=c++11 -fPIC /' Makefile
 endif
-	cd re2/re2 && CC=${CC} CXX=${CXX} ${MAKE}
+	cd re2/re2 && CC=${CC} CXX=${CXX} ${MAKE} obj/libre2.a
 
 re2: re2/re2/obj/libre2.a
 
@@ -296,7 +296,7 @@ pcre/pcre/.libs/libpcre.a:
 	cd pcre && rm -rf pcre-*/ || true
 	cd pcre && tar -zxf pcre-*.tar.gz
 	cd pcre/pcre && patch pcretest.c < ../pcretest.c-multiplication-overflow.patch
-	cd pcre/pcre && ./configure
+	cd pcre/pcre && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="$(CPPFLAGS) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LDFLAGS) $(EXTRA_LDFLAGS)" ./configure --enable-static=yes --enable-shared=no
 	cd pcre/pcre && CC=${CC} CXX=${CXX} ${MAKE}
 
 pcre: pcre/pcre/.libs/libpcre.a
@@ -308,7 +308,7 @@ postgresql/postgresql/src/interfaces/libpq/libpq.a:
 	cd postgresql/postgresql && patch -p0 < ../handle_row_data.patch
 	cd postgresql/postgresql && patch -p0 < ../fmt_err_msg.patch
 	#cd postgresql/postgresql && LD_LIBRARY_PATH="$(shell pwd)/libssl/openssl" ./configure --with-ssl=openssl --with-includes="$(shell pwd)/libssl/openssl/include/" --with-libraries="$(shell pwd)/libssl/openssl/" --without-readline --enable-debug  CFLAGS="-ggdb -O0 -fno-omit-frame-pointer" CPPFLAGS="-g -O0"
-	cd postgresql/postgresql && LD_LIBRARY_PATH="$(SSL_LDIR)" ./configure --with-ssl=openssl --with-includes="$(SSL_IDIR)" --with-libraries="$(SSL_LDIR)" --without-readline
+	cd postgresql/postgresql && LD_LIBRARY_PATH="$(SSL_LDIR)" CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS) -std=gnu17" CPPFLAGS="$(CPPFLAGS) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LDFLAGS) $(EXTRA_LDFLAGS)" ./configure --with-ssl=openssl --with-includes="$(SSL_IDIR)" --with-libraries="$(SSL_LDIR)" --without-readline
 	cd postgresql/postgresql/src/interfaces/libpq && CC=${CC} CXX=${CXX} ${MAKE} MAKELEVEL=0
 	#cd postgresql/postgresql && CC=${CC} CXX=${CXX} ${MAKE} -f src/interfaces/libpq/Makefile all
 
@@ -318,7 +318,7 @@ libusual/libusual/.libs/libusual.a:
 	cd libusual && rm -rf libusual-*/ || true
 	cd libusual && tar -zxf libusual-*.tar.gz
 	cd libusual/libusual && ./autogen.sh
-	cd libusual/libusual &&  CPPFLAGS="-I$(SSL_IDIR)" LDFLAGS="$(LIB_SSL_PATH) $(LIB_CRYPTO_PATH)" ./configure --with-openssl="$(SSL_LDIR)" --disable-shared
+	cd libusual/libusual && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="-I$(SSL_IDIR) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LIB_SSL_PATH) $(LIB_CRYPTO_PATH) $(EXTRA_LDFLAGS)" ./configure --with-openssl="$(SSL_LDIR)" --disable-shared
 	cd libusual/libusual && CC=${CC} CXX=${CXX} ${MAKE}
 
 libusual: libusual/libusual/.libs/libusual.a

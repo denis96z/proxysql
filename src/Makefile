@@ -187,7 +187,7 @@ ifeq ($(UNAME_S),Linux)
 	STATICMYLIBS += -lcoredumper
 endif
 
-MYLIBS := -Wl,--export-dynamic $(STATICMYLIBS) -Wl,-Bdynamic -lgnutls -lpthread -lssl -lcrypto -lm -lz -lrt -lprometheus-cpp-pull -lprometheus-cpp-core -luuid $(EXTRALINK)
+MYLIBS := -Wl,--export-dynamic $(STATICMYLIBS) -Wl,-Bdynamic -lpthread -lssl -lcrypto -lm -lz -lrt -lprometheus-cpp-pull -lprometheus-cpp-core -luuid $(EXTRALINK)
 ifeq ($(DISTRO),almalinux)
 ifeq ($(CENTOSVER),8)
 	MYLIBS := -Wl,--export-dynamic $(STATICMYLIBS) -Wl,-Bdynamic -lgnutls -lpthread $(LIB_SSL_PATH) $(LIB_CRYPTO_PATH) -lm -lz -lrt -lprometheus-cpp-pull -lprometheus-cpp-core -luuid $(EXTRALINK)
@@ -195,7 +195,7 @@ endif
 endif
 
 ifeq ($(UNAME_S),Darwin)
-	MYLIBS :=-lre2 -lmariadbclient -lpq -lpthread -lm -lz -liconv -lgnutls -lprometheus-cpp-pull -lprometheus-cpp-core -luuid
+	MYLIBS :=-lre2 -lmariadbclient -lpq -lpthread -lm -lz -liconv -lprometheus-cpp-pull -lprometheus-cpp-core -luuid
 else
 	CURL_DIR := $(DEPS_PATH)/curl/curl
 	IDIRS += -L$(CURL_DIR)/include
@@ -236,13 +236,13 @@ _OBJ := main.o proxysql_global.o SQLite3_Server.o proxy_tls.o
 OBJ := $(patsubst %,$(ODIR)/%,$(_OBJ))
 
 $(ODIR)/%.o: %.cpp
-	$(CXX) -c -o $@ $< $(MYCXXFLAGS) $(CXXFLAGS) -Wall
+	$(CXX) -c -o $@ $< $(MYCXXFLAGS) $(CXXFLAGS) $(EXTRA_CXXFLAGS) -Wall
 
 $(EXECUTABLE): $(ODIR) $(OBJ) $(LIBPROXYSQLAR)
 ifeq ($(PROXYSQLCLICKHOUSE),1)
-	$(CXX) -o $@ $(OBJ) $(CLANGFIX) $(LIBPROXYSQLAR) $(CLICKHOUSE_CPP_LDIR)/libclickhouse-cpp-lib-static.a $(LZ4_LDIR)/liblz4.a $(MYCXXFLAGS) $(CXXFLAGS) $(LDIRS) $(LIBS) $(MYLIBS)
+	$(CXX) -o $@ $(OBJ) $(CLANGFIX) $(LIBPROXYSQLAR) $(CLICKHOUSE_CPP_LDIR)/libclickhouse-cpp-lib-static.a $(LZ4_LDIR)/liblz4.a $(MYCXXFLAGS) $(CXXFLAGS) $(EXTRA_CXXFLAGS) $(LDIRS) $(LIBS) $(MYLIBS) $(EXTRA_LDFLAGS)
 else
-	$(CXX) -o $@ $(OBJ) $(CLANGFIX) $(LIBPROXYSQLAR) $(MYCXXFLAGS) $(CXXFLAGS) $(LDIRS) $(LIBS) $(MYLIBS)
+	$(CXX) -o $@ $(OBJ) $(CLANGFIX) $(LIBPROXYSQLAR) $(MYCXXFLAGS) $(CXXFLAGS) $(EXTRA_CXXFLAGS) $(LDIRS) $(LIBS) $(MYLIBS) $(EXTRA_LDFLAGS)
 endif
 ifeq ($(UNAME_S),Darwin)
 	shasum $(EXECUTABLE) > $(EXECUTABLE).sha1

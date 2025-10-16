@@ -27,8 +27,8 @@ ifeq ($(CUSTOM_OPENSSL_PATH),)
 else
     SSL_IDIR := $(CUSTOM_OPENSSL_PATH)/include
     SSL_LDIR := $(CUSTOM_OPENSSL_PATH)/lib64
-    LIB_SSL_PATH := $(shell find $(SSL_LDIR) -name "libssl.so" 2>/dev/null | head -n 1)
-    LIB_CRYPTO_PATH := $(shell find $(SSL_LDIR) -name "libcrypto.so" 2>/dev/null | head -n 1)	
+    LIB_SSL_PATH := $(shell find $(SSL_LDIR) -name "libssl.a" 2>/dev/null | head -n 1)
+    LIB_CRYPTO_PATH := $(shell find $(SSL_LDIR) -name "libcrypto.a" 2>/dev/null | head -n 1)
     $(info Using custom OpenSSL path: $(CUSTOM_OPENSSL_PATH))
 endif
 

@@ -1,7 +1,7 @@
 CC ?= gcc
 CFLAGS_common = -Wall -Iinclude
 CFLAGS_DEBUG = -g -O0
-CFLAGS_RELEASE = -O3
+CFLAGS_RELEASE = -O3 $(EXTRA_CFLAGS)
 SRC_DIR = src
 OBJ_DIR_DEBUG = obj/debug
 OBJ_DIR_RELEASE = obj/release
