@@ -1,3 +1,5 @@
+#include <cstdint>
+
 #include "btree_map.h"
 #include "proxysql_atomic.h"
 #include "prometheus/counter.h"
