@@ -1,4 +1,6 @@
 #ifdef PROXYSQLCLICKHOUSE
+#include <cstdint>
+
 #include "btree_map.h"
 #include "proxysql.h"
 #include "cpp.h"
