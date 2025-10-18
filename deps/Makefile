@@ -309,7 +309,7 @@ postgresql/postgresql/src/interfaces/libpq/libpq.a:
 	cd postgresql/postgresql && patch -p0 < ../fmt_err_msg.patch
 	#cd postgresql/postgresql && LD_LIBRARY_PATH="$(shell pwd)/libssl/openssl" ./configure --with-ssl=openssl --with-includes="$(shell pwd)/libssl/openssl/include/" --with-libraries="$(shell pwd)/libssl/openssl/" --without-readline --enable-debug  CFLAGS="-ggdb -O0 -fno-omit-frame-pointer" CPPFLAGS="-g -O0"
 	cd postgresql/postgresql && LD_LIBRARY_PATH="$(SSL_LDIR)" CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS) -std=gnu17" CPPFLAGS="$(CPPFLAGS) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LDFLAGS) $(EXTRA_LDFLAGS)" ./configure --with-ssl=openssl --with-includes="$(SSL_IDIR)" --with-libraries="$(SSL_LDIR)" --without-readline
-	cd postgresql/postgresql/src/interfaces/libpq && CC=${CC} CXX=${CXX} ${MAKE} MAKELEVEL=0
+	cd postgresql/postgresql/src/interfaces/libpq && CC=${CC} CXX=${CXX} ${MAKE} MAKELEVEL=0 all-static-lib
 	#cd postgresql/postgresql && CC=${CC} CXX=${CXX} ${MAKE} -f src/interfaces/libpq/Makefile all
 
 postgresql: postgresql/postgresql/src/interfaces/libpq/libpq.a
