@@ -195,7 +195,7 @@ mariadb-client-library/mariadb_client/libmariadb/libmariadbclient.a:
 	cd mariadb-client-library && rm -rf mariadb-connector-c-*/ || true
 	cd mariadb-client-library && tar -zxf mariadb-connector-c-3.3.8-src.tar.gz
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../plugin_auth_CMakeLists.txt.patch
-	cd mariadb-client-library/mariadb_client && cmake . -Wno-dev -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$(CMAKE_C_FLAGS) $(EXTRA_CFLAGS) -std=gnu17" -DCMAKE_CXX_FLAGS="$(CMAKE_CXX_FLAGS) $(EXTRA_CXXFLAGS)" -DOPENSSL_ROOT_DIR=$(SSL_IDIR) -DOPENSSL_LIBRARIES=$(SSL_LDIR) -DICONV_LIBRARIES=$(brew --prefix libiconv)/lib -DICONV_INCLUDE=$(brew --prefix libiconv)/include .
+	cd mariadb-client-library/mariadb_client && cmake . -Wno-dev -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="$(CMAKE_C_FLAGS) $(EXTRA_CFLAGS) -std=gnu17" -DCMAKE_CXX_FLAGS="$(CMAKE_CXX_FLAGS) $(EXTRA_CXXFLAGS)" -DWITH_SSL=OPENSSL -DOPENSSL_FOUND=ON -DOPENSSL_INCLUDE_DIR="$(SSL_IDIR)" -DOPENSSL_SSL_LIBRARY="$(SSL_LDIR)/libssl.a" -DOPENSSL_CRYPTO_LIBRARY="$(SSL_LDIR)/libcrypto.a" -DICONV_LIBRARIES=$(brew --prefix libiconv)/lib -DICONV_INCLUDE=$(brew --prefix libiconv)/include .
 ifeq ($(PROXYDEBUG),1)
 	cd mariadb-client-library/mariadb_client && patch -p0 < ../ma_context.h.patch
 else ifeq ($(USEVALGRIND),1)
