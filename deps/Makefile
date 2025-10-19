@@ -318,7 +318,7 @@ libusual/libusual/.libs/libusual.a:
 	cd libusual && rm -rf libusual-*/ || true
 	cd libusual && tar -zxf libusual-*.tar.gz
 	cd libusual/libusual && ./autogen.sh
-	cd libusual/libusual && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="-I$(SSL_IDIR) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LIB_SSL_PATH) $(LIB_CRYPTO_PATH) $(EXTRA_LDFLAGS)" ./configure --with-openssl="$(SSL_LDIR)" --disable-shared
+	cd libusual/libusual && CFLAGS="$(CFLAGS) $(EXTRA_CFLAGS)" CPPFLAGS="-I$(SSL_IDIR) $(EXTRA_CXXFLAGS)" LDFLAGS="$(LIB_SSL_PATH) $(LIB_CRYPTO_PATH) $(EXTRA_LDFLAGS)" ./configure --with-openssl="$(SSL_LDIR)" --enable-static=yes --enable-shared=no
 	cd libusual/libusual && CC=${CC} CXX=${CXX} ${MAKE}
 
 libusual: libusual/libusual/.libs/libusual.a
